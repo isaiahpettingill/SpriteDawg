@@ -560,6 +560,22 @@ object Aseprite {
                         }
                     )
                 }
+                // New palette entries are appended as patches; existing color names stay intact.
+                for ((index, color) in f.palettePatches) {
+                    chunks.add(
+                        chunk(0x2019) {
+                            d(f.palette.size)
+                            d(index)
+                            d(index)
+                            zeros(8)
+                            w(0)
+                            b(color ushr 16)
+                            b(color ushr 8)
+                            b(color)
+                            b(color ushr 24)
+                        }
+                    )
+                }
                 if (fi == 0) addUser(doc.data)
                 if (fi == 0 && doc.tags.isNotEmpty()) {
                     chunks.add(

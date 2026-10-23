@@ -381,4 +381,38 @@ class AsepriteTest {
         assertSame(original, d.frames[0].cels[0])
         assertEquals(123, original.pixels[0])
     }
+
+    @Test
+    fun indexedBackgroundConversionPreservesPixelsAndRoundTrip() {
+        val d = Document.create(2, 1)
+        d.depth = 8
+        d.layers[0].flags = 11
+        d.frames[0].palette = intArrayOf(0xffff0000.toInt(), 0xff00ff00.toInt())
+        d.editable(0, 0).pixels[1] = 1
+        d.addFrame(0, true)
+        d.frames[1].cels[0] = Cel(0, 0, 0, 0, IntArray(0), 255, 0)
+        val original = d.frames.indices.map { d.composite(it) }
+        d.makeLayerTransparent(0)
+        for (f in d.frames.indices) assertArrayEquals(original[f], d.composite(f))
+        val r = round(d)
+        for (f in d.frames.indices) assertArrayEquals(original[f], r.composite(f))
+        r.editable(0, 0).pixels[0] = 0
+        assertEquals(0, r.composite(0)[0])
+    }
+
+    @Test
+    fun fullUniquePaletteBackgroundConversionRefusedWithoutMutation() {
+        val d = Document.create(1, 1)
+        d.depth = 8
+        d.layers[0].flags = 11
+        d.frames[0].palette = IntArray(256) { 0xff000000.toInt() or it }
+        val c = d.editable(0, 0)
+        try {
+            d.makeLayerTransparent(0)
+            fail("Conversion discarded a palette color")
+        } catch (_: IllegalArgumentException) {}
+        assertEquals(11, d.layers[0].flags)
+        assertSame(c, d.frames[0].cels[0])
+        assertEquals(256, d.frames[0].palette.size)
+    }
 }

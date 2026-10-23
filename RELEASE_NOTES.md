@@ -2,6 +2,8 @@ Native offline Android Aseprite editor with an adaptive pixel-pocket-and-pencil 
 
 - Opening a sprite selects a visible top layer; hidden-layer edits explain the limitation.
 - All tools are visible without horizontal scrolling; active tool/layer is shown on the canvas.
+- Selecting a tool stops playback so editing is never silently ignored.
+- Eraser offers a color-preserving conversion for opaque background layers.
 - Pencil, eraser, eyedropper, fill, line/rectangle tools, undo/redo, zoom and pan.
 - Layers, animation frames, frame timing, playback, tags, and onion skin.
 - RGBA, indexed and grayscale/alpha files; native Kotlin Aseprite codec.

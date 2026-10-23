@@ -341,6 +341,8 @@ fun PocketEditor(e: Editor) {
                             onClick = {
                                 e.playing = false
                                 tool = t
+                                if (t == Tool.Eraser && e.doc.layers[e.layer].flags and 8 != 0)
+                                    dialog = "Transparent layer"
                             },
                             label = { Text(t.name) },
                             modifier = Modifier.weight(1f).testTag("tool-${t.name}"),
@@ -731,6 +733,25 @@ else->"RGBA"}}",
                     dialog = null
                 }
             }
+        "Transparent layer" ->
+            AlertDialog(
+                onDismissRequest = { dialog = null },
+                title = { Text("Enable transparency on this layer?") },
+                text = {
+                    Text(
+                        "Aseprite background layers are opaque. Convert this background to a normal layer so the eraser can remove pixels. Existing pixels and colors are preserved; indexed colors may be remapped to an identical palette entry."
+                    )
+                },
+                confirmButton = {
+                    Action("Convert layer") {
+                        safe {
+                            e.edit { makeLayerTransparent(e.layer) }
+                            dialog = null
+                        }
+                    }
+                },
+                dismissButton = { Action("Cancel") { dialog = null } },
+            )
         "Color" ->
             ColorDialog(e.color, e.doc.depth, onDismiss = { dialog = null }) {
                 e.color = it

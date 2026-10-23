@@ -38,7 +38,8 @@ class EditorInteractionTest {
 
     private fun drag() {
         ui.onNodeWithTag("pixelCanvas").performTouchInput {
-            swipe(center - Offset(35f, 35f), center + Offset(35f, 35f), 250)
+            val span = minOf(width, height) * 0.22f
+            swipe(center - Offset(span, span), center + Offset(span, span), 250)
         }
         ui.waitForIdle()
     }
@@ -133,6 +134,34 @@ class EditorInteractionTest {
         ui.runOnIdle {
             assertFalse(editor.dirty)
             assertTrue(pixels().all { it ushr 24 == 0 })
+        }
+    }
+
+    @Test
+    fun selectingToolStopsPlayback() {
+        start()
+        ui.onNodeWithText("Play").performClick()
+        tool("Pencil")
+        ui.runOnIdle { assertFalse(editor.playing) }
+        tap()
+        ui.runOnIdle { assertTrue(pixels().any { it ushr 24 != 0 }) }
+    }
+
+    @Test
+    fun indexedBackgroundCanBeConvertedAndErased() {
+        val d = Document.create(16, 16)
+        d.depth = 8
+        d.layers[0].flags = 11
+        d.frames[0].palette = intArrayOf(0xffff3344.toInt(), 0xff00ff00.toInt())
+        d.editable(0, 0)
+        start(d)
+        tool("Eraser")
+        ui.onNodeWithText("Convert layer").performClick()
+        drag()
+        ui.runOnIdle {
+            assertEquals(0, editor.doc.layers[0].flags and 8)
+            assertTrue(editor.doc.composite(0).any { it ushr 24 == 0 })
+            assertTrue(editor.doc.composite(0).any { it == 0xffff3344.toInt() })
         }
     }
 }

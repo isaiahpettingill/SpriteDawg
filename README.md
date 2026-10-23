@@ -47,13 +47,16 @@ one-time fetch.
 - One finger/stylus draws. Two fingers pan and pinch; adding a second finger cancels
   the in-progress stroke. **Pan** supports one-finger panning. **Fit** recenters.
 - Pencil and eraser have sizes 1–16. Fill is four-connected. Line/rectangle tools
-  preview until release. Color opens AARRGGBB hex and RGBA sliders. Checkerboard,
+  preview until release. Selecting a drawing tool stops animation playback. Color opens AARRGGBB hex and RGBA sliders. Checkerboard,
   nearest-neighbor rendering, optional grid, and previous-frame onion skin are built in.
 - **Layers / Frames** expands the compact panel. Layers can be selected, renamed,
   reordered, hidden, added/deleted, or assigned opacity. The first stored layer is
   the bottom layer; the panel displays topmost first. Opening a file selects its
   topmost visible editable layer. The canvas header shows the active tool and layer.
-  Hidden-layer drawing and indexed-background erasing explain why editing is blocked.
+  Hidden-layer drawing explains why editing is blocked. Selecting Eraser on a
+  background layer offers conversion to a normal layer, preserving existing pixels
+  and palette colors. A full indexed palette with no matching spare color must be
+  converted to RGBA in Aseprite first.
 - Frames can be added, duplicated, deleted, selected, timed, and played. **Tags**
   selects a loaded tag for playback or creates forward tags. Loaded direction,
   repeat count, range, color, and user data survive saves. New tag ranges are

@@ -10,7 +10,12 @@ linked cels, signed cel positions, cel/layer opacity, visibility, layer UUIDs,
 multiple layers/frames, frame timing, tags, modern/legacy palettes, and user data.
 Indexed files retain native indices, transparent index, frame palettes, and depth.
 Drawing maps to the nearest current palette entry; erasing uses the transparent
-index. Indexed background layers follow Aseprite's opaque-background semantics.
+index. Indexed background layers follow Aseprite's opaque-background semantics. Eraser
+selection offers explicit conversion to a normal layer, remapping the background
+index to an identical existing/new palette entry before enabling transparency.
+Conversion refuses a full palette without an identical replacement, preserving
+all colors and source pixels. New palette entries use small patches so names
+and metadata on existing entries remain intact.
 Grayscale drawing converts RGB to luminance and preserves alpha. New documents
 start in RGBA. Editing a linked cel detaches it so other frames keep their pixels.
 

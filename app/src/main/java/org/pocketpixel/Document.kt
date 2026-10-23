@@ -35,6 +35,7 @@ data class Frame(
     val cels: MutableList<Cel?> = mutableListOf(),
     val metadata: MutableList<Pair<Int, ByteArray>> = mutableListOf(),
     var palette: IntArray = IntArray(0),
+    val palettePatches: MutableMap<Int, Int> = mutableMapOf(),
 )
 
 data class Tag(
@@ -71,6 +72,7 @@ class Document(
                         f.cels.map { it?.copyDeep() }.toMutableList(),
                         f.metadata.toMutableList(),
                         f.palette.copyOf(),
+                        f.palettePatches.toMutableMap(),
                     )
                 }
                 .toMutableList(),
@@ -183,6 +185,44 @@ class Document(
         return out
     }
 
+    /** Convert an opaque background without changing existing rendered pixels. */
+    fun makeLayerTransparent(layer: Int) {
+        if (layers[layer].flags and 8 == 0) return
+        if (depth == 8) {
+            data class Plan(val frame: Int, val cel: Cel, val index: Int, val append: Boolean)
+            val plans =
+                frames.indices.mapNotNull { f ->
+                    val c = resolved(f, layer)?.copyDeep() ?: return@mapNotNull null
+                    if (!c.pixels.contains(transparentIndex)) return@mapNotNull null
+                    val pal = frames[f].palette
+                    val existing =
+                        pal.indices.firstOrNull {
+                            it != transparentIndex && pal[it] == pal[transparentIndex]
+                        }
+                    require(existing != null || pal.size < 256) {
+                        "The indexed palette is full and has no duplicate background color. Convert this sprite to RGBA in Aseprite first; its colors have not been changed."
+                    }
+                    Plan(f, c, existing ?: pal.size, existing == null)
+                }
+            // All plans are validated before touching any frame or palette.
+            for (plan in plans) {
+                val frame = frames[plan.frame]
+                if (plan.append) {
+                    val color = frame.palette[transparentIndex]
+                    frame.palette = frame.palette + color
+                    frame.palettePatches[plan.index] = color
+                }
+                for (i in plan.cel.pixels.indices) if (plan.cel.pixels[i] == transparentIndex)
+                    plan.cel.pixels[i] = plan.index
+                plan.cel.link = null
+                frame.cels[layer] = plan.cel
+            }
+            palette.clear()
+            palette.addAll(frames[0].palette.toList())
+        }
+        layers[layer].flags = layers[layer].flags and 8.inv()
+    }
+
     fun addFrame(after: Int, duplicate: Boolean) {
         require(frames.size < 4096)
         // Resolve links before changing frame indices.
@@ -194,6 +234,7 @@ class Document(
                     frames[after].cels.map { it?.copyDeep() }.toMutableList(),
                     frames[after].metadata.filter { it.first != 0x2007 }.toMutableList(),
                     frames[after].palette.copyOf(),
+                    frames[after].palettePatches.toMutableMap(),
                 )
             else
                 Frame(
