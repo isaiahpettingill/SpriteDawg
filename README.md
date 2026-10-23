@@ -93,8 +93,5 @@ Release only after unit tests, lint, and interaction tests pass.
 For tagged releases configure four repository secrets:
 `POCKET_KEYSTORE_BASE64`, `POCKET_STORE_PASSWORD`, `POCKET_KEY_ALIAS`, and
 `POCKET_KEY_PASSWORD`. Generate your own keystore with Android Studio's signing
-wizard or `keytool`; back it up securely and reuse it for updates. Without a private release key, the workflow publishes an explicitly marked
-development prerelease using a CI-generated debug key. Debug keys from different
-build environments differ: uninstall the old app if Android rejects an update,
-after saving your projects. Configure the signing secrets for stable signed updates.
+wizard or `keytool`; back it up securely and reuse it for updates. Release publication refuses to proceed without this permanent key; debug APKs remain CI artifacts only. Regular signed releases include one universal `.apk` asset and a SHA-256 checksum, so Obtainium can use the repository URL without enabling prereleases. Version 0.1.2 switches from development signing: export your projects before uninstalling an old build with a different certificate. Subsequent signed releases update normally.
 Increase `versionCode` and `versionName` in `app/build.gradle.kts` before releases.

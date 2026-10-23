@@ -12,9 +12,8 @@ Native offline Android Aseprite editor with an adaptive pixel-pocket-and-pencil 
 
 Android 10 or newer. Open Layers / Frames to choose the layer being edited.
 
-This first development release uses a CI-generated debug signing key. If replacing
-an APK signed by a different key, Android requires uninstalling the old build first;
-save/export your projects before uninstalling because app-private recovery is removed.
-Configure the documented private signing secrets for stable signed updates.
+This is a signed, non-debug release APK for Android 10 and newer, including Pixel 8 / GrapheneOS. In Obtainium, add https://github.com/isaiahpettingill/SpriteDawg as a GitHub source. Choose the .apk asset; prereleases are not required.
+
+Version 0.1.2 starts permanent release signing. Android cannot update an earlier development APK signed with another certificate. Save/export your projects, uninstall the development build once, then install this release. Future releases reuse the same certificate and install as updates. Uninstalling removes app-private recovery.
 
 The repository documents supported Aseprite features and safely refused features.

@@ -75,12 +75,13 @@ jobs:
       HAS_SIGNING_KEY: ${{ secrets.POCKET_KEYSTORE_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: pocket-pixel-debug
-          path: release-assets
+      - name: Require permanent release signing key
+        run: |
+          if [[ "$HAS_SIGNING_KEY" != true ]]; then
+            echo "::error::Configure the four POCKET signing secrets before publishing. Debug APKs must never be published as releases."
+            exit 1
+          fi
       - uses: actions/setup-java@v4
-        if: env.HAS_SIGNING_KEY == 'true'
         with:
           distribution: temurin
           java-version: '17'
@@ -88,11 +89,8 @@ jobs:
         with:
           packages: platform-tools
           log-accepted-android-sdk-licenses: false
-        if: env.HAS_SIGNING_KEY == 'true'
       - uses: gradle/actions/setup-gradle@v4
-        if: env.HAS_SIGNING_KEY == 'true'
-      - name: Build with private release key when configured
-        if: env.HAS_SIGNING_KEY == 'true'
+      - name: Build with permanent private release key
         env:
           KEYSTORE_BASE64: ${{ secrets.POCKET_KEYSTORE_BASE64 }}
           POCKET_KEYSTORE: ${{ runner.temp }}/pocket-release.jks
@@ -101,7 +99,13 @@ jobs:
           POCKET_KEY_PASSWORD: ${{ secrets.POCKET_KEY_PASSWORD }}
         run: |
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$POCKET_KEYSTORE"
+          trap 'rm -f "$POCKET_KEYSTORE"' EXIT
           ./gradlew --no-daemon assembleRelease
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose app/build/outputs/apk/release/app-release.apk
+          if "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging app/build/outputs/apk/release/app-release.apk | grep -q application-debuggable; then
+            echo "::error::Refusing to publish a debuggable APK"
+            exit 1
+          fi
       - name: Publish release with installable APK
         env:
           GH_TOKEN: ${{ github.token }}
@@ -109,12 +113,8 @@ jobs:
           version=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1)
           tag="v$version"
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then tag="$GITHUB_REF_NAME"; fi
-          if [[ "$HAS_SIGNING_KEY" == true ]]; then
-            apk="release-assets/pocket-pixel-$tag.apk"
-            cp app/build/outputs/apk/release/app-release.apk "$apk"
-            gh release create "$tag" "$apk" --target "$GITHUB_SHA" --title "Pocket Pixel $tag" --notes-file RELEASE_NOTES.md
-          else
-            apk="release-assets/pocket-pixel-$tag-debug.apk"
-            mv release-assets/app-debug.apk "$apk"
-            gh release create "$tag" "$apk" --target "$GITHUB_SHA" --title "Pocket Pixel $tag (development build)" --notes-file RELEASE_NOTES.md --prerelease
-          fi
+          mkdir -p release-assets
+          apk="release-assets/pocket-pixel-$tag.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$apk"
+          sha256sum "$apk" > "$apk.sha256"
+          gh release create "$tag" "$apk" "$apk.sha256" --target "$GITHUB_SHA" --title "Pocket Pixel $tag" --notes-file RELEASE_NOTES.md --latest
