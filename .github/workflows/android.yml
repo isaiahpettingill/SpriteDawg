@@ -1,0 +1,111 @@
+name: Android
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - run: python3 scripts/fetch-fixtures.py
+      - run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pocket-pixel-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-reports
+          path: |
+            app/build/reports/tests/
+            app/build/reports/lint-results-debug.html
+  interaction:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_7
+          disable-animations: true
+          script: ./gradlew --no-daemon connectedDebugAndroidTest
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: interaction-test-reports
+          path: app/build/reports/androidTests/
+  release:
+    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || contains(github.event.head_commit.message, '[release]'))
+    needs: [build, interaction]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      HAS_SIGNING_KEY: ${{ secrets.POCKET_KEYSTORE_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: pocket-pixel-debug
+          path: release-assets
+      - uses: actions/setup-java@v4
+        if: env.HAS_SIGNING_KEY == 'true'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        if: env.HAS_SIGNING_KEY == 'true'
+      - uses: gradle/actions/setup-gradle@v4
+        if: env.HAS_SIGNING_KEY == 'true'
+      - name: Build with private release key when configured
+        if: env.HAS_SIGNING_KEY == 'true'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.POCKET_KEYSTORE_BASE64 }}
+          POCKET_KEYSTORE: ${{ runner.temp }}/pocket-release.jks
+          POCKET_STORE_PASSWORD: ${{ secrets.POCKET_STORE_PASSWORD }}
+          POCKET_KEY_ALIAS: ${{ secrets.POCKET_KEY_ALIAS }}
+          POCKET_KEY_PASSWORD: ${{ secrets.POCKET_KEY_PASSWORD }}
+        run: |
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$POCKET_KEYSTORE"
+          ./gradlew --no-daemon assembleRelease
+      - name: Publish release with installable APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1)
+          tag="v$version"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then tag="$GITHUB_REF_NAME"; fi
+          if [[ "$HAS_SIGNING_KEY" == true ]]; then
+            apk="release-assets/pocket-pixel-$tag.apk"
+            cp app/build/outputs/apk/release/app-release.apk "$apk"
+            gh release create "$tag" "$apk" --target "$GITHUB_SHA" --title "Pocket Pixel $tag" --notes-file RELEASE_NOTES.md
+          else
+            apk="release-assets/pocket-pixel-$tag-debug.apk"
+            mv release-assets/app-debug.apk "$apk"
+            gh release create "$tag" "$apk" --target "$GITHUB_SHA" --title "Pocket Pixel $tag (development build)" --notes-file RELEASE_NOTES.md --prerelease
+          fi
