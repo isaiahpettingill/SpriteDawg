@@ -4,6 +4,8 @@ import 'package:file_selector/file_selector.dart';
 import 'package:path_provider/path_provider.dart';
 import '../engine/aseprite.dart';
 import '../engine/editor_engine.dart';
+import '../engine/editor_sessions.dart';
+import '../engine/document.dart';
 import '../engine/png.dart';
 
 /// Desktop filesystem adapter. The editor always retains a recoverable copy
@@ -30,20 +32,64 @@ class DesktopBackend {
           ]
         : [_ase],
   ))?.path;
-  final engine = EditorEngine();
-  String? _path;
-  File? _recovery;
-  String? _recoveryError;
+  final sessions = EditorSessions();
+  EditorEngine get engine => sessions.active.engine;
+  String? get _path => sessions.active.path;
+  set _path(String? value) {
+    sessions.active.path = value;
+  }
+
+  Directory? _base;
+  File get _recovery =>
+      File('${_base!.path}/recovery-${sessions.active.id}.aseprite');
+  String? get _recoveryError => sessions.active.recoveryError;
+  set _recoveryError(String? value) {
+    sessions.active.recoveryError = value;
+  }
+
   static const _ase = XTypeGroup(
     label: 'Aseprite project',
     extensions: ['ase', 'aseprite'],
   );
+  Future<List<File>> _recoveryFiles() async {
+    final files = await _base!
+        .list()
+        .where(
+          (f) =>
+              f is File &&
+              RegExp(
+                r'^recovery(?:-[0-9]+)?\.aseprite$',
+              ).hasMatch(f.path.split('/').last),
+        )
+        .cast<File>()
+        .toList();
+    files.sort((a, b) => a.path.compareTo(b.path));
+    return files;
+  }
+
   Future<void> _init() async {
-    if (_recovery != null) return;
-    final base = await _supportDirectory();
-    await base.create(recursive: true);
-    _recovery = File('${base.path}/recovery.aseprite');
-    engine.recoveryAvailable = await _recovery!.exists();
+    if (_base != null) return;
+    _base = await _supportDirectory();
+    await _base!.create(recursive: true);
+    final files = await _recoveryFiles();
+    // Never overwrite an earlier process's recovery before it is recovered.
+    for (final file in files) {
+      final match = RegExp(
+        r'recovery-([0-9]+)\.aseprite$',
+      ).firstMatch(file.path);
+      if (match != null) {
+        final id = int.parse(match.group(1)!);
+        if (id >= sessions.nextId) sessions.nextId = id + 1;
+      }
+    }
+    if (files.isNotEmpty) {
+      sessions.documents.clear();
+      final first = EditorSession(sessions.nextId++);
+      sessions.configure(first);
+      sessions.documents.add(first);
+      sessions.activeId = first.id;
+    }
+    engine.recoveryAvailable = files.isNotEmpty;
   }
 
   Future<void> _atomic(File file, Uint8List bytes) async {
@@ -65,7 +111,7 @@ class DesktopBackend {
 
   Future<void> _persist() async {
     try {
-      await _atomic(_recovery!, _validated());
+      await _atomic(_recovery, _validated());
       engine.recoveryAvailable = true;
       _recoveryError = null;
     } catch (e) {
@@ -75,7 +121,7 @@ class DesktopBackend {
 
   Future<void> _clearRecovery() async {
     try {
-      if (await _recovery!.exists()) await _recovery!.delete();
+      if (await _recovery.exists()) await _recovery.delete();
       engine.recoveryAvailable = false;
       _recoveryError = null;
     } catch (e) {
@@ -102,6 +148,8 @@ class DesktopBackend {
     await _init();
     final args = arguments ?? <String, dynamic>{};
     switch (method) {
+      case 'thumbnails':
+        return engine.invoke(method, args);
       case 'open':
         final chosen = await _openPath();
         if (chosen == null) break;
@@ -112,9 +160,8 @@ class DesktopBackend {
         final bytes = await file.readAsBytes();
         // Decode must succeed completely before changing document/path/history.
         final decoded = AsepriteCodec.decode(bytes);
-        engine.replace(decoded);
-        _path = chosen;
-        await _clearRecovery();
+        final opened = sessions.add(decoded, title: chosen.split('/').last);
+        opened.path = chosen;
       case 'save':
       case 'saveAs':
         var path = method == 'save' ? _path : null;
@@ -127,6 +174,7 @@ class DesktopBackend {
         await _persist();
         await _atomic(File(path), bytes);
         _path = path;
+        sessions.active.title = path.split('/').last;
         engine.saved();
         await _clearRecovery();
       case 'exportPng':
@@ -141,10 +189,125 @@ class DesktopBackend {
         );
         await _atomic(File(chosen), encoded);
       case 'recover':
-        engine.load(await _recovery!.readAsBytes(), unsaved: true);
-        _path = null;
+        final files = await _recoveryFiles();
+        final existing = sessions.documents.map((s) => s.id).toSet();
+        final needed = files.where((f) {
+          final m = RegExp(r'recovery-([0-9]+)\.aseprite$').firstMatch(f.path);
+          return m == null || !existing.contains(int.parse(m.group(1)!));
+        }).length;
+        require(
+          sessions.documents.length +
+                  needed -
+                  (sessions.documents.length == 1 &&
+                          sessions.active.placeholder &&
+                          !engine.dirty
+                      ? 1
+                      : 0) <=
+              8,
+          'Close documents before recovering more (8 maximum).',
+        );
+        var totalBytes = 0;
+        for (final file in files) {
+          totalBytes += await file.length();
+        }
+        require(
+          totalBytes <= AsepriteCodec.maxFile,
+          'Combined recovery exceeds the 64 MiB safety budget. Original recovery files were retained.',
+        );
+        var decodedPixels = 0;
+        final decoded = <File, SpriteDocument>{};
+        for (final file in files) {
+          if (await file.length() > AsepriteCodec.maxFile) {
+            throw const FormatException('Recovery exceeds 64 MiB');
+          }
+          final doc = AsepriteCodec.decode(await file.readAsBytes());
+          decodedPixels += doc.frames.fold<int>(
+            0,
+            (n, f) =>
+                n + f.cels.fold<int>(0, (n, c) => n + (c?.pixels.length ?? 0)),
+          );
+          require(
+            decodedPixels <= 16 * 1024 * 1024,
+            'Combined recovery exceeds the decoded-pixel budget. Original recovery files were retained.',
+          );
+          decoded[file] = doc;
+        }
+        sessions.validateRecoveryCandidates(
+          decoded.values.toList(),
+          files
+              .map(
+                (f) =>
+                    RegExp(r'recovery-([0-9]+)\.aseprite$').firstMatch(f.path),
+              )
+              .whereType<RegExpMatch>()
+              .map((m) => int.parse(m.group(1)!))
+              .toSet(),
+        );
+        final restored = sessions.restoreDecoded(
+          decoded.entries.map((entry) {
+            final match = RegExp(
+              r'recovery-([0-9]+)\.aseprite$',
+            ).firstMatch(entry.key.path);
+            return MapEntry(
+              match == null ? null : int.parse(match.group(1)!),
+              entry.value,
+            );
+          }).toList(),
+        );
+        final selectedAfterRestore = sessions.activeId;
+        for (var i = 0; i < restored.length; i++) {
+          sessions.select(restored[i].id);
+          await _persist();
+          final file = files[i];
+          if (_recoveryError == null && file.path != _recovery.path) {
+            await file.delete();
+          }
+        }
+        sessions.select(selectedAfterRestore);
       case 'discardRecovery':
-        await _clearRecovery();
+        // Explicit startup dismissal may remove old-process copies; never delete
+        // another currently-open document's recovery.
+        final protected = sessions.documents
+            .where((s) => s.id != sessions.activeId)
+            .map((s) => '${_base!.path}/recovery-${s.id}.aseprite')
+            .toSet();
+        for (final file in await _recoveryFiles()) {
+          if (!protected.contains(file.path)) await file.delete();
+        }
+        engine.recoveryAvailable = false;
+      case 'selectDocument':
+        sessions.select((args['id'] as num).toInt());
+      case 'closeDocument':
+        final id = (args['id'] as num).toInt();
+        final matches = sessions.documents.where((s) => s.id == id);
+        require(matches.isNotEmpty, 'Document is no longer open');
+        require(
+          !matches.first.engine.dirty || args['discard'] == true,
+          'Save this document or confirm discarding its unsaved changes.',
+        );
+        final file = File('${_base!.path}/recovery-$id.aseprite');
+        if (await file.exists()) await file.delete();
+        sessions.close(id, discard: args['discard'] == true);
+      case 'clearTagClipboard':
+        sessions.clearClipboard();
+      case 'copyTag':
+        sessions.copyTag((args['index'] as num).toInt());
+      case 'pasteTag':
+        if (args['asNew'] == true) {
+          sessions.pasteTagAsNew();
+        } else {
+          sessions.pasteTag(after: (args['after'] as num?)?.toInt());
+        }
+        await _persist();
+      case 'new':
+        sessions.add(
+          SpriteDocument.create(
+            (args['width'] as num?)?.toInt() ?? 32,
+            (args['height'] as num?)?.toInt() ?? 32,
+          ),
+          unsaved: true,
+        );
+        await _persist();
       default:
         engine.invoke(method, args);
         if (method == 'new') {
@@ -155,6 +318,6 @@ class DesktopBackend {
           await _persist();
         }
     }
-    return {...engine.state(), 'recoveryError': _recoveryError};
+    return sessions.state();
   }
 }

@@ -1,5 +1,6 @@
 import 'platform/desktop_backend.dart';
 import 'rgba_image.dart';
+import 'frame_thumbnails.dart';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
@@ -30,6 +31,9 @@ class Editor extends ChangeNotifier {
   bool _disposed = false;
   String? error;
   int revision = 0;
+  int documentRevision = 0;
+  late final FrameThumbnailCache _thumbnails = FrameThumbnailCache(transport);
+  Future<ui.Image?> thumbnail(int frame) => _thumbnails.get(frame);
   int get width => state['width'] as int? ?? 32;
   int get height => state['height'] as int? ?? 32;
   int get frame => state['frame'] as int? ?? 0;
@@ -69,6 +73,19 @@ class Editor extends ChangeNotifier {
         image = next;
         previous = prev;
         revision++;
+        if (!const {
+          'select',
+          'state',
+          'save',
+          'saveAs',
+          'exportPng',
+          'discardRecovery',
+          'copyTag',
+          'clearTagClipboard',
+        }.contains(method)) {
+          documentRevision++;
+          _thumbnails.invalidate();
+        }
       }
       return true;
     } on PlatformException catch (e) {
@@ -88,6 +105,7 @@ class Editor extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _thumbnails.dispose();
     image?.dispose();
     previous?.dispose();
     super.dispose();

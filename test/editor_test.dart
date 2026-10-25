@@ -309,10 +309,10 @@ void main() {
       await tester.tap(find.text(label).first);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull, reason: '$label in landscape');
-      expect(
-        tester.getSize(find.byKey(const Key('pixel-canvas'))).height,
-        greaterThan(0),
-      );
+      final visibleWorkspace = label == 'Tags'
+          ? find.byKey(const Key('tag-frame-strip'))
+          : find.byKey(const Key('pixel-canvas'));
+      expect(tester.getSize(visibleWorkspace).height, greaterThan(0));
     }
     await tester.tap(find.text('Tags').first);
     await tester.pumpAndSettle();

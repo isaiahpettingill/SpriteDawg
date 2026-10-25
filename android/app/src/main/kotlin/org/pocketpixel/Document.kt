@@ -430,6 +430,7 @@ object Drawing {
 }
 
 class History {
+    var budgetBytes=48L*1024*1024
     private val undo = ArrayDeque<Document>()
     private val redo = ArrayDeque<Document>()
     val canUndo get() = undo.isNotEmpty()
@@ -441,18 +442,20 @@ class History {
     fun push(d: Document) {
         undo.addLast(d.copyDeep())
         redo.clear()
-        while (undo.size > 30 || (undo.size > 1 && undo.sumOf(::bytes) > 48L * 1024 * 1024)) undo
+        while (undo.size > 30 || (undo.size > 1 && undo.sumOf(::bytes) > budgetBytes)) undo
             .removeFirst()
     }
 
-    fun undo(d: Document): Document? {
+    fun undo(d: Document, validate: ((Document)->Unit)? = null): Document? {
         if (undo.isEmpty()) return null
+        validate?.invoke(undo.last())
         redo.addLast(d.copyDeep())
         return undo.removeLast()
     }
 
-    fun redo(d: Document): Document? {
+    fun redo(d: Document, validate: ((Document)->Unit)? = null): Document? {
         if (redo.isEmpty()) return null
+        validate?.invoke(redo.last())
         undo.addLast(d.copyDeep())
         return redo.removeLast()
     }

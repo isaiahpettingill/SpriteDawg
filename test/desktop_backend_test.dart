@@ -33,7 +33,9 @@ void main() {
         'color': 0xffff0000,
       })
       .then((_) {});
-  File recovery() => File('${base.path}/support/recovery.aseprite');
+  File recovery() => File(
+    '${base.path}/support/recovery-${backend.sessions.activeId}.aseprite',
+  );
   test(
     'cancel open/save/saveAs/export leaves state, history, and recovery intact',
     () async {
@@ -133,24 +135,29 @@ void main() {
     expect(other.engine.dirty, true);
     await other.invoke('save', null);
     expect(other.engine.dirty, true);
-    expect(await recovery().exists(), true);
+    expect(
+      await File(
+        '${base.path}/support/recovery-${other.sessions.activeId}.aseprite',
+      ).exists(),
+      true,
+    );
   });
-  test(
-    'successful open resets history after decoding and clears old recovery',
-    () async {
-      await draw();
-      final file = File('${base.path}/valid.aseprite');
-      await file.writeAsBytes(
-        AsepriteCodec.encode(SpriteDocument.create(8, 8)),
-      );
-      openPath = file.path;
-      await backend.invoke('open', null);
-      expect(backend.engine.document.width, 8);
-      expect(backend.engine.dirty, false);
-      expect(backend.engine.state()['canUndo'], false);
-      expect(await recovery().exists(), false);
-    },
-  );
+  test('successful open retains prior document history and recovery', () async {
+    await draw();
+    final previousId = backend.sessions.activeId;
+    final previousRecovery = recovery();
+    final file = File('${base.path}/valid.aseprite');
+    await file.writeAsBytes(AsepriteCodec.encode(SpriteDocument.create(8, 8)));
+    openPath = file.path;
+    await backend.invoke('open', null);
+    expect(backend.engine.document.width, 8);
+    expect(backend.engine.dirty, false);
+    expect(backend.engine.state()['canUndo'], false);
+    expect(await previousRecovery.exists(), true);
+    await backend.invoke('selectDocument', {'id': previousId});
+    expect(backend.engine.state()['canUndo'], true);
+    expect(backend.engine.dirty, true);
+  });
   test('corrupt recovery cannot replace current document', () async {
     await draw();
     final before = backend.engine.encode();
@@ -188,7 +195,7 @@ void main() {
       expect(backend.engine.document.composite(0)[1], 0);
     },
   );
-  test('cleanup failure returns newly opened state with a warning', () async {
+  test('open never cleans up another document recovery', () async {
     if (!Platform.isLinux) return;
     await draw();
     final valid = File('${base.path}/cleanup-open.aseprite');
@@ -200,10 +207,8 @@ void main() {
       final state = await backend.invoke('open', null);
       expect(state!['width'], 8);
       expect(state['dirty'], false);
-      expect(
-        state['recoveryError'],
-        contains('old recovery could not be removed'),
-      );
+      expect(state['recoveryError'], isNull);
+      expect(backend.sessions.documents.length, 2);
     } finally {
       await Process.run('chmod', ['700', support]);
     }
