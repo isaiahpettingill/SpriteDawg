@@ -208,4 +208,38 @@ void main() {
       await Process.run('chmod', ['700', support]);
     }
   });
+  test('PNG export preserves straight-alpha color bytes', () async {
+    await backend.invoke('new', {'width': 1, 'height': 1});
+    await backend.invoke('stroke', {
+      'tool': 'pencil',
+      'points': [
+        [0, 0],
+      ],
+      'color': 0x80c86432,
+    });
+    savePath = '${base.path}/translucent.png';
+    await backend.invoke('exportPng', null);
+    final png = await File(savePath!).readAsBytes();
+    expect(png.take(8), [137, 80, 78, 71, 13, 10, 26, 10]);
+    expect(
+      png[24],
+      8,
+    ); // Always eight-bit RGBA for game-asset interoperability.
+    expect(png[25], 6); // RGBA rather than flattened RGB.
+    final compressed = BytesBuilder();
+    final bytes = ByteData.sublistView(png);
+    var offset = 8;
+    while (offset < png.length) {
+      final length = bytes.getUint32(offset);
+      final type = String.fromCharCodes(png.sublist(offset + 4, offset + 8));
+      if (type == 'IDAT') {
+        compressed.add(png.sublist(offset + 8, offset + 8 + length));
+      }
+      offset += 12 + length;
+    }
+    final row = ZLibDecoder().convert(compressed.takeBytes());
+    // All PNG filters have zero left/up predictors for the first RGBA pixel.
+    expect(row.first, inInclusiveRange(0, 4));
+    expect(row.skip(1), [200, 100, 50, 128]);
+  });
 }

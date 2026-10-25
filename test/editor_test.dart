@@ -1,3 +1,4 @@
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -5,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:spritedawg/editor.dart';
 import 'package:spritedawg/main.dart';
 import 'package:spritedawg/pixel_canvas.dart';
+import 'package:spritedawg/rgba_image.dart';
 
 Map<String, dynamic> state({bool dirty = false}) => {
   'width': 32,
@@ -73,6 +75,50 @@ void main() {
       e.dispose();
     },
   );
+  test('Straight-alpha RGBA composites retain translucent colors', () async {
+    final pixels = Uint8List.fromList([
+      for (final alpha in [1, 17, 128, 254]) ...[200, 100, 50, alpha],
+    ]);
+    final e = Editor(
+      transport: (m, a) async => {
+        ...state(),
+        'width': 4,
+        'height': 1,
+        'pixels': pixels,
+        'previousPixels': pixels,
+      },
+    );
+    await e.call('init');
+    for (final image in [e.image!, e.previous!]) {
+      final bytes = await image.toByteData(
+        format: ui.ImageByteFormat.rawStraightRgba,
+      );
+      expect(bytes!.buffer.asUint8List(), pixels);
+    }
+    e.dispose();
+  });
+  test('RGBA image helper rejects invalid dimensions and lengths', () async {
+    for (final dimensions in [
+      (0, 1),
+      (1, 0),
+      (-1, 1),
+      (65536, 1),
+      (2049, 2048),
+    ]) {
+      await expectLater(
+        decodeStraightRgba(
+          Uint8List(4),
+          width: dimensions.$1,
+          height: dimensions.$2,
+        ),
+        throwsFormatException,
+      );
+    }
+    await expectLater(
+      decodeStraightRgba(Uint8List(3), width: 1, height: 1),
+      throwsFormatException,
+    );
+  });
   Future<void> canvas(
     WidgetTester tester,
     Editor e,

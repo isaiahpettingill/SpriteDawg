@@ -51,6 +51,9 @@ installation. Never uninstall your existing app just to try an unsigned update.
 
 Use Flutter **3.47.8** (Dart 3.13), JDK 17, Android SDK 36/build-tools 36.0.0.
 On Linux install clang, cmake, ninja-build, pkg-config, libgtk-3-dev and a C++ SDK.
+For ARM64 Linux, bootstrap the official pinned SDK tag instead of the x64-only
+stable archive: `git clone --depth 1 --branch 3.47.8 https://github.com/flutter/flutter.git`,
+then add its `bin` directory to PATH. CI uses this path on a native ARM64 runner.
 
 ```sh
 flutter pub get
@@ -58,7 +61,7 @@ python3 scripts/fetch-fixtures.py
 flutter analyze
 flutter test
 flutter build apk --debug
-(cd android && ./gradlew testDebugUnitTest lintDebug)
+(cd android && ./gradlew :app:testDebugUnitTest :app:lintDebug)
 flutter build linux --release
 scripts/package-linux.sh x64 # arm64 on an ARM64 Linux host
 ```

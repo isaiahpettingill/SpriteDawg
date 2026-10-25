@@ -1,4 +1,5 @@
 import 'platform/desktop_backend.dart';
+import 'rgba_image.dart';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
@@ -43,19 +44,7 @@ class Editor extends ChangeNotifier {
       (state['palette'] as List? ?? [0xff000000, 0xffffffff]).cast<int>();
   Future<ui.Image?> _decode(dynamic data) async {
     if (data is! Uint8List || data.length != width * height * 4) return null;
-    final buffer = await ui.ImmutableBuffer.fromUint8List(data);
-    final descriptor = ui.ImageDescriptor.raw(
-      buffer,
-      width: width,
-      height: height,
-      pixelFormat: ui.PixelFormat.rgba8888,
-    );
-    final codec = await descriptor.instantiateCodec();
-    final result = (await codec.getNextFrame()).image;
-    codec.dispose();
-    descriptor.dispose();
-    buffer.dispose();
-    return result;
+    return decodeStraightRgba(data, width: width, height: height);
   }
 
   Future<bool> call(String method, [Map<String, dynamic>? args]) async {

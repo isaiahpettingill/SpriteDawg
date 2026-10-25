@@ -1,7 +1,6 @@
 package org.pocketpixel
 
 import android.content.Intent
-import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -95,8 +94,8 @@ class MainActivity : FlutterActivity() {
             worker.execute {
                 try {
                     pendingBytes=if(kind=="exportPng") {
-                        val d=editor.document; val bitmap=Bitmap.createBitmap(d.composite(editor.frame),d.width,d.height,Bitmap.Config.ARGB_8888)
-                        java.io.ByteArrayOutputStream().use { out -> bitmap.compress(Bitmap.CompressFormat.PNG,100,out); bitmap.recycle(); out.toByteArray() }
+                        val d=editor.document
+                        Png.encode(d.width,d.height,d.composite(editor.frame))
                     } else { Aseprite.write(editor.document).also { Aseprite.read(it); persist() } }
                     pendingRevision=revision
                     main.post {

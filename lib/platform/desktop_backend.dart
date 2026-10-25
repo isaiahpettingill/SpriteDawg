@@ -1,10 +1,10 @@
 import 'dart:io';
 import 'dart:typed_data';
-import 'dart:ui' as ui;
 import 'package:file_selector/file_selector.dart';
 import 'package:path_provider/path_provider.dart';
 import '../engine/aseprite.dart';
 import '../engine/editor_engine.dart';
+import '../engine/png.dart';
 
 /// Desktop filesystem adapter. The editor always retains a recoverable copy
 /// before replacing a project; a cancelled dialog never changes saved state.
@@ -134,29 +134,12 @@ class DesktopBackend {
         if (chosen == null) break;
         final state = engine.state();
         final pixels = state['pixels'] as Uint8List;
-        final buffer = await ui.ImmutableBuffer.fromUint8List(pixels);
-        final descriptor = ui.ImageDescriptor.raw(
-          buffer,
+        final encoded = encodeRgbaPng(
+          pixels,
           width: engine.document.width,
           height: engine.document.height,
-          pixelFormat: ui.PixelFormat.rgba8888,
         );
-        final codec = await descriptor.instantiateCodec();
-        final image = (await codec.getNextFrame()).image;
-        try {
-          final encoded = await image.toByteData(
-            format: ui.ImageByteFormat.png,
-          );
-          if (encoded == null) {
-            throw const FormatException('PNG encoding failed');
-          }
-          await _atomic(File(chosen), encoded.buffer.asUint8List());
-        } finally {
-          image.dispose();
-          codec.dispose();
-          descriptor.dispose();
-          buffer.dispose();
-        }
+        await _atomic(File(chosen), encoded);
       case 'recover':
         engine.load(await _recovery!.readAsBytes(), unsaved: true);
         _path = null;

@@ -130,3 +130,17 @@ The exporter also regenerated per-frame RGBA files under
 `/tmp/spritedawg-dart-interop` for a separate native-backend cross-check. Generation
 alone is not evidence that the native comparison ran or passed. No third-party
 parser code or copyrighted upstream fixture bytes are bundled in the application.
+
+## Alpha/rendering follow-up
+
+A focused Flutter regression proved that sending straight RGBA bytes directly to
+`rgba8888` brightened translucent channels (`200,100,50,128` became
+`255,199,100,128`). Display/onion images now use the documented straight-alpha
+float format when needed, with exact low-alpha regressions. Android and Linux PNG
+exports bypass premultiplied render surfaces and write standard 8-bit RGBA PNGs
+without quantizing source channels. Independent JDK ImageIO, PNG CRC/decompression,
+and Flutter decoding checks validate these exports. The complete local Flutter
+suite passes 67 tests with a clean analyzer; the complete native standalone JVM
+suite passes 45 tests, including 11-file/41-frame Dart/Kotlin comparisons. These
+are not claims of physical-device testing. Final Android/ARM64 CI is tracked on
+the draft PR.

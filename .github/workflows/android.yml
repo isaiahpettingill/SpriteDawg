@@ -52,7 +52,7 @@ jobs:
       - run: python3 scripts/fetch-fixtures.py
       - run: flutter build apk --debug
       - run: dart tool/aseprite_interop.dart
-      - run: cd android && ./gradlew --no-daemon testDebugUnitTest lintDebug
+      - run: cd android && ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug
         env:
           SPRITEDAWG_INTEROP_DIR: /tmp/spritedawg-dart-interop
       - uses: actions/upload-artifact@v4
@@ -107,9 +107,17 @@ jobs:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-12-dev
       - uses: subosito/flutter-action@v2
+        if: matrix.arch == 'x64'
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
+      - name: Bootstrap official Flutter tag on ARM64
+        if: matrix.arch == 'arm64'
+        run: |
+          # Stable archives omit Linux ARM64; the official SDK bootstrap supports it.
+          git clone --depth 1 --branch "$FLUTTER_VERSION" https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/flutter/bin/flutter" --version
       - run: flutter pub get
       - run: flutter build linux --release
       - run: scripts/package-linux.sh ${{ matrix.arch }}
