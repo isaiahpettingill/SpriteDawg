@@ -25,3 +25,5 @@ Extract the entire Linux archive and run `spritedawg` from its extracted directo
 `SHA256SUMS` contains checksums using asset basenames. Download it beside the assets you want to verify, then use `sha256sum --check --ignore-missing SHA256SUMS`.
 
 The release is gated on Flutter tests/analyzer, native codec/interoperability tests and lint, Android emulator interaction tests, Linux builds on both architectures, and verified production signing. See the repository's compatibility documentation for format limits; this is not complete Aseprite desktop feature parity.
+
+Maintainers publish only through a matching version tag or an explicitly marked `[release]` merge commit on `main`. Ordinary pushes do not publish. The workflow requires the existing permanent Android signing configuration and all platform checks before creating release assets.

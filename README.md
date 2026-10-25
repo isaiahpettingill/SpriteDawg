@@ -95,8 +95,9 @@ claimed tested unless explicitly recorded in the PR verification results.
 
 CI runs Dart analysis/widget/codec tests, Android native codec tests/lint/APK build,
 and separate Linux x64 + ARM64 release builds. Branches produce workflow artifacts.
-Explicit version tags publish releases only after all required checks pass and
-production Android signing succeeds. Release assets include architecture-specific
+Explicit version tags or a main-branch merge marked `[release]` publish releases
+only after all required checks pass and production Android signing succeeds.
+Release assets include architecture-specific
 Android APKs, Linux x64/ARM64 archives, and basename-relative SHA256 checksums.
 Download the Android ARM64 APK for a Pixel 8; use the Linux ARM64 archive only for
 a compatible glibc/GTK3 Linux system, not Android.

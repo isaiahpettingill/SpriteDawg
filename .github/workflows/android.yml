@@ -132,12 +132,13 @@ jobs:
     needs: [test, android, android-interaction]
     runs-on: ubuntu-latest
     env:
+      RELEASE_REQUESTED: ${{ startsWith(github.ref, 'refs/tags/v') || (github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[release]')) }}
       HAS_SIGNING_KEY: ${{ secrets.POCKET_KEYSTORE_BASE64 != '' && secrets.POCKET_STORE_PASSWORD != '' && secrets.POCKET_KEY_ALIAS != '' && secrets.POCKET_KEY_PASSWORD != '' }}
     steps:
-      - name: Require the existing permanent key for a release tag
+      - name: Require the existing permanent key for an explicit release
         if: env.HAS_SIGNING_KEY != 'true'
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+          if [[ "$RELEASE_REQUESTED" == true ]]; then
             echo '::error::All four existing POCKET signing secrets must be configured. No fallback or new key is allowed.'
             exit 1
           fi
@@ -211,13 +212,13 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || (github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[release]')))
     needs: [test, android, android-interaction, linux, signed-android]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     concurrency:
-      group: release-${{ github.ref }}
+      group: spritedawg-production-release
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
@@ -226,8 +227,11 @@ jobs:
           set -euo pipefail
           version=$(sed -n 's/^version: *\([^+ ]*\).*/\1/p' pubspec.yaml)
           test -n "$version"
-          test "$GITHUB_REF_NAME" = "v$version"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            test "$GITHUB_REF_NAME" = "v$version"
+          fi
           echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=v$version" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v4
         with:
           name: spritedawg-android-signed
@@ -263,10 +267,23 @@ jobs:
           set -euo pipefail
           # API errors fail this job; they must not be mistaken for an absent release.
           tags=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq '.[].tag_name')
-          if grep -Fxq "$GITHUB_REF_NAME" <<< "$tags"; then
+          if grep -Fxq "$RELEASE_TAG" <<< "$tags"; then
             echo '::error::This release already exists. Inspect it explicitly; no assets were overwritten.'
             exit 1
           fi
-          gh release create "$GITHUB_REF_NAME" release-assets/* \
-            --repo "$GITHUB_REPOSITORY" --verify-tag \
-            --title "SpriteDawg $GITHUB_REF_NAME" --notes-file RELEASE_NOTES.md --latest
+          refs=$(git ls-remote origin "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")
+          if [[ -n "$refs" ]]; then
+            # Prefer the peeled commit for an annotated tag.
+            tag_commit=$(awk '{ if ($2 ~ /\^\{\}$/) peeled=$1; else direct=$1 } END { print peeled != "" ? peeled : direct }' <<< "$refs")
+            if [[ "$tag_commit" != "$GITHUB_SHA" ]]; then
+              echo '::error::The version tag already points at a different commit; refusing to publish mismatched assets.'
+              exit 1
+            fi
+          fi
+          # A marked main merge creates its version tag at the exact tested commit.
+          # A pre-existing tag trigger must already exist and match pubspec.yaml.
+          tag_options=()
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then tag_options+=(--verify-tag); fi
+          gh release create "$RELEASE_TAG" release-assets/* \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" "${tag_options[@]}" \
+            --title "SpriteDawg $RELEASE_TAG" --notes-file RELEASE_NOTES.md --latest
