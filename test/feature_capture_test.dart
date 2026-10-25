@@ -92,6 +92,25 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      final playback = find.widgetWithIcon(
+        IconButton,
+        Icons.play_circle_outline,
+      );
+      expect(tester.widget<IconButton>(playback).iconSize, 32);
+      expect(tester.getSize(playback).width, greaterThanOrEqualTo(48));
+      expect(tester.getSize(playback).height, greaterThanOrEqualTo(48));
+      await tester.tap(playback);
+      await tester.pump();
+      expect(
+        tester
+            .widget<IconButton>(
+              find.widgetWithIcon(IconButton, Icons.pause_circle),
+            )
+            .iconSize,
+        32,
+      );
+      await tester.tap(find.byTooltip('Stop animation'));
+      await tester.pump();
       await tester.tap(find.text('Tags').first);
       await tester.pump();
       await tester.runAsync(() async {

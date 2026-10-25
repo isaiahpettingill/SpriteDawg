@@ -950,6 +950,11 @@ class _EditorScreenState extends State<EditorScreen>
                           ),
                           panelButton('tags', Icons.sell_outlined, 'Tags'),
                           IconButton(
+                            iconSize: 32,
+                            constraints: const BoxConstraints(
+                              minWidth: 56,
+                              minHeight: 48,
+                            ),
                             tooltip: playing
                                 ? 'Stop animation'
                                 : 'Play animation',
@@ -1398,6 +1403,8 @@ class _EditorScreenState extends State<EditorScreen>
             ),
             const Spacer(),
             IconButton(
+              iconSize: 32,
+              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
               tooltip: playing ? 'Stop animation' : 'Play animation',
               onPressed: e.maps('frames').length > 1 ? play : null,
               icon: Icon(
