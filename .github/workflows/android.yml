@@ -1,14 +1,37 @@
-name: Android
+name: SpriteDawg Flutter
 on:
   push:
     branches: ['**']
-    tags: ['v*']
   pull_request:
   workflow_dispatch:
 permissions:
   contents: read
+env:
+  CI: 'true'
+  FLUTTER_SUPPRESS_ANALYTICS: 'true'
+  DASH__SUPPRESS_ANALYTICS: 'true'
+  FLUTTER_VERSION: '3.47.8'
 jobs:
-  build:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get
+      - run: python3 scripts/fetch-fixtures.py
+      - run: dart format --output=none --set-exit-if-changed lib test
+      - run: flutter analyze
+      - run: flutter test --reporter expanded
+      - name: Cross-check output with independent Aseprite parser
+        run: |
+          dart tool/aseprite_interop.dart
+          git clone https://github.com/TheCyberRonin/ase-parser.git /tmp/spritedawg-ase-parser
+          git -C /tmp/spritedawg-ase-parser checkout 550bde9ec5d3dc03571d7ea5acd9612a49c61a80
+          node scripts/check-ase-parser.cjs /tmp/spritedawg-ase-parser/Aseprite.js
+  android:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,22 +43,28 @@ jobs:
         with:
           packages: platform-tools
           log-accepted-android-sdk-licenses: false
-      - uses: gradle/actions/setup-gradle@v4
-      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - run: flutter pub get
       - run: python3 scripts/fetch-fixtures.py
-      - run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
+      - run: flutter build apk --debug
+      - run: dart tool/aseprite_interop.dart
+      - run: cd android && ./gradlew --no-daemon testDebugUnitTest lintDebug
+        env:
+          SPRITEDAWG_INTEROP_DIR: /tmp/spritedawg-dart-interop
       - uses: actions/upload-artifact@v4
         with:
-          name: pocket-pixel-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: spritedawg-android-debug
+          path: build/app/outputs/flutter-apk/app-debug.apk
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-reports
-          path: |
-            app/build/reports/tests/
-            app/build/reports/lint-results-debug.html
-  interaction:
+          name: native-test-reports
+          path: build/app/reports/
+  android-interaction:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +76,11 @@ jobs:
         with:
           packages: platform-tools
           log-accepted-android-sdk-licenses: false
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get
       - name: Enable emulator acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -59,62 +92,76 @@ jobs:
           arch: x86_64
           profile: pixel_7
           disable-animations: true
-          script: ./gradlew --no-daemon connectedDebugAndroidTest
-      - uses: actions/upload-artifact@v4
-        if: always()
+          script: flutter test integration_test/editor_smoke_test.dart -d emulator-5554 --reporter expanded
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-12-dev
+      - uses: subosito/flutter-action@v2
         with:
-          name: interaction-test-reports
-          path: app/build/reports/androidTests/
-  release:
-    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || contains(github.event.head_commit.message, '[release]'))
-    needs: [build, interaction]
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get
+      - run: flutter build linux --release
+      - run: scripts/package-linux.sh ${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spritedawg-linux-${{ matrix.arch }}
+          path: build/spritedawg-linux-${{ matrix.arch }}.tar.gz*
+
+  signed-android:
+    if: github.event_name == 'push'
+    needs: [test, android, android-interaction]
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     env:
       HAS_SIGNING_KEY: ${{ secrets.POCKET_KEYSTORE_BASE64 != '' }}
     steps:
+      - name: Explain optional signing
+        if: env.HAS_SIGNING_KEY != 'true'
+        run: echo 'No existing release key configured. Side-by-side debug APK remains available; no key was generated.'
       - uses: actions/checkout@v4
-      - name: Require permanent release signing key
-        run: |
-          if [[ "$HAS_SIGNING_KEY" != true ]]; then
-            echo "::error::Configure the four POCKET signing secrets before publishing. Debug APKs must never be published as releases."
-            exit 1
-          fi
+        if: env.HAS_SIGNING_KEY == 'true'
       - uses: actions/setup-java@v4
+        if: env.HAS_SIGNING_KEY == 'true'
         with:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
+        if: env.HAS_SIGNING_KEY == 'true'
         with:
           packages: platform-tools
           log-accepted-android-sdk-licenses: false
-      - uses: gradle/actions/setup-gradle@v4
-      - name: Build with permanent private release key
+      - uses: subosito/flutter-action@v2
+        if: env.HAS_SIGNING_KEY == 'true'
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: Build with existing permanent key (artifact only)
+        if: env.HAS_SIGNING_KEY == 'true'
         env:
           KEYSTORE_BASE64: ${{ secrets.POCKET_KEYSTORE_BASE64 }}
-          POCKET_KEYSTORE: ${{ runner.temp }}/pocket-release.jks
+          POCKET_KEYSTORE: ${{ runner.temp }}/spritedawg-release.jks
           POCKET_STORE_PASSWORD: ${{ secrets.POCKET_STORE_PASSWORD }}
           POCKET_KEY_ALIAS: ${{ secrets.POCKET_KEY_ALIAS }}
           POCKET_KEY_PASSWORD: ${{ secrets.POCKET_KEY_PASSWORD }}
         run: |
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$POCKET_KEYSTORE"
           trap 'rm -f "$POCKET_KEYSTORE"' EXIT
-          ./gradlew --no-daemon assembleRelease
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose app/build/outputs/apk/release/app-release.apk
-          if "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging app/build/outputs/apk/release/app-release.apk | grep -q application-debuggable; then
-            echo "::error::Refusing to publish a debuggable APK"
-            exit 1
-          fi
-      - name: Publish release with installable APK
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          version=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1)
-          tag="v$version"
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then tag="$GITHUB_REF_NAME"; fi
-          mkdir -p release-assets
-          apk="release-assets/pocket-pixel-$tag.apk"
-          cp app/build/outputs/apk/release/app-release.apk "$apk"
-          sha256sum "$apk" > "$apk.sha256"
-          gh release create "$tag" "$apk" "$apk.sha256" --target "$GITHUB_SHA" --title "Pocket Pixel $tag" --notes-file RELEASE_NOTES.md --latest
+          flutter pub get
+          flutter build apk --release
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify build/app/outputs/flutter-apk/app-release.apk
+          sha256sum build/app/outputs/flutter-apk/app-release.apk > build/app/outputs/flutter-apk/app-release.apk.sha256
+      - uses: actions/upload-artifact@v4
+        if: env.HAS_SIGNING_KEY == 'true'
+        with:
+          name: spritedawg-android-signed
+          path: build/app/outputs/flutter-apk/app-release.apk*

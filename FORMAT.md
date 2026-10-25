@@ -55,3 +55,14 @@ frame timing, linked cels and detaching, positions, tags, text/color/typed user 
 indexed/grayscale round trips, upstream sprites, unsupported features, every byte
 truncation of an encoded project, mutated input, fill/lines, and undo/redo.
 
+
+## Flutter migration
+
+The current UI is in `lib/main.dart`, `lib/editor.dart` and `lib/pixel_canvas.dart`.
+Android platform file handling and the Kotlin codec now build from `android/app/`;
+the previous Compose UI in `app/` is reference-only. Linux uses the port under
+`lib/engine/` with native file dialogs and atomic local-file replacement in
+`lib/platform/desktop_backend.dart`. Both preserve the existing format refusal
+policy; see `INTEROP_REVIEW.md` for independent implementation comparisons and
+explicit remaining verification limits. PNG export is intentionally separate from
+Aseprite saving. Linux recovery lives in the platform application-support folder.

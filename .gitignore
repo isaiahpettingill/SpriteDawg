@@ -33,3 +33,16 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# Flutter and local SDKs
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+android/.gradle/
+android/local.properties
+linux/flutter/ephemeral/
+
+# Test-only upstream Aseprite assets (download and hash verify with scripts/fetch-fixtures.py)
+app/src/test/resources/upstream/
+android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java

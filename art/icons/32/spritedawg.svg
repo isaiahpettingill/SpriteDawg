@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+<title>SpriteDawg</title>
+<desc>An original pixel dog on a warm violet tile. MIT licensed.</desc>
+<rect x="2" y="3" width="28" height="28" rx="4" fill="#000000" opacity=".2"/>
+<rect x="2" y="2" width="28" height="28" rx="4" fill="#7466a3"/>
+<path fill="#ffffff" opacity=".2" d="M6 2H26Q30 2 30 6V7Q30 3 26 3H6Q2 3 2 7V6Q2 2 6 2Z"/>
+<path d="M10,8 22,8 22,10 26,10 26,20 22,20 22,24 20,24 20,26 12,26 12,24 10,24 10,20 6,20 6,10 10,10Z" fill="#000000" opacity=".2" transform="translate(0 1)"/>
+<path d="M10,8 22,8 22,10 26,10 26,20 22,20 22,24 20,24 20,26 12,26 12,24 10,24 10,20 6,20 6,10 10,10Z" fill="#f5e6c8"/>
+<path fill="#b88a60" d="M6 10H10V20H6Z"/>
+<path fill="#b88a60" d="M22 10H26V20H22Z"/>
+<path fill="#403743" d="M12 14H14V16H12Z"/>
+<path fill="#403743" d="M18 14H20V16H18Z"/>
+<path fill="#403743" d="M14 18H18V20H14Z"/>
+<path fill="#403743" d="M15 20H17V22H15Z"/>
+<path fill="#cc7574" d="M14 22H18V24H14Z"/>
+</svg>
