@@ -94,8 +94,19 @@ claimed tested unless explicitly recorded in the PR verification results.
 ## CI and signing
 
 CI runs Dart analysis/widget/codec tests, Android native codec tests/lint/APK build,
-and separate Linux x64 + ARM64 release builds. Outputs are **workflow artifacts**,
-not automatic public releases. This rewrite does not merge or publish a release.
+and separate Linux x64 + ARM64 release builds. Branches produce workflow artifacts.
+Explicit version tags or a main-branch merge marked `[release]` publish releases
+only after all required checks pass and production Android signing succeeds.
+Release assets include architecture-specific
+Android APKs, Linux x64/ARM64 archives, and basename-relative SHA256 checksums.
+Download the Android ARM64 APK for a Pixel 8; use the Linux ARM64 archive only for
+a compatible glibc/GTK3 Linux system, not Android.
+
+The old v0.1.1 release was debug-signed despite using `org.pocketpixel`. A release
+signed by a different permanent key cannot update that installation in place.
+Export your projects first; do not uninstall the old app until your files are safe.
+The separately delivered **SpriteDawg Test** APK uses `org.pocketpixel.debug` and
+is not the production release or an automatic-update channel.
 
 Authorized release builds may use the existing permanent key via `POCKET_KEYSTORE`,
 `POCKET_STORE_PASSWORD`, `POCKET_KEY_ALIAS`, `POCKET_KEY_PASSWORD`. Release builds

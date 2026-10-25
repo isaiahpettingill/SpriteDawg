@@ -23,4 +23,4 @@ INSTALL
 chmod +x "$bundle/install-desktop.sh"
 tar -czf "build/spritedawg-linux-$arch.tar.gz" -C "$bundle" .
 
-sha256sum "build/spritedawg-linux-$arch.tar.gz" > "build/spritedawg-linux-$arch.tar.gz.sha256"
+(cd build && sha256sum "spritedawg-linux-$arch.tar.gz" > "spritedawg-linux-$arch.tar.gz.sha256")
