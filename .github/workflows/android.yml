@@ -53,9 +53,11 @@ jobs:
       - run: python3 scripts/fetch-fixtures.py
       - run: flutter build apk --debug
       - run: dart tool/aseprite_interop.dart
+      - run: dart tool/brush_interop.dart /tmp/spritedawg-dart-brush-interop
       - run: cd android && ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug
         env:
           SPRITEDAWG_INTEROP_DIR: /tmp/spritedawg-dart-interop
+          SPRITEDAWG_BRUSH_INTEROP_DIR: /tmp/spritedawg-dart-brush-interop
       - uses: actions/upload-artifact@v4
         with:
           name: spritedawg-android-debug

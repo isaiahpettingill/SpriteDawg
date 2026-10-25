@@ -8,12 +8,23 @@ MIT licensed, no ads, accounts, tracking, networking or broad Android storage pe
 
 ## Draw
 
-- Pencil, eraser, flood fill, eyedropper, line, rectangle, ellipse and pan.
+- Pencil, eraser, flood fill, eyedropper, line, outlined/filled rectangles and
+  ellipses, spray, blur, jumble and pan. The eraser has its own eraser icon.
+- Two-color horizontal/vertical gradients stay inside the connected fill region.
+  Spray has adjustable density; blur/jumble have strength controls. Random tools
+  use a fixed seed per gesture, and the entire gesture is one undo step.
+- Horizontal/vertical symmetry mirrors around the canvas center. Center-line
+  pixels are not applied repeatedly. In indexed mode, gradients and blur map
+  results to the current palette; jumble moves native pixel indices.
 - One finger/stylus draws; two fingers pan/pinch. Adding a second finger **cancels**
   the pending stroke, and drawing cannot resume until all fingers lift.
 - Brush size, palette, custom RGBA color, grid, previous-frame onion skin and Fit.
 - Undo/redo; visible/editable layer safeguards; layers, opacity and ordering.
 - Frames, duration, duplication and animation playback with direction/repeat tags.
+- Visual tag editing keeps frame thumbnails visible with the selected range and
+  current frame marked. Rename, adjust endpoints or duplicate quickly; browse tile
+  variants without starting playback, or explicitly preview an animation. Tags
+  remain generic, contiguous Aseprite ranges, not new incompatible tag types.
 - Sprite/layer/cel/tag user-data text; existing binary typed-property payloads remain
   attached to their original objects. Unsupported advanced features are refused,
   rather than silently flattened.
@@ -25,6 +36,38 @@ Android uses the system document picker. Linux uses native GTK file dialogs.
 Linux also supports pointer-wheel zoom, right-drag pan, Ctrl-Z/Y, Ctrl-Shift-Z,
 Ctrl-S/O, and B/E/G/I/H tool shortcuts. Controls remain usable in narrow portrait
 windows; desktop packaging declares mobile support to Linux phone shells.
+
+## Documents, tags and palettes
+
+Open up to eight documents in tabs with independent selection, undo, save targets
+and recovery snapshots. Closing unsaved work requires explicit confirmation. On
+roomier tablet/desktop windows, tools, canvas, layers and frame/tag workspace remain
+visible together; compact phones use the same features in adaptive panels.
+
+Copy a whole tag section and paste after the current frame in this or another open
+document. Frame timing, tag/cel/layer metadata and per-frame indexed palettes are
+retained; linked cels become self-contained within the copied section. Paste is one
+undo transaction and never edits the source. Incompatible canvas dimensions, color
+modes, transparent indices, layer schemas or profiles are refused rather than
+silently flattened or renamed. **Paste as new document** is the safe alternative
+when those properties differ. This clipboard is app-local, not a system Aseprite
+clipboard, and represents one contiguous tag at a time.
+Open documents plus copied sections share a conservative 64 MiB estimated data
+budget; operations exceeding it are refused without replacing work. History is
+bounded per document (the most recent undo is retained even when large). This is
+not a hard process-memory limit. Recovery restores unsaved copies, not original
+save paths; closing the app keeps recovery for every dirty tab.
+
+Palette management supports exact-index swatch selection (including identical-color
+entries), names, add/edit/reorder and removal with an explicit replacement. A color
+edit affects the current frame. Structural edits remap all frame indices and names;
+they refuse unequal palette sizes across the timeline. The transparent index cannot
+be removed or used as a replacement. All edits are undoable.
+
+Convert to indexed mode using each frame's palette, with an added transparency slot;
+colors/alpha may be quantized and a full palette without a free slot is refused.
+Conversion back to RGBA resolves per-frame palettes and linked cels to preserve
+appearance. Keep original game assets when experimenting with conversion.
 
 ## Compatibility and safety
 

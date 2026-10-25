@@ -14,25 +14,63 @@ import java.util.concurrent.Executors
 
 /** SAF and the tested Aseprite implementation are the only Android-specific parts. */
 class MainActivity : FlutterActivity() {
-    private val editor = EditorEngine()
+    private val sessions = EditorSessions()
+    private val editor get() = sessions.active.engine
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
-    private lateinit var recovery: AtomicFile
-    private var currentUri: Uri? = null
+    private val recovery get() = AtomicFile(File(filesDir,"recovery-${sessions.activeId}.aseprite"))
+    private var currentUri: Uri?
+        get() = sessions.active.path?.let(Uri::parse)
+        set(value) { sessions.active.path=value?.toString() }
+    private var startupRecovery = false
     private var pending: MethodChannel.Result? = null
     private var pendingKind = ""
     private var pendingBytes: ByteArray? = null
     private var pendingRevision = 0L
-    private var revision = 0L
-    private var recoveryError: String? = null
+    private var revision: Long
+        get() = sessions.active.revision
+        set(value) { sessions.active.revision=value }
+    private var recoveryError: String?
+        get() = sessions.active.recoveryError
+        set(value) { sessions.active.recoveryError=value }
+    private var pendingDocument = 0
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        recovery = AtomicFile(File(filesDir,"recovery.aseprite"))
+        val files=recoveryFiles()
+        files.forEach { f -> Regex("recovery-([0-9]+)\\.aseprite").matchEntire(f.name)?.groupValues?.get(1)?.toIntOrNull()?.let { sessions.nextId=maxOf(sessions.nextId,it+1) } }
+        if(files.isNotEmpty()) {sessions.documents.clear();val blank=EditorSession(sessions.nextId++);sessions.configure(blank);sessions.documents.add(blank);sessions.activeId=blank.id;startupRecovery=true}
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger,"pocketpixel/editor").setMethodCallHandler(::handle)
     }
-    private fun state() = editor.state(recovery.baseFile.exists()).toMutableMap().also {
-        it["recoveryError"] = recoveryError
+    private fun recoveryFiles() = recoveryBaseFiles(filesDir)
+    private fun state() = sessions.state(startupRecovery || recovery.baseFile.exists() || File(recovery.baseFile.path+".bak").exists())
+    private fun recoverDocuments() {
+        val files=recoveryFiles()
+        val existing=sessions.documents.map { it.id }.toSet()
+        fun id(f: File)=Regex("recovery-([0-9]+)\\.aseprite").matchEntire(f.name)?.groupValues?.get(1)?.toIntOrNull()
+        val needed=files.count { id(it) !in existing }
+        val placeholder=if(sessions.documents.size==1 && sessions.active.placeholder && !editor.dirty)1 else 0
+        require(sessions.documents.size+needed-placeholder<=8) { "Close documents before recovering more (8 maximum)." }
+        require(files.sumOf { maxOf(it.length(),File(it.path+".bak").length()) }<=Aseprite.MAX_FILE) { "Combined recovery exceeds the 64 MiB safety budget. Original recovery files were retained." }
+        var decodedPixels=0L
+        val decoded=files.map { f ->
+            // AtomicFile promotes a valid legacy backup before reading; reading
+            // the base directly could decode a partially replaced file.
+            val doc=Aseprite.read(AtomicFile(f).readFully())
+            decodedPixels+=doc.frames.sumOf { frame -> frame.cels.sumOf { it?.pixels?.size?.toLong() ?: 0L } }
+            require(decodedPixels<=16L*1024*1024) { "Combined recovery exceeds the decoded-pixel budget. Original recovery files were retained." }
+            f to doc
+        }
+        sessions.validateRecoveryCandidates(decoded.map {it.second},files.mapNotNull(::id).toSet())
+        val restored=sessions.restoreDecoded(decoded.map {(file,doc)->id(file) to doc})
+        val selectedAfterRestore=sessions.activeId
+        restored.forEachIndexed { index,session ->
+            sessions.select(session.id);changed()
+            val file=files[index]
+            if(recoveryError==null && file.absolutePath!=recovery.baseFile.absolutePath)AtomicFile(file).delete()
+        }
+        sessions.select(selectedAfterRestore)
+        startupRecovery=false
     }
     private fun execute(result: MethodChannel.Result, block: () -> Any?) {
         worker.execute {
@@ -58,14 +96,24 @@ class MainActivity : FlutterActivity() {
         execute(result) {
             when(call.method) {
                 "init", "state" -> Unit
-                "new" -> { editor.replace(Document.create(args.number("width",32),args.number("height",32)),true); currentUri=null; changed() }
+                "thumbnails" -> return@execute editor.thumbnails(args)
+                "new" -> { sessions.add(Document.create(args.number("width",32),args.number("height",32)),unsaved=true); changed() }
+                "selectDocument" -> sessions.select(args.number("id",-1))
+                "closeDocument" -> {val id=args.number("id",-1);sessions.close(id,args["discard"]==true);AtomicFile(File(filesDir,"recovery-$id.aseprite")).delete()}
+                "clearTagClipboard" -> sessions.clearClipboard()
+                "copyTag" -> sessions.copyTag(args.number("index",-1))
+                "pasteTag" -> {if(args["asNew"]==true)sessions.pasteTagAsNew() else sessions.pasteTag((args["after"] as? Number)?.toInt());changed()}
                 "select" -> editor.select(args)
                 "stroke" -> { editor.stroke(args); changed() }
                 "edit" -> { editor.edit(args); changed() }
                 "undo" -> { editor.undo(); changed() }
                 "redo" -> { editor.redo(); changed() }
-                "recover" -> { val doc=Aseprite.read(recovery.readFully()); editor.replace(doc,true); currentUri=null; revision++ }
-                "discardRecovery" -> { recovery.delete(); recoveryError=null }
+                "recover" -> recoverDocuments()
+                "discardRecovery" -> {
+                    val protectedNames=sessions.documents.filter {it.id!=sessions.activeId}.map {"recovery-${it.id}.aseprite"}.toSet()
+                    recoveryFiles().filter {it.name !in protectedNames}.forEach {AtomicFile(it).delete()}
+                    startupRecovery=false;recoveryError=null
+                }
                 "save" -> {
                     val uri=currentUri
                     if(uri==null) { main.post { launchPicker("saveAs",result) }; return@execute DeferredResult }
@@ -82,11 +130,11 @@ class MainActivity : FlutterActivity() {
         Aseprite.read(bytes) // Validate before opening any destination for truncation.
         persist()
         contentResolver.openOutputStream(uri,"wt")?.use { it.write(bytes); it.flush() } ?: error("The document provider refused this file. Use Save As.")
-        editor.saved(); currentUri=uri; recovery.delete(); recoveryError=null
+        editor.saved(); currentUri=uri; sessions.active.title=uri.lastPathSegment?.substringAfterLast('/') ?: sessions.active.title; recovery.delete(); recoveryError=null
     }
     private fun launchPicker(kind: String,result: MethodChannel.Result) {
         if(pending!=null) { result.error("busy","Finish the open file picker first",null); return }
-        pending=result; pendingKind=kind
+        pending=result; pendingKind=kind;pendingDocument=sessions.activeId
         if(kind=="open") {
             val intent=Intent(Intent.ACTION_OPEN_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type="*/*"; addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION) }
             try { startActivityForResult(intent,42) } catch(e: Exception) { pending=null; result.error("picker_error",e.message,null) }
@@ -111,9 +159,10 @@ class MainActivity : FlutterActivity() {
         super.onActivityResult(requestCode,resultCode,data)
         if(requestCode!=42) return
         val result=pending ?: return
-        val kind=pendingKind; val bytes=pendingBytes; val snapshotRevision=pendingRevision
+        val kind=pendingKind; val bytes=pendingBytes; val snapshotRevision=pendingRevision; val snapshotDocument=pendingDocument
         pending=null; pendingBytes=null
         execute(result) {
+            require(sessions.activeId==snapshotDocument) { "Active document changed while file picker was open. Try again." }
             val uri=data?.data
             if(resultCode==RESULT_OK && uri!=null) {
                 try { contentResolver.takePersistableUriPermission(uri,((data?.flags ?: 0) and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION))) } catch(_: SecurityException) { /* A provider may offer only this session. */ }
@@ -123,11 +172,12 @@ class MainActivity : FlutterActivity() {
                         while(true) { val n=stream.read(buffer); if(n<0) break; require(out.size()+n<=128*1024*1024) { "File exceeds the 128 MiB safety limit" }; out.write(buffer,0,n) }
                         Aseprite.read(out.toByteArray())
                     } ?: error("The document provider could not read this file")
-                    editor.replace(loaded); currentUri=uri; revision++; recovery.delete(); recoveryError=null
+                    val opened=sessions.add(loaded, uri.lastPathSegment?.substringAfterLast('/') ?: "Opened document")
+                    opened.path=uri.toString();revision++
                 } else {
                     requireNotNull(bytes)
                     contentResolver.openOutputStream(uri,"wt")?.use { it.write(bytes); it.flush() } ?: error("The document provider refused this file")
-                    if(kind=="saveAs") { currentUri=uri; if(revision==snapshotRevision) { editor.saved(); recovery.delete(); recoveryError=null } }
+                    if(kind=="saveAs") { currentUri=uri;sessions.active.title=uri.lastPathSegment?.substringAfterLast('/') ?: sessions.active.title; if(revision==snapshotRevision) { editor.saved(); recovery.delete(); recoveryError=null } }
                 }
             }
             state()

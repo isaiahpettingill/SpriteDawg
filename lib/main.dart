@@ -5,6 +5,11 @@ import 'package:flutter/services.dart';
 
 import 'editor.dart';
 import 'pixel_canvas.dart';
+import 'visual_tag_editor.dart';
+import 'palette_editor.dart';
+import 'eraser_icon.dart';
+import 'document_tabs.dart';
+import 'responsive_editor_shell.dart';
 
 void main() => runApp(const PocketPixelApp());
 
@@ -38,9 +43,18 @@ class _EditorScreenState extends State<EditorScreen>
     with WidgetsBindingObserver {
   late final e = widget.editor ?? Editor();
   String tool = 'pencil';
-  int color = 0xff000000, brush = 1, fitToken = 0;
+  int color = 0xff000000, secondaryColor = 0xffffffff, brush = 1, fitToken = 0;
+  int? selectedPaletteIndex;
+  bool filledShape = false,
+      gradientFill = false,
+      mirrorX = false,
+      mirrorY = false;
+  String gradientDirection = 'vertical';
+  int sprayDensity = 12, effectStrength = 50, strokeSeed = 1;
   bool grid = false, onion = false, playing = false, allowExit = false;
   String? panel;
+  bool editingText = false;
+  final _tagEditorKey = GlobalKey<VisualTagEditorState>();
   int selectedTag = -1;
   Timer? playback;
   String? lastError;
@@ -52,6 +66,9 @@ class _EditorScreenState extends State<EditorScreen>
     'line': (Icons.show_chart, 'Line'),
     'rectangle': (Icons.crop_square, 'Rectangle'),
     'ellipse': (Icons.circle_outlined, 'Ellipse'),
+    'spray': (Icons.grain, 'Spray'),
+    'blur': (Icons.blur_on, 'Blur'),
+    'jumble': (Icons.shuffle, 'Jumble'),
     'pan': (Icons.pan_tool_alt, 'Pan'),
   };
   @override
@@ -93,6 +110,13 @@ class _EditorScreenState extends State<EditorScreen>
 
   void update() {
     if (!mounted) return;
+    if (selectedPaletteIndex != null &&
+        (e.state['depth'] != 8 || selectedPaletteIndex! >= e.palette.length)) {
+      selectedPaletteIndex = null;
+    }
+    if (e.state['depth'] == 8 && selectedPaletteIndex != null) {
+      color = e.palette[selectedPaletteIndex!];
+    }
     setState(() {});
     final issue = e.error ?? e.state['recoveryError'] as String?;
     if (issue != null && lastError != issue) {
@@ -132,13 +156,29 @@ class _EditorScreenState extends State<EditorScreen>
 
   Future<bool> discard() async {
     stop();
-    if (!e.dirty) return true;
+    if (!await (_tagEditorKey.currentState?.savePending() ??
+        Future.value(true))) {
+      return false;
+    }
+    if (!mounted) return false;
+    final documents = e.maps('documents');
+    final dirtyCount = documents.isEmpty
+        ? (e.dirty ? 1 : 0)
+        : documents.where((d) => d['dirty'] == true).length;
+    if (dirtyCount == 0) return true;
+    if (e.state['recoveryError'] != null ||
+        documents.any((d) => d['recoveryError'] != null)) {
+      notice(
+        'Recovery is unavailable for an open drawing. Save your work before leaving.',
+      );
+      return false;
+    }
     return await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
             title: const Text('Leave unsaved work?'),
-            content: const Text(
-              'Save your drawing before replacing it. Discarding cannot be undone.',
+            content: Text(
+              '$dirtyCount open ${dirtyCount == 1 ? 'drawing has' : 'drawings have'} unsaved changes. Recovery copies will be kept. Use Save to write Aseprite files.',
             ),
             actions: [
               TextButton(
@@ -147,7 +187,7 @@ class _EditorScreenState extends State<EditorScreen>
               ),
               TextButton(
                 onPressed: () => Navigator.pop(context, true),
-                child: const Text('Discard changes'),
+                child: const Text('Leave with recovery'),
               ),
             ],
           ),
@@ -221,6 +261,7 @@ class _EditorScreenState extends State<EditorScreen>
   }
 
   Future<void> newProject() async {
+    if (!await beforeDocumentSwitch()) return;
     final raw = await input(
       'New canvas',
       '32 × 32',
@@ -232,7 +273,7 @@ class _EditorScreenState extends State<EditorScreen>
       notice('Use dimensions from 1 to 2048, for example 32 × 32.');
       return;
     }
-    if (!await discard()) return;
+    stop();
     if (await e.call('new', {'width': dims[0], 'height': dims[1]}) && mounted) {
       setState(() {
         fitToken++;
@@ -242,7 +283,7 @@ class _EditorScreenState extends State<EditorScreen>
   }
 
   Future<void> open() async {
-    if (!await discard()) return;
+    if (!await beforeDocumentSwitch()) return;
     final old = e.revision;
     await e.call('open');
     if (mounted && e.revision != old) {
@@ -253,8 +294,8 @@ class _EditorScreenState extends State<EditorScreen>
     }
   }
 
-  Future<void> colorDialog() async {
-    var chosen = color;
+  Future<void> colorDialog({bool secondary = false}) async {
+    var chosen = secondary ? secondaryColor : color;
     final controller = TextEditingController(
       text: chosen.toRadixString(16).padLeft(8, '0').toUpperCase(),
     );
@@ -343,7 +384,16 @@ class _EditorScreenState extends State<EditorScreen>
       ),
     );
     Future<void>.delayed(const Duration(milliseconds: 400), controller.dispose);
-    if (result != null && mounted) setState(() => color = result);
+    if (result != null && mounted) {
+      setState(() {
+        if (secondary) {
+          secondaryColor = result;
+        } else {
+          color = result;
+          selectedPaletteIndex = null;
+        }
+      });
+    }
   }
 
   void chooseTool(String value) {
@@ -358,11 +408,24 @@ class _EditorScreenState extends State<EditorScreen>
 
   Future<void> stroke(String value, List<Offset> points) async {
     stop();
+    final seed = strokeSeed;
+    setState(() => strokeSeed = (strokeSeed + 1) & 0xffffffff);
     await e.call('stroke', {
       'tool': value,
       'points': points.map((p) => [p.dx.floor(), p.dy.floor()]).toList(),
       'color': color,
       'size': brush,
+      'filled': filledShape,
+      'gradient': gradientFill,
+      'secondaryColor': secondaryColor,
+      'gradientDirection': gradientDirection,
+      'density': sprayDensity,
+      'strength': effectStrength,
+      'seed': seed,
+      'mirrorX': mirrorX,
+      'mirrorY': mirrorY,
+      if (e.state['depth'] == 8 && selectedPaletteIndex != null)
+        'paletteIndex': selectedPaletteIndex,
     });
   }
 
@@ -458,9 +521,9 @@ class _EditorScreenState extends State<EditorScreen>
       case 'open':
         await open();
       case 'saveAs':
-        await e.call('saveAs');
+        await fileAction('saveAs');
       case 'exportPng':
-        await e.call('exportPng');
+        await fileAction('exportPng');
       case 'grid':
         setState(() => grid = !grid);
       case 'onion':
@@ -529,22 +592,30 @@ class _EditorScreenState extends State<EditorScreen>
 
   @override
   Widget build(BuildContext context) {
-    final compactHeight = MediaQuery.sizeOf(context).height < 600;
-    final hideDrawingStrips = compactHeight && panel != null;
+    final compactHeight =
+        MediaQuery.sizeOf(context).height -
+            MediaQuery.viewInsetsOf(context).bottom <
+        600;
+    final tightHeight =
+        MediaQuery.sizeOf(context).height -
+            MediaQuery.viewInsetsOf(context).bottom <
+        430;
+    final compactTags = panel == 'tags' && compactHeight;
+    final hideDrawingStrips =
+        (compactHeight && panel != null) || panel == 'tags';
     final layers = e.maps('layers');
     final currentLayer = e.layer < layers.length ? layers[e.layer] : null;
     final layerName = currentLayer == null
         ? 'Layer 1'
         : '${currentLayer['name']}${currentLayer['visible'] == false ? ' (hidden)' : ''}${currentLayer['editable'] == false ? ' (locked)' : ''}';
     final view = PopScope(
-      canPop: !e.busy && (allowExit || !e.dirty),
+      canPop: !e.busy && allowExit,
       onPopInvokedWithResult: (didPop, result) async {
         if (!didPop && e.busy) {
           notice('Wait for the current file operation to finish.');
           return;
         }
         if (!didPop && await discard() && mounted) {
-          if (!await e.call('discardRecovery') || !mounted) return;
           setState(() => allowExit = true);
           await WidgetsBinding.instance.endOfFrame;
           if (!context.mounted) return;
@@ -556,7 +627,7 @@ class _EditorScreenState extends State<EditorScreen>
         }
       },
       child: Scaffold(
-        resizeToAvoidBottomInset: false,
+        resizeToAvoidBottomInset: panel == 'tags',
         appBar: AppBar(
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -586,7 +657,7 @@ class _EditorScreenState extends State<EditorScreen>
                   ? null
                   : () {
                       stop();
-                      e.call('save');
+                      fileAction('save');
                     },
               icon: const Icon(Icons.save_outlined),
             ),
@@ -634,231 +705,273 @@ class _EditorScreenState extends State<EditorScreen>
           top: false,
           child: Column(
             children: [
-              SizedBox(
-                height: 3,
-                child: e.busy ? const LinearProgressIndicator() : null,
-              ),
-              if (e.state['recoveryError'] != null)
-                Material(
-                  color: Theme.of(context).colorScheme.errorContainer,
-                  child: Padding(
-                    padding: const EdgeInsets.all(8),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.warning_amber_rounded, size: 20),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Recovery unavailable: ${e.state['recoveryError']}. Save a copy now.',
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: e.busy ? null : () => e.call('saveAs'),
-                          child: const Text('Save as'),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        '${tools[tool]!.$2} · $layerName',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.labelMedium,
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'Undo',
-                      onPressed: e.canUndo && !e.busy
-                          ? () {
-                              stop();
-                              e.call('undo');
-                            }
-                          : null,
-                      icon: const Icon(Icons.undo),
-                    ),
-                    IconButton(
-                      tooltip: 'Redo',
-                      onPressed: e.canRedo && !e.busy
-                          ? () {
-                              stop();
-                              e.call('redo');
-                            }
-                          : null,
-                      icon: const Icon(Icons.redo),
-                    ),
-                    IconButton(
-                      tooltip: 'Fit canvas',
-                      onPressed: () => setState(() => fitToken++),
-                      icon: const Icon(Icons.fit_screen),
-                    ),
-                  ],
-                ),
-              ),
+              if (recoveryIssue != null) recoveryBanner(),
               Expanded(
-                child: PixelCanvas(
-                  editor: e,
-                  tool: playing ? 'pan' : tool,
-                  color: color,
-                  brush: brush,
-                  grid: grid,
-                  onion: onion,
-                  fitToken: fitToken,
-                  onPick: (value) => setState(() => color = value),
-                  onStroke: stroke,
-                ),
-              ),
-              if (panel != null)
-                SizedBox(
-                  height: compactHeight
-                      ? (MediaQuery.sizeOf(context).height - 210)
-                            .clamp(130.0, 180.0)
-                            .toDouble()
-                      : 180,
-                  child: panel == 'layers'
-                      ? layerPanel()
-                      : panel == 'frames'
-                      ? framePanel()
-                      : tagPanel(),
-                ),
-              if (!hideDrawingStrips)
-                SizedBox(
-                  height: 50,
-                  child: Row(
+                child: ResponsiveEditorShell(
+                  documentTabs: DocumentTabs(
+                    editor: e,
+                    onNew: () => newProject(),
+                    onOpen: () => open(),
+                    beforeSwitch: beforeDocumentSwitch,
+                  ),
+                  canvas: Column(
                     children: [
-                      Padding(
-                        padding: const EdgeInsets.only(left: 8),
-                        child: Tooltip(
-                          message: 'Custom brush color',
-                          child: InkWell(
-                            onTap: colorDialog,
-                            child: Container(
-                              width: 40,
-                              height: 36,
-                              decoration: BoxDecoration(
-                                color: Color(color),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                  color: Colors.white70,
-                                  width: 2,
+                      strokeOptions(),
+                      Expanded(child: drawingCanvas()),
+                    ],
+                  ),
+                  tools: toolRail(),
+                  layers: layerPanel(),
+                  timeline: wideTimeline(),
+                  mobileBody: Column(
+                    children: [
+                      SizedBox(
+                        height: 3,
+                        child: e.busy ? const LinearProgressIndicator() : null,
+                      ),
+                      if (!compactTags)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  '${tools[tool]!.$2} · $layerName',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(
+                                    context,
+                                  ).textTheme.labelMedium,
                                 ),
                               ),
-                              child: Icon(
-                                Icons.color_lens_outlined,
-                                color: Color(color).computeLuminance() > .5
-                                    ? Colors.black
-                                    : Colors.white,
-                                size: 20,
+                              if (tightHeight)
+                                IconButton(
+                                  tooltip: 'Manage palette and color mode',
+                                  onPressed: managePalette,
+                                  icon: const Icon(Icons.palette_outlined),
+                                ),
+                              if (tightHeight) compactBrushMenu(),
+                              IconButton(
+                                tooltip: 'Undo',
+                                onPressed: e.canUndo && !e.busy
+                                    ? () {
+                                        stop();
+                                        e.call('undo');
+                                      }
+                                    : null,
+                                icon: const Icon(Icons.undo),
                               ),
-                            ),
+                              IconButton(
+                                tooltip: 'Redo',
+                                onPressed: e.canRedo && !e.busy
+                                    ? () {
+                                        stop();
+                                        e.call('redo');
+                                      }
+                                    : null,
+                                icon: const Icon(Icons.redo),
+                              ),
+                              IconButton(
+                                tooltip: 'Fit canvas',
+                                onPressed: () => setState(() => fitToken++),
+                                icon: const Icon(Icons.fit_screen),
+                              ),
+                            ],
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
                       Expanded(
-                        child: ListView.separated(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: e.palette.length,
-                          separatorBuilder: (_, index) =>
-                              const SizedBox(width: 5),
-                          itemBuilder: (context, index) {
-                            final c = e.palette[index];
-                            return Center(
-                              child: Semantics(
-                                label: 'Palette color ${index + 1}',
-                                selected: c == color,
-                                button: true,
-                                child: InkWell(
-                                  onTap: () => setState(() => color = c),
-                                  child: Container(
-                                    width: 30,
-                                    height: 30,
-                                    decoration: BoxDecoration(
-                                      color: Color(c),
-                                      borderRadius: BorderRadius.circular(5),
-                                      border: Border.all(
-                                        color: c == color
-                                            ? Theme.of(
-                                                context,
-                                              ).colorScheme.primary
-                                            : Colors.white24,
-                                        width: c == color ? 3 : 1,
+                        child: compactTags ? tagPanel() : drawingCanvas(),
+                      ),
+                      if (panel != null && !compactTags)
+                        SizedBox(
+                          height: panel == 'tags'
+                              ? 280
+                              : compactHeight
+                              ? (MediaQuery.sizeOf(context).height - 210)
+                                    .clamp(130.0, 180.0)
+                                    .toDouble()
+                              : 180,
+                          child: panel == 'layers'
+                              ? layerPanel()
+                              : panel == 'frames'
+                              ? framePanel()
+                              : tagPanel(),
+                        ),
+                      if (!hideDrawingStrips && !tightHeight)
+                        SizedBox(
+                          height: 50,
+                          child: Row(
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.only(left: 8),
+                                child: Tooltip(
+                                  message: 'Custom brush color',
+                                  child: InkWell(
+                                    onTap: colorDialog,
+                                    child: Container(
+                                      width: 40,
+                                      height: 36,
+                                      decoration: BoxDecoration(
+                                        color: Color(color),
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(
+                                          color: Colors.white70,
+                                          width: 2,
+                                        ),
+                                      ),
+                                      child: Icon(
+                                        Icons.color_lens_outlined,
+                                        color:
+                                            Color(color).computeLuminance() > .5
+                                            ? Colors.black
+                                            : Colors.white,
+                                        size: 20,
                                       ),
                                     ),
                                   ),
                                 ),
                               ),
-                            );
-                          },
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: ListView.separated(
+                                  scrollDirection: Axis.horizontal,
+                                  itemCount: e.palette.length,
+                                  separatorBuilder: (_, index) =>
+                                      const SizedBox(width: 5),
+                                  itemBuilder: (context, index) {
+                                    final c = e.palette[index];
+                                    final selected =
+                                        e.state['depth'] == 8 &&
+                                            selectedPaletteIndex != null
+                                        ? index == selectedPaletteIndex
+                                        : c == color;
+                                    return Center(
+                                      child: Semantics(
+                                        label: 'Palette color ${index + 1}',
+                                        selected: selected,
+                                        button: true,
+                                        child: InkWell(
+                                          onTap: () => setState(() {
+                                            color = c;
+                                            selectedPaletteIndex = index;
+                                          }),
+                                          child: Container(
+                                            width: 30,
+                                            height: 30,
+                                            decoration: BoxDecoration(
+                                              color: Color(c),
+                                              borderRadius:
+                                                  BorderRadius.circular(5),
+                                              border: Border.all(
+                                                color: selected
+                                                    ? Theme.of(
+                                                        context,
+                                                      ).colorScheme.primary
+                                                    : Colors.white24,
+                                                width: selected ? 3 : 1,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: 'Manage palette and color mode',
+                                onPressed: e.busy ? null : managePalette,
+                                icon: const Icon(Icons.palette_outlined),
+                              ),
+                              PopupMenuButton<int>(
+                                tooltip: 'Brush size',
+                                initialValue: brush,
+                                onSelected: (v) => setState(() => brush = v),
+                                itemBuilder: (_) =>
+                                    [1, 2, 3, 4, 6, 8, 12, 16, 24, 32]
+                                        .map(
+                                          (v) => PopupMenuItem(
+                                            value: v,
+                                            child: Text('$v px'),
+                                          ),
+                                        )
+                                        .toList(),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: Text('$brush px'),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                      PopupMenuButton<int>(
-                        tooltip: 'Brush size',
-                        initialValue: brush,
-                        onSelected: (v) => setState(() => brush = v),
-                        itemBuilder: (_) => [1, 2, 3, 4, 6, 8, 12, 16]
-                            .map(
-                              (v) =>
-                                  PopupMenuItem(value: v, child: Text('$v px')),
-                            )
-                            .toList(),
-                        child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Text('$brush px'),
+                      if (!hideDrawingStrips && !tightHeight) strokeOptions(),
+                      if (!hideDrawingStrips)
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: tools.entries
+                                .map(
+                                  (entry) => Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 2,
+                                    ),
+                                    child: IconButton.filledTonal(
+                                      tooltip: entry.value.$2,
+                                      isSelected: tool == entry.key,
+                                      onPressed: () => chooseTool(entry.key),
+                                      style: IconButton.styleFrom(
+                                        backgroundColor: tool == entry.key
+                                            ? Theme.of(
+                                                context,
+                                              ).colorScheme.primaryContainer
+                                            : Colors.transparent,
+                                      ),
+                                      icon: entry.key == 'eraser'
+                                          ? const EraserIcon()
+                                          : Icon(entry.value.$1),
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                          ),
                         ),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          panelButton(
+                            'layers',
+                            Icons.layers_outlined,
+                            'Layers',
+                          ),
+                          panelButton(
+                            'frames',
+                            Icons.view_carousel_outlined,
+                            'Frames',
+                          ),
+                          panelButton('tags', Icons.sell_outlined, 'Tags'),
+                          IconButton(
+                            iconSize: 32,
+                            constraints: const BoxConstraints(
+                              minWidth: 56,
+                              minHeight: 48,
+                            ),
+                            tooltip: playing
+                                ? 'Stop animation'
+                                : 'Play animation',
+                            onPressed: e.maps('frames').length > 1 && !e.busy
+                                ? play
+                                : null,
+                            icon: Icon(
+                              playing
+                                  ? Icons.pause_circle
+                                  : Icons.play_circle_outline,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
                 ),
-              if (!hideDrawingStrips)
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: tools.entries
-                        .map(
-                          (entry) => Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 2),
-                            child: IconButton.filledTonal(
-                              tooltip: entry.value.$2,
-                              isSelected: tool == entry.key,
-                              onPressed: () => chooseTool(entry.key),
-                              style: IconButton.styleFrom(
-                                backgroundColor: tool == entry.key
-                                    ? Theme.of(
-                                        context,
-                                      ).colorScheme.primaryContainer
-                                    : Colors.transparent,
-                              ),
-                              icon: Icon(entry.value.$1),
-                            ),
-                          ),
-                        )
-                        .toList(),
-                  ),
-                ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  panelButton('layers', Icons.layers_outlined, 'Layers'),
-                  panelButton('frames', Icons.view_carousel_outlined, 'Frames'),
-                  panelButton('tags', Icons.sell_outlined, 'Tags'),
-                  IconButton(
-                    tooltip: playing ? 'Stop animation' : 'Play animation',
-                    onPressed: e.maps('frames').length > 1 && !e.busy
-                        ? play
-                        : null,
-                    icon: Icon(
-                      playing ? Icons.pause_circle : Icons.play_circle_outline,
-                    ),
-                  ),
-                ],
               ),
             ],
           ),
@@ -866,56 +979,450 @@ class _EditorScreenState extends State<EditorScreen>
       ),
     );
     return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.keyZ, control: true): () {
-          if (e.canUndo && !e.busy) {
-            stop();
-            e.call('undo');
-          }
-        },
-        const SingleActivator(
-          LogicalKeyboardKey.keyZ,
-          control: true,
-          shift: true,
-        ): () {
-          if (e.canRedo && !e.busy) {
-            stop();
-            e.call('redo');
-          }
-        },
-        const SingleActivator(LogicalKeyboardKey.keyY, control: true): () {
-          if (e.canRedo && !e.busy) {
-            stop();
-            e.call('redo');
-          }
-        },
-        const SingleActivator(LogicalKeyboardKey.keyS, control: true): () {
-          if (!e.busy) {
-            stop();
-            e.call('save');
-          }
-        },
-        const SingleActivator(LogicalKeyboardKey.keyO, control: true): () {
-          if (!e.busy) open();
-        },
-        const SingleActivator(LogicalKeyboardKey.keyB): () =>
-            chooseTool('pencil'),
-        const SingleActivator(LogicalKeyboardKey.keyE): () =>
-            chooseTool('eraser'),
-        const SingleActivator(LogicalKeyboardKey.keyG): () =>
-            chooseTool('fill'),
-        const SingleActivator(LogicalKeyboardKey.keyI): () =>
-            chooseTool('eyedropper'),
-        const SingleActivator(LogicalKeyboardKey.keyH): () => chooseTool('pan'),
-      },
+      bindings: editingText
+          ? const <ShortcutActivator, VoidCallback>{}
+          : {
+              const SingleActivator(
+                LogicalKeyboardKey.keyZ,
+                control: true,
+              ): () {
+                if (e.canUndo && !e.busy) {
+                  stop();
+                  e.call('undo');
+                }
+              },
+              const SingleActivator(
+                LogicalKeyboardKey.keyZ,
+                control: true,
+                shift: true,
+              ): () {
+                if (e.canRedo && !e.busy) {
+                  stop();
+                  e.call('redo');
+                }
+              },
+              const SingleActivator(
+                LogicalKeyboardKey.keyY,
+                control: true,
+              ): () {
+                if (e.canRedo && !e.busy) {
+                  stop();
+                  e.call('redo');
+                }
+              },
+              const SingleActivator(
+                LogicalKeyboardKey.keyS,
+                control: true,
+              ): () {
+                if (!e.busy) {
+                  stop();
+                  fileAction('save');
+                }
+              },
+              const SingleActivator(
+                LogicalKeyboardKey.keyO,
+                control: true,
+              ): () {
+                if (!e.busy) open();
+              },
+              const SingleActivator(LogicalKeyboardKey.keyB): () =>
+                  chooseTool('pencil'),
+              const SingleActivator(LogicalKeyboardKey.keyE): () =>
+                  chooseTool('eraser'),
+              const SingleActivator(LogicalKeyboardKey.keyG): () =>
+                  chooseTool('fill'),
+              const SingleActivator(LogicalKeyboardKey.keyI): () =>
+                  chooseTool('eyedropper'),
+              const SingleActivator(LogicalKeyboardKey.keyH): () =>
+                  chooseTool('pan'),
+            },
       child: Focus(autofocus: true, child: view),
     );
   }
+
+  Future<bool> fileAction(String method) async {
+    stop();
+    if (!await (_tagEditorKey.currentState?.savePending() ??
+        Future.value(true))) {
+      return false;
+    }
+    return e.call(method);
+  }
+
+  String? get recoveryIssue {
+    final active = e.state['recoveryError'] as String?;
+    if (active != null) return active;
+    for (final doc in e.maps('documents')) {
+      if (doc['recoveryError'] != null) {
+        return '${doc['title']}: ${doc['recoveryError']}';
+      }
+    }
+    return null;
+  }
+
+  Widget recoveryBanner() {
+    final problem = e
+        .maps('documents')
+        .where((d) => d['recoveryError'] != null && d['active'] != true)
+        .firstOrNull;
+    return Material(
+      color: Theme.of(context).colorScheme.errorContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Row(
+          children: [
+            const Icon(Icons.warning_amber_rounded, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Recovery unavailable: $recoveryIssue. Save a copy now.',
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            TextButton(
+              onPressed: e.busy
+                  ? null
+                  : () async {
+                      if (problem != null) {
+                        if (await beforeDocumentSwitch()) {
+                          await e.call('selectDocument', {'id': problem['id']});
+                        }
+                      } else {
+                        await fileAction('saveAs');
+                      }
+                    },
+              child: Text(problem == null ? 'Save as' : 'Open drawing'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<bool> beforeDocumentSwitch() async {
+    stop();
+    if (!await (_tagEditorKey.currentState?.savePending() ??
+        Future.value(true))) {
+      return false;
+    }
+    if (!mounted) return false;
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      selectedTag = -1;
+      selectedPaletteIndex = null;
+      fitToken++;
+    });
+    return true;
+  }
+
+  Future<void> managePalette() async {
+    stop();
+    await showPaletteEditor(
+      context,
+      editor: e,
+      onSelect: (value, index) {
+        setState(() {
+          color = value;
+          selectedPaletteIndex = index;
+        });
+      },
+    );
+  }
+
+  Widget drawingCanvas() => PixelCanvas(
+    key: const Key('drawing-workspace'),
+    editor: e,
+    tool: playing ? 'pan' : tool,
+    color: color,
+    brush: brush,
+    grid: grid,
+    onion: onion,
+    fitToken: fitToken,
+    filled: filledShape,
+    mirrorX: mirrorX,
+    mirrorY: mirrorY,
+    density: sprayDensity,
+    seed: strokeSeed,
+    onPick: (value) => setState(() {
+      color = value;
+      selectedPaletteIndex = null;
+    }),
+    onStroke: stroke,
+  );
+  Widget compactBrushMenu() => PopupMenuButton<String>(
+    tooltip: 'Brush options',
+    icon: const Icon(Icons.tune),
+    onSelected: (value) async {
+      switch (value) {
+        case 'size':
+          await number('Brush size', brush, 1, 32, (n) async {
+            setState(() => brush = n);
+            return true;
+          });
+        case 'filled':
+          setState(() => filledShape = !filledShape);
+        case 'gradient':
+          setState(() => gradientFill = !gradientFill);
+        case 'secondary':
+          await colorDialog(secondary: true);
+        case 'axis':
+          setState(
+            () => gradientDirection = gradientDirection == 'vertical'
+                ? 'horizontal'
+                : 'vertical',
+          );
+        case 'density':
+          await number('Spray particles per stamp', sprayDensity, 1, 100, (
+            n,
+          ) async {
+            setState(() => sprayDensity = n);
+            return true;
+          });
+        case 'strength':
+          await number('Effect strength', effectStrength, 1, 100, (n) async {
+            setState(() => effectStrength = n);
+            return true;
+          });
+        case 'x':
+          setState(() => mirrorX = !mirrorX);
+        case 'y':
+          setState(() => mirrorY = !mirrorY);
+      }
+    },
+    itemBuilder: (_) => [
+      PopupMenuItem(value: 'size', child: Text('Brush size: $brush px')),
+      if (tool == 'rectangle' || tool == 'ellipse')
+        CheckedPopupMenuItem(
+          value: 'filled',
+          checked: filledShape,
+          child: const Text('Filled shape'),
+        ),
+      if (tool == 'fill')
+        CheckedPopupMenuItem(
+          value: 'gradient',
+          checked: gradientFill,
+          child: const Text('Gradient fill'),
+        ),
+      if (tool == 'fill' && gradientFill) ...[
+        const PopupMenuItem(
+          value: 'secondary',
+          child: Text('Second gradient color'),
+        ),
+        PopupMenuItem(
+          value: 'axis',
+          child: Text('Gradient: $gradientDirection'),
+        ),
+      ],
+      if (tool == 'spray')
+        PopupMenuItem(
+          value: 'density',
+          child: Text('Spray density: $sprayDensity'),
+        ),
+      if (tool == 'blur' || tool == 'jumble')
+        PopupMenuItem(
+          value: 'strength',
+          child: Text('Strength: $effectStrength%'),
+        ),
+      CheckedPopupMenuItem(
+        value: 'x',
+        checked: mirrorX,
+        child: const Text('Mirror X'),
+      ),
+      CheckedPopupMenuItem(
+        value: 'y',
+        checked: mirrorY,
+        child: const Text('Mirror Y'),
+      ),
+    ],
+  );
+
+  Widget strokeOptions() => SizedBox(
+    height: 48,
+    child: SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          if (tool == 'rectangle' || tool == 'ellipse')
+            TextButton.icon(
+              onPressed: () => setState(() => filledShape = !filledShape),
+              icon: Icon(filledShape ? Icons.square : Icons.crop_square),
+              label: Text(filledShape ? 'Filled' : 'Outline'),
+            ),
+          if (tool == 'fill')
+            TextButton.icon(
+              onPressed: () => setState(() => gradientFill = !gradientFill),
+              icon: Icon(
+                gradientFill ? Icons.gradient : Icons.format_color_fill,
+              ),
+              label: Text(gradientFill ? 'Gradient' : 'Solid fill'),
+            ),
+          if (tool == 'fill' && gradientFill) ...[
+            TextButton.icon(
+              onPressed: () => colorDialog(secondary: true),
+              icon: Container(
+                width: 20,
+                height: 20,
+                color: Color(secondaryColor),
+              ),
+              label: const Text('Second color'),
+            ),
+            TextButton.icon(
+              onPressed: () => setState(
+                () => gradientDirection = gradientDirection == 'vertical'
+                    ? 'horizontal'
+                    : 'vertical',
+              ),
+              icon: Icon(
+                gradientDirection == 'vertical' ? Icons.south : Icons.east,
+              ),
+              label: Text(
+                gradientDirection == 'vertical' ? 'Vertical' : 'Horizontal',
+              ),
+            ),
+          ],
+          if (tool == 'spray')
+            PopupMenuButton<int>(
+              tooltip: 'Spray density',
+              onSelected: (value) => setState(() => sprayDensity = value),
+              itemBuilder: (_) => [1, 4, 8, 12, 24, 50, 100]
+                  .map(
+                    (v) => PopupMenuItem(
+                      value: v,
+                      child: Text('$v particles per stamp'),
+                    ),
+                  )
+                  .toList(),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Text('Density $sprayDensity'),
+              ),
+            ),
+          if (tool == 'blur' || tool == 'jumble')
+            PopupMenuButton<int>(
+              tooltip: 'Effect strength',
+              onSelected: (value) => setState(() => effectStrength = value),
+              itemBuilder: (_) => [10, 25, 50, 75, 100]
+                  .map((v) => PopupMenuItem(value: v, child: Text('$v%')))
+                  .toList(),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Text('Strength $effectStrength%'),
+              ),
+            ),
+          TextButton.icon(
+            onPressed: () => setState(() => mirrorX = !mirrorX),
+            icon: Icon(
+              mirrorX ? Icons.check_box : Icons.check_box_outline_blank,
+            ),
+            label: const Text('Mirror X'),
+          ),
+          TextButton.icon(
+            onPressed: () => setState(() => mirrorY = !mirrorY),
+            icon: Icon(
+              mirrorY ? Icons.check_box : Icons.check_box_outline_blank,
+            ),
+            label: const Text('Mirror Y'),
+          ),
+        ],
+      ),
+    ),
+  );
+  Widget toolRail() => Column(
+    children: [
+      for (final entry in tools.entries)
+        IconButton.filledTonal(
+          tooltip: entry.value.$2,
+          isSelected: tool == entry.key,
+          onPressed: () => chooseTool(entry.key),
+          icon: entry.key == 'eraser'
+              ? const EraserIcon()
+              : Icon(entry.value.$1),
+        ),
+      const Divider(),
+      IconButton(
+        tooltip: 'Brush color',
+        onPressed: colorDialog,
+        icon: Container(
+          width: 24,
+          height: 24,
+          decoration: BoxDecoration(
+            color: Color(color),
+            border: Border.all(color: Colors.white70),
+          ),
+        ),
+      ),
+      IconButton(
+        tooltip: 'Manage palette and color mode',
+        onPressed: managePalette,
+        icon: const Icon(Icons.palette_outlined),
+      ),
+      PopupMenuButton<int>(
+        tooltip: 'Brush size',
+        onSelected: (value) => setState(() => brush = value),
+        itemBuilder: (_) => [
+          1,
+          2,
+          4,
+          8,
+          12,
+          16,
+          24,
+          32,
+        ].map((v) => PopupMenuItem(value: v, child: Text('$v px'))).toList(),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Text('$brush px'),
+        ),
+      ),
+      IconButton(
+        tooltip: 'Undo',
+        onPressed: e.canUndo && !e.busy ? () => e.call('undo') : null,
+        icon: const Icon(Icons.undo),
+      ),
+      IconButton(
+        tooltip: 'Redo',
+        onPressed: e.canRedo && !e.busy ? () => e.call('redo') : null,
+        icon: const Icon(Icons.redo),
+      ),
+    ],
+  );
+  Widget wideTimeline() => Column(
+    children: [
+      SizedBox(
+        height: 48,
+        child: Row(
+          children: [
+            TextButton(
+              onPressed: () => setState(() => panel = 'frames'),
+              child: const Text('Frames'),
+            ),
+            TextButton(
+              onPressed: () => setState(() => panel = 'tags'),
+              child: const Text('Tags'),
+            ),
+            const Spacer(),
+            IconButton(
+              iconSize: 32,
+              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+              tooltip: playing ? 'Stop animation' : 'Play animation',
+              onPressed: e.maps('frames').length > 1 ? play : null,
+              icon: Icon(
+                playing ? Icons.pause_circle : Icons.play_circle_outline,
+              ),
+            ),
+          ],
+        ),
+      ),
+      Expanded(child: panel == 'tags' ? tagPanel() : framePanel()),
+    ],
+  );
 
   Widget panelButton(String key, IconData icon, String label) => Expanded(
     child: TextButton(
       onPressed: () {
         stop();
+        FocusManager.instance.primaryFocus?.unfocus();
         setState(() => panel = panel == key ? null : key);
       },
       style: TextButton.styleFrom(
@@ -948,11 +1455,14 @@ class _EditorScreenState extends State<EditorScreen>
           Row(
             children: [
               const SizedBox(width: 12),
-              const Text(
-                'Layers',
-                style: TextStyle(fontWeight: FontWeight.bold),
+              const Expanded(
+                child: Text(
+                  'Layers',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
               ),
-              const Spacer(),
               IconButton(
                 tooltip: 'Add layer',
                 onPressed: e.busy
@@ -1167,123 +1677,29 @@ class _EditorScreenState extends State<EditorScreen>
     );
   }
 
-  Widget tagPanel() {
-    final tags = e.maps('tags');
-    return Material(
-      color: const Color(0xff1c2331),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Text(
-                  'Animation tags',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              TextButton(
-                onPressed: () => setState(() => selectedTag = -1),
-                child: const Text('All frames'),
-              ),
-              IconButton(
-                tooltip: 'Add animation tag',
-                onPressed: e.busy
-                    ? null
-                    : () async {
-                        final name = await input('Tag name', 'Animation');
-                        if (name == null || name.trim().isEmpty) return;
-                        final raw = await input(
-                          'Tag range',
-                          '1–${e.maps('frames').length}',
-                          hint: 'First–last frame',
-                        );
-                        if (raw == null) return;
-                        final parts = raw
-                            .split(RegExp(r'\s*[-–,]\s*'))
-                            .map(int.tryParse)
-                            .toList();
-                        if (parts.length != 2 ||
-                            parts.any((n) => n == null) ||
-                            parts[0]! < 1 ||
-                            parts[1]! < parts[0]! ||
-                            parts[1]! > e.maps('frames').length) {
-                          notice('Enter a valid first–last frame range.');
-                          return;
-                        }
-                        await edit('addTag', {
-                          'name': name,
-                          'from': parts[0]! - 1,
-                          'to': parts[1]! - 1,
-                          'direction': 0,
-                        });
-                      },
-                icon: const Icon(Icons.add),
-              ),
-            ],
-          ),
-          Expanded(
-            child: tags.isEmpty
-                ? const Center(child: Text('Add a tag to play a frame range.'))
-                : ListView.builder(
-                    itemCount: tags.length,
-                    itemBuilder: (context, index) {
-                      final t = tags[index];
-                      return ListTile(
-                        dense: true,
-                        selected: index == selectedTag,
-                        title: Text(t['name'] as String),
-                        subtitle: Text(
-                          'Frames ${(t['from'] as int) + 1}–${(t['to'] as int) + 1}',
-                        ),
-                        leading: Icon(
-                          index == selectedTag
-                              ? Icons.radio_button_checked
-                              : Icons.radio_button_off,
-                        ),
-                        onTap: () async {
-                          setState(() => selectedTag = index);
-                          await e.call('select', {'frame': t['from']});
-                        },
-                        trailing: PopupMenuButton<String>(
-                          tooltip: 'Tag options',
-                          onSelected: (value) async {
-                            if (value == 'delete') {
-                              await edit('deleteTag', {'index': index});
-                              if (mounted) setState(() => selectedTag = -1);
-                            } else {
-                              final text = await input(
-                                'Tag user data',
-                                t['text'] as String? ?? '',
-                                lines: 5,
-                              );
-                              if (text != null) {
-                                await edit('userData', {
-                                  'target': 'tag',
-                                  'index': index,
-                                  'text': text,
-                                });
-                              }
-                            }
-                          },
-                          itemBuilder: (_) => [
-                            const PopupMenuItem(
-                              value: 'data',
-                              child: Text('User data'),
-                            ),
-                            const PopupMenuItem(
-                              value: 'delete',
-                              child: Text('Delete tag'),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
+  Widget tagPanel() => VisualTagEditor(
+    key: _tagEditorKey,
+    editor: e,
+    selectedTag: selectedTag,
+    playing: playing,
+    onSelected: (index) => setState(() => selectedTag = index),
+    onEdit: edit,
+    onStop: stop,
+    onPlay: () => play(),
+    onEditingChanged: (value) {
+      if (mounted) setState(() => editingText = value);
+    },
+    onData: (index) async {
+      final tags = e.maps('tags');
+      if (index < 0 || index >= tags.length) return;
+      final text = await input(
+        'Tag user data',
+        tags[index]['text'] as String? ?? '',
+        lines: 5,
+      );
+      if (text != null) {
+        await edit('userData', {'target': 'tag', 'index': index, 'text': text});
+      }
+    },
+  );
 }

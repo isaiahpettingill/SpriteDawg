@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart' show PointerScrollEvent;
 
 import 'editor.dart';
+import 'brush_preview.dart';
 
 class PixelCanvas extends StatefulWidget {
   const PixelCanvas({
@@ -17,11 +18,18 @@ class PixelCanvas extends StatefulWidget {
     required this.fitToken,
     required this.onPick,
     required this.onStroke,
+    this.filled = false,
+    this.mirrorX = false,
+    this.mirrorY = false,
+    this.density = 12,
+    this.seed = 1,
   });
   final Editor editor;
   final String tool;
   final int color, brush, fitToken;
   final bool grid, onion;
+  final bool filled, mirrorX, mirrorY;
+  final int density, seed;
   final ValueChanged<int> onPick;
   final void Function(String, List<Offset>) onStroke;
   @override
@@ -50,7 +58,14 @@ class _PixelCanvasState extends State<PixelCanvas> {
       stroke.clear();
       if (pointers.isNotEmpty) navigating = true;
     }
-    if (old.tool != widget.tool || widget.editor.busy) {
+    if (old.tool != widget.tool ||
+        widget.editor.busy ||
+        old.color != widget.color ||
+        old.brush != widget.brush ||
+        old.filled != widget.filled ||
+        old.mirrorX != widget.mirrorX ||
+        old.mirrorY != widget.mirrorY ||
+        old.density != widget.density) {
       stroke.clear();
       if (pointers.isNotEmpty) navigating = true;
     }
@@ -177,6 +192,11 @@ class _PixelCanvasState extends State<PixelCanvas> {
               widget.tool,
               widget.color,
               widget.brush,
+              widget.filled,
+              widget.mirrorX,
+              widget.mirrorY,
+              widget.density,
+              widget.seed,
             ),
           ),
         ),
@@ -196,6 +216,11 @@ class _CanvasPainter extends CustomPainter {
     this.tool,
     this.color,
     this.brush,
+    this.filled,
+    this.mirrorX,
+    this.mirrorY,
+    this.density,
+    this.seed,
   );
   final Editor editor;
   final Offset origin;
@@ -204,6 +229,8 @@ class _CanvasPainter extends CustomPainter {
   final List<Offset> points;
   final String tool;
   final int color, brush;
+  final bool filled, mirrorX, mirrorY;
+  final int density, seed;
   @override
   void paint(Canvas canvas, Size size) {
     canvas.drawColor(const Color(0xff10141d), BlendMode.src);
@@ -260,50 +287,70 @@ class _CanvasPainter extends CustomPainter {
       );
     }
     if (points.isNotEmpty && tool != 'pan' && tool != 'eyedropper') {
-      final p = Paint()
-        ..color = tool == 'eraser' ? const Color(0x99ffffff) : Color(color)
-        ..isAntiAlias = false;
-      void dot(Offset v) => canvas.drawRect(
-        Rect.fromLTWH(
-          v.dx.floorToDouble() - (brush ~/ 2),
-          v.dy.floorToDouble() - (brush ~/ 2),
-          brush.toDouble(),
-          brush.toDouble(),
-        ),
-        p,
-      );
-      if (tool == 'rectangle' || tool == 'ellipse') {
-        final rect = Rect.fromPoints(
-          Offset(
-            points.first.dx.floorToDouble() + .5,
-            points.first.dy.floorToDouble() + .5,
-          ),
-          Offset(
-            points.last.dx.floorToDouble() + .5,
-            points.last.dy.floorToDouble() + .5,
-          ),
-        );
-        p.style = PaintingStyle.stroke;
-        p.strokeWidth = brush.toDouble();
-        if (tool == 'rectangle') {
-          canvas.drawRect(rect, p);
-        } else {
-          canvas.drawOval(rect, p);
-        }
-      } else {
-        final drawPoints = tool == 'line'
-            ? [points.first, points.last]
-            : points;
-        dot(drawPoints.first);
-        for (var n = 1; n < drawPoints.length; n++) {
-          final a = drawPoints[n - 1], b = drawPoints[n];
-          final count = math
-              .max((b.dx - a.dx).abs(), (b.dy - a.dy).abs())
-              .ceil();
-          for (var i = 0; i <= count; i++) {
-            dot(Offset.lerp(a, b, count == 0 ? 0 : i / count)!);
+      if (const {'fill', 'blur', 'jumble'}.contains(tool)) {
+        final point = tool == 'fill' ? points.first : points.last;
+        final p = Paint()
+          ..color = Colors.white
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1 / scale;
+        for (final x in [
+          point.dx.floor(),
+          if (mirrorX) editor.width - 1 - point.dx.floor(),
+        ]) {
+          for (final y in [
+            point.dy.floor(),
+            if (mirrorY) editor.height - 1 - point.dy.floor(),
+          ]) {
+            final size = tool == 'fill' ? 1 : brush;
+            canvas.drawRect(
+              Rect.fromLTWH(
+                (x - size ~/ 2).toDouble(),
+                (y - size ~/ 2).toDouble(),
+                size.toDouble(),
+                size.toDouble(),
+              ),
+              p,
+            );
           }
         }
+      } else {
+        final runs = previewStrokeRuns(
+          width: editor.width,
+          height: editor.height,
+          tool: tool,
+          points: points,
+          size: brush,
+          filled: filled,
+          mirrorX: mirrorX,
+          mirrorY: mirrorY,
+          seed: seed,
+          density: density,
+        );
+        final p = Paint()
+          ..color = tool == 'eraser' ? const Color(0x99ffffff) : Color(color)
+          ..isAntiAlias = false;
+        for (final run in runs) {
+          canvas.drawRect(run, p);
+        }
+      }
+    }
+    if (mirrorX || mirrorY) {
+      final p = Paint()
+        ..color = const Color(0x9989a7ff)
+        ..strokeWidth = 1 / scale;
+      if (mirrorX) {
+        canvas.drawLine(
+          Offset(editor.width / 2, 0),
+          Offset(editor.width / 2, editor.height.toDouble()),
+          p,
+        );
+      }
+      if (mirrorY) {
+        canvas.drawLine(
+          Offset(0, editor.height / 2),
+          Offset(editor.width.toDouble(), editor.height / 2),
+          p,
+        );
       }
     }
     if (grid && scale >= 6) {
