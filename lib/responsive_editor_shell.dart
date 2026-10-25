@@ -41,10 +41,7 @@ class ResponsiveEditorShell extends StatelessWidget {
                           children: [
                             Expanded(child: canvas),
                             const Divider(height: 1),
-                            SizedBox(
-                              height: desktop ? 260 : 240,
-                              child: timeline,
-                            ),
+                            SizedBox(height: 260, child: timeline),
                           ],
                         ),
                       ),

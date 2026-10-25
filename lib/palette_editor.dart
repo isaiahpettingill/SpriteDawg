@@ -182,8 +182,9 @@ class _PaletteEditorState extends State<PaletteEditor> {
       message = ok ? null : e.error;
       _load();
     });
-    if (ok && e.palette.isNotEmpty)
+    if (ok && e.palette.isNotEmpty) {
       widget.onSelect(e.palette[selected], selected);
+    }
   }
 
   @override

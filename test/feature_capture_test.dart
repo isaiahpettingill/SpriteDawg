@@ -104,6 +104,13 @@ void main() {
       });
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
+      expect(
+        tester.getRect(find.byKey(const Key('browse-tag'))).bottom,
+        lessThanOrEqualTo(
+          tester.getRect(find.byKey(const Key('tag-frame-strip'))).top + 1,
+        ),
+        reason: 'Pinned thumbnails must not obscure the tag range controls.',
+      );
       if (const bool.fromEnvironment('CAPTURE_UI')) {
         await tester.runAsync(() async {
           final boundary =
