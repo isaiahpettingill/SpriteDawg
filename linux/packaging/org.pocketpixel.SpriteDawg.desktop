@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=SpriteDawg
+Comment=Draw pixel art and edit Aseprite projects offline
+Exec=spritedawg
+Icon=org.pocketpixel.SpriteDawg
+Terminal=false
+Categories=Graphics;2DGraphics;
+StartupWMClass=org.pocketpixel.SpriteDawg
+X-Purism-FormFactor=Workstation;Mobile;
