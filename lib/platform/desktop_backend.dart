@@ -1,7 +1,9 @@
 import 'dart:io';
 import 'dart:typed_data';
+
 import 'package:file_selector/file_selector.dart';
 import 'package:path_provider/path_provider.dart';
+
 import '../engine/aseprite.dart';
 import '../engine/editor_engine.dart';
 import '../engine/editor_sessions.dart';
@@ -149,6 +151,7 @@ class DesktopBackend {
     final args = arguments ?? <String, dynamic>{};
     switch (method) {
       case 'thumbnails':
+      case 'previewStroke':
         return engine.invoke(method, args);
       case 'open':
       case 'openExternal':

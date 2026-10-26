@@ -39,6 +39,8 @@ class EditorEngine {
     switch (method) {
       case 'thumbnails':
         return thumbnails(args);
+      case 'previewStroke':
+        return previewStroke(args);
       case 'init':
       case 'state':
         break;
@@ -87,6 +89,22 @@ class EditorEngine {
         throw UnsupportedError('Platform adapter must handle $method');
     }
     return state();
+  }
+
+  /// Render a candidate stroke without touching document, undo or dirty state.
+  /// stroke() already clones before mutation, so the temporary engine may share
+  /// the immutable base until that point without a second deep copy.
+  Map<String, dynamic> previewStroke(Map<String, dynamic> args) {
+    final candidate = EditorEngine()
+      ..document = document
+      ..frame = frame
+      ..layer = layer;
+    candidate.stroke(args);
+    return {
+      'width': document.width,
+      'height': document.height,
+      'pixels': rgbaBytes(candidate.document.composite(frame)),
+    };
   }
 
   /// Bounded, read-only previews. Never changes the active frame or undo stack.
@@ -214,6 +232,7 @@ class EditorEngine {
         'rectangle',
         'ellipse',
         'spray',
+        'airbrush',
         'blur',
         'jumble',
       ].contains(tool),
@@ -228,7 +247,11 @@ class EditorEngine {
           points.every((p) => p.$1.abs() <= 8192 && p.$2.abs() <= 8192),
       'Stroke exceeds safe limits',
     );
-    final size = _n(a, 'size', 1).clamp(1, 32),
+    final size = _n(
+          a,
+          'size',
+          tool == 'spray' || tool == 'airbrush' ? 12 : 1,
+        ).clamp(1, 32),
         color = _n(a, 'color', 0xff000000);
     final gradient = tool == 'fill' && a['gradient'] == true,
         direction = a['gradientDirection'] ?? 'vertical';
@@ -278,18 +301,29 @@ class EditorEngine {
       final original = (effect || tool == 'fill')
           ? Uint32List.fromList(c.pixels)
           : c.pixels;
-      final covered = <int>{};
-      void pixel(int x, int y, int value) {
+      final covered = <int>{}, painted = <int>{};
+      final accumulates = tool == 'spray' || tool == 'airbrush';
+      void paint(int i, int value) {
+        // Ordinary strokes cover each pixel once, regardless of overlapping
+        // stamps or symmetry. Spraying/airbrushing intentionally builds up.
+        if (!accumulates && !painted.add(i)) return;
+        c.pixels[i] = tool == 'eraser' || d.depth == 8
+            ? value
+            : over(c.pixels[i], value);
+      }
+
+      void pixel(int x, int y, int value, [Set<int>? stamp]) {
         final xs = [x, if (mirrorX) d.width - 1 - x],
             ys = [y, if (mirrorY) d.height - 1 - y];
-        for (final yy in ys) {
-          for (final xx in xs) {
+        for (final yy in ys.toSet()) {
+          for (final xx in xs.toSet()) {
             if (xx >= 0 && yy >= 0 && xx < d.width && yy < d.height) {
               final i = (yy - c.y) * c.width + xx - c.x;
+              if (stamp != null && !stamp.add(i)) continue;
               if (effect) {
                 covered.add(i);
               } else {
-                c.pixels[i] = value;
+                paint(i, value);
               }
             }
           }
@@ -312,7 +346,45 @@ class EditorEngine {
       }
 
       void dot(int x, int y) {
-        if (tool == 'spray') {
+        if (tool == 'airbrush') {
+          final stamp = <int>{};
+          // A soft circular dab, using integer radial falloff so both engines
+          // produce identical pixels. Strength is flow per dab, not replacement.
+          final radiusSquared = size * size;
+          for (var oy = 0; oy < size; oy++) {
+            for (var ox = 0; ox < size; ox++) {
+              final dx = 2 * ox - size + 1, dy = 2 * oy - size + 1;
+              final distance = dx * dx + dy * dy;
+              if (distance >= radiusSquared) continue;
+              final alpha =
+                  ((color >> 24) * strength * (radiusSquared - distance) +
+                      radiusSquared * 50) ~/
+                  (radiusSquared * 100);
+              if (alpha == 0) continue;
+              final ink = (color & 0xffffff) | (alpha << 24);
+              final px = x - size ~/ 2 + ox, py = y - size ~/ 2 + oy;
+              if (d.depth == 8) {
+                // Quantize the blended result rather than replacing an index
+                // with a partially transparent palette entry.
+                for (final yy in {py, if (mirrorY) d.height - 1 - py}) {
+                  for (final xx in {px, if (mirrorX) d.width - 1 - px}) {
+                    if (xx < 0 || yy < 0 || xx >= d.width || yy >= d.height) {
+                      continue;
+                    }
+                    final i = (yy - c.y) * c.width + xx - c.x;
+                    if (!stamp.add(i)) continue;
+                    c.pixels[i] = d.drawingColor(
+                      over(d.display(c.pixels[i], frame, layer), ink),
+                      frame,
+                    );
+                  }
+                }
+              } else {
+                pixel(px, py, d.drawingColor(ink, frame), stamp);
+              }
+            }
+          }
+        } else if (tool == 'spray') {
           for (var i = 0; i < density; i++) {
             final ox = random() % size,
                 oy = random() % size,
@@ -426,7 +498,7 @@ class EditorEngine {
                 return d.drawingColor(rgb, frame);
               });
             }
-            c.pixels[i] = value;
+            paint(i, value);
           }
         }
       } else if ((tool == 'rectangle' || tool == 'ellipse') &&
@@ -490,7 +562,11 @@ class EditorEngine {
       } else {
         dot(first.$1, first.$2);
         for (var i = 1; i < points.length; i++) {
-          line(points[i - 1], points[i], skipFirst: tool == 'spray');
+          if (accumulates && points[i - 1] == points[i]) {
+            dot(points[i].$1, points[i].$2);
+          } else {
+            line(points[i - 1], points[i], skipFirst: true);
+          }
         }
       }
       if (tool == 'blur') {
@@ -538,20 +614,32 @@ class EditorEngine {
           c.pixels[i] = d.drawingColor(result, frame);
         }
       } else if (tool == 'jumble') {
-        final targets = covered
-                .where((_) => random() % 100 < strength)
-                .toList(),
-            values = <int>[];
-        for (final i in targets) {
-          values.add(original[i]);
-        }
-        for (var i = values.length - 1; i > 0; i--) {
-          final j = random() % (i + 1), value = values[i];
-          values[i] = values[j];
-          values[j] = value;
-        }
-        for (var i = 0; i < targets.length; i++) {
-          c.pixels[targets[i]] = values[i];
+        // Swap with a local neighbour, including just outside a one-pixel
+        // footprint. Shuffling only the covered mask made small brushes inert.
+        // Swaps preserve the raw native-index histogram and hidden RGB data.
+        for (final i in covered) {
+          if (random() % 100 >= strength) continue;
+          final x = c.x + i % c.width, y = c.y + i ~/ c.width;
+          final neighbours = <int>[];
+          for (
+            var yy = math.max(0, y - 1);
+            yy <= math.min(d.height - 1, y + 1);
+            yy++
+          ) {
+            for (
+              var xx = math.max(0, x - 1);
+              xx <= math.min(d.width - 1, x + 1);
+              xx++
+            ) {
+              final j = (yy - c.y) * c.width + xx - c.x;
+              if (j != i && c.pixels[j] != c.pixels[i]) neighbours.add(j);
+            }
+          }
+          if (neighbours.isEmpty) continue;
+          final j = neighbours[random() % neighbours.length],
+              value = c.pixels[i];
+          c.pixels[i] = c.pixels[j];
+          c.pixels[j] = value;
         }
       }
     });

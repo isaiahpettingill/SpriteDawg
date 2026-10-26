@@ -38,16 +38,30 @@ class EditorEngine {
     fun undo() { history.undo(document,validateCandidate)?.let { document = it; dirty = true; clampSelection() } }
     fun redo() { history.redo(document,validateCandidate)?.let { document = it; dirty = true; clampSelection() } }
     private fun clampSelection() { frame = frame.coerceIn(document.frames.indices); layer = layer.coerceIn(document.layers.indices) }
+    /** Disposable candidate: no active document, undo, dirty state or recovery writes. */
+    fun previewStroke(args: Map<String,Any?>): Map<String,Any?> {
+        val candidate=EditorEngine()
+        candidate.replace(document)
+        candidate.select(mapOf("frame" to frame,"layer" to layer))
+        candidate.stroke(args)
+        val pixels=candidate.document.composite(frame)
+        val bytes=ByteArray(pixels.size*4)
+        pixels.forEachIndexed { i,c ->
+            bytes[i*4]=(c ushr 16).toByte();bytes[i*4+1]=(c ushr 8).toByte()
+            bytes[i*4+2]=c.toByte();bytes[i*4+3]=(c ushr 24).toByte()
+        }
+        return mapOf("width" to document.width,"height" to document.height,"pixels" to bytes)
+    }
     fun stroke(args: Map<String, Any?>) {
         val tool = args["tool"] as? String ?: "pencil"
-        require(tool in listOf("pencil", "eraser", "fill", "line", "rectangle", "ellipse", "spray", "blur", "jumble")) { "Unknown drawing tool" }
+        require(tool in listOf("pencil", "eraser", "fill", "line", "rectangle", "ellipse", "spray", "airbrush", "blur", "jumble")) { "Unknown drawing tool" }
         val points = (args["points"] as? List<*>)?.map { p ->
             val a = p as List<*>; Pair((a[0] as Number).toInt(), (a[1] as Number).toInt())
         } ?: emptyList()
         if (points.isEmpty()) return
         require(points.size <= 100000) { "Stroke is too long" }
         require(points.all { abs(it.first.toLong()) <= 8192 && abs(it.second.toLong()) <= 8192 }) { "Stroke exceeds canvas limits" }
-        val size = args.number("size", 1).coerceIn(1, 32)
+        val size = args.number("size", if(tool == "spray" || tool == "airbrush") 12 else 1).coerceIn(1, 32)
         val color = (args["color"] as? Number)?.toLong()?.toInt() ?: 0xff000000.toInt()
         require(document.layers[layer].visible) { "Show this layer before drawing" }
         require(document.layers[layer].flags and 2 != 0) { "This layer is locked" }

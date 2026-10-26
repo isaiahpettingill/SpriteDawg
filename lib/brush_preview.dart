@@ -126,7 +126,11 @@ Uint8List previewStrokeMask({
   } else {
     dot(first.$1, first.$2);
     for (var i = 1; i < p.length; i++) {
-      line(p[i - 1], p[i], skipFirst: tool == 'spray');
+      if (tool == 'spray' && p[i - 1] == p[i]) {
+        dot(p[i].$1, p[i].$2);
+      } else {
+        line(p[i - 1], p[i], skipFirst: true);
+      }
     }
   }
   return out;

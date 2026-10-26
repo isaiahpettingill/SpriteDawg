@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+
 import 'editor.dart';
+import 'color_picker.dart';
 
 Future<void> showPaletteEditor(
   BuildContext context, {
@@ -63,9 +65,7 @@ class _PaletteEditorState extends State<PaletteEditor> {
   int? _color() {
     final value = hex.text.trim().replaceFirst('#', '');
     if (!RegExp(r'^(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$').hasMatch(value)) {
-      setState(
-        () => message = 'Enter RRGGBB or AARRGGBB, for example FF44AA88.',
-      );
+      setState(() => message = 'Use RRGGBB or AARRGGBB.');
       return null;
     }
     return int.parse(value.length == 6 ? 'FF$value' : value, radix: 16);
@@ -100,12 +100,12 @@ class _PaletteEditorState extends State<PaletteEditor> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, update) => AlertDialog(
-          title: const Text('Remove swatch safely'),
+          title: const Text('Remove swatch?'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               const Text(
-                'Pixels using this index will use the replacement. This can change their colors. Palette indices are remapped across frames; Undo restores the original.',
+                'Replace this swatch in every frame. Pixel colors may change.',
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<int>(
@@ -155,8 +155,8 @@ class _PaletteEditorState extends State<PaletteEditor> {
         title: Text(indexed ? 'Convert to RGBA?' : 'Convert to indexed?'),
         content: Text(
           indexed
-              ? 'Resolve each frame’s palette into RGBA pixels. Appearance is retained; native palette indices become colors. Undo restores indexed mode.'
-              : 'Map pixels to each frame’s palette, reserving transparency. Colors and partial alpha may be approximated. This affects the whole document and can be undone. Keep an original copy.',
+              ? 'Keep the appearance, but replace palette indices with RGBA colors.'
+              : 'Convert every frame to its palette. Colors and transparency may change. Keep an original copy.',
         ),
         actions: [
           TextButton(
@@ -212,6 +212,25 @@ class _PaletteEditorState extends State<PaletteEditor> {
                     ),
                   ),
                   IconButton(
+                    tooltip: 'Palette help',
+                    icon: const Icon(Icons.help_outline),
+                    onPressed: () => showDialog<void>(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text('Palette'),
+                        content: const Text(
+                          'Color edits affect the current frame. Moving or removing a swatch remaps indices across all frames. In indexed mode, swatches with the same color can still be different indices. Palette changes can be undone.',
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text('Close'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  IconButton(
                     tooltip: 'Close palette',
                     onPressed: () => Navigator.pop(context),
                     icon: const Icon(Icons.close),
@@ -225,12 +244,6 @@ class _PaletteEditorState extends State<PaletteEditor> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(
-                      indexed
-                          ? 'Choose an exact index, including duplicate-color swatches. Color edits affect this frame; reordering/removal remaps indices across the document.'
-                          : 'Manage the document palette or convert to native indexed editing.',
-                    ),
-                    const SizedBox(height: 12),
                     Wrap(
                       spacing: 4,
                       runSpacing: 4,
@@ -288,14 +301,43 @@ class _PaletteEditorState extends State<PaletteEditor> {
                       ],
                     ),
                     const SizedBox(height: 12),
-                    TextField(
-                      controller: hex,
-                      enabled: !e.busy,
-                      decoration: const InputDecoration(
-                        labelText: 'Color · AARRGGBB',
-                        helperText: 'AA is opacity: FF opaque, 00 transparent',
-                      ),
-                      autocorrect: false,
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: hex,
+                            enabled: !e.busy,
+                            decoration: const InputDecoration(
+                              labelText: 'Color · AARRGGBB',
+                            ),
+                            autocorrect: false,
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Choose swatch color',
+                          icon: const Icon(Icons.colorize),
+                          onPressed: e.busy
+                              ? null
+                              : () async {
+                                  final current = _color();
+                                  if (current == null) return;
+                                  final chosen = await showSpriteColorPicker(
+                                    context,
+                                    initialColor: current,
+                                    title: 'Swatch color',
+                                  );
+                                  if (chosen != null && mounted) {
+                                    setState(() {
+                                      hex.text = chosen
+                                          .toRadixString(16)
+                                          .padLeft(8, '0')
+                                          .toUpperCase();
+                                      message = null;
+                                    });
+                                  }
+                                },
+                        ),
+                      ],
                     ),
                     TextField(
                       controller: name,

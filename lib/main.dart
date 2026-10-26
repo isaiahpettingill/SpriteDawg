@@ -7,6 +7,7 @@ import 'editor.dart';
 import 'pixel_canvas.dart';
 import 'visual_tag_editor.dart';
 import 'palette_editor.dart';
+import 'color_picker.dart';
 import 'eraser_icon.dart';
 import 'document_tabs.dart';
 import 'responsive_editor_shell.dart';
@@ -73,6 +74,7 @@ class _EditorScreenState extends State<EditorScreen>
     'rectangle': (Icons.crop_square, 'Rectangle'),
     'ellipse': (Icons.circle_outlined, 'Ellipse'),
     'spray': (Icons.grain, 'Spray'),
+    'airbrush': (Icons.blur_circular, 'Airbrush'),
     'blur': (Icons.blur_on, 'Blur'),
     'jumble': (Icons.shuffle, 'Jumble'),
     'pan': (Icons.pan_tool_alt, 'Pan'),
@@ -253,7 +255,7 @@ class _EditorScreenState extends State<EditorScreen>
           builder: (context) => AlertDialog(
             title: const Text('Leave unsaved work?'),
             content: Text(
-              '$dirtyCount open ${dirtyCount == 1 ? 'drawing has' : 'drawings have'} unsaved changes. Recovery copies will be kept. Use Save to write Aseprite files.',
+              '$dirtyCount open ${dirtyCount == 1 ? 'drawing has' : 'drawings have'} unsaved changes. Recovery copies will be kept.',
             ),
             actions: [
               TextButton(
@@ -370,95 +372,11 @@ class _EditorScreenState extends State<EditorScreen>
   }
 
   Future<void> colorDialog({bool secondary = false}) async {
-    var chosen = secondary ? secondaryColor : color;
-    final controller = TextEditingController(
-      text: chosen.toRadixString(16).padLeft(8, '0').toUpperCase(),
+    final result = await showSpriteColorPicker(
+      context,
+      initialColor: secondary ? secondaryColor : color,
+      title: secondary ? 'Gradient color' : 'Brush color',
     );
-    final result = await showDialog<int>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, refresh) => AlertDialog(
-          title: const Text('Brush color'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  height: 40,
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    color: Color(chosen),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.white38),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: controller,
-                  maxLength: 8,
-                  decoration: const InputDecoration(
-                    labelText: 'AARRGGBB / RRGGBB',
-                    prefixText: '#',
-                  ),
-                  onChanged: (raw) {
-                    final hex = raw.replaceAll('#', '').trim();
-                    final n = int.tryParse(hex, radix: 16);
-                    if (n != null && (hex.length == 6 || hex.length == 8)) {
-                      refresh(
-                        () => chosen = hex.length == 6 ? n | 0xff000000 : n,
-                      );
-                    }
-                  },
-                ),
-                for (final channel in [
-                  ('Red', 16),
-                  ('Green', 8),
-                  ('Blue', 0),
-                  ('Alpha', 24),
-                ])
-                  Row(
-                    children: [
-                      SizedBox(width: 42, child: Text(channel.$1)),
-                      Expanded(
-                        child: Slider(
-                          value: ((chosen >> channel.$2) & 255).toDouble(),
-                          min: 0,
-                          max: 255,
-                          divisions: 255,
-                          onChanged: (v) => refresh(() {
-                            chosen =
-                                (chosen & ~(255 << channel.$2)) |
-                                (v.round() << channel.$2);
-                            controller.text = chosen
-                                .toRadixString(16)
-                                .padLeft(8, '0')
-                                .toUpperCase();
-                          }),
-                        ),
-                      ),
-                      SizedBox(
-                        width: 28,
-                        child: Text('${(chosen >> channel.$2) & 255}'),
-                      ),
-                    ],
-                  ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, chosen),
-              child: const Text('Use color'),
-            ),
-          ],
-        ),
-      ),
-    );
-    Future<void>.delayed(const Duration(milliseconds: 400), controller.dispose);
     if (result != null && mounted) {
       setState(() {
         if (secondary) {
@@ -471,9 +389,22 @@ class _EditorScreenState extends State<EditorScreen>
     }
   }
 
+  final _brushSizes = <String, int>{
+    'spray': 12,
+    'airbrush': 12,
+    'blur': 5,
+    'jumble': 5,
+  };
+  final _strengths = <String, int>{'airbrush': 20};
   void chooseTool(String value) {
     stop();
-    setState(() => tool = value);
+    setState(() {
+      _brushSizes[tool] = brush;
+      _strengths[tool] = effectStrength;
+      tool = value;
+      brush = _brushSizes[value] ?? 1;
+      effectStrength = _strengths[value] ?? 50;
+    });
   }
 
   Future<bool> edit(String action, [Map<String, dynamic> args = const {}]) {
@@ -484,7 +415,7 @@ class _EditorScreenState extends State<EditorScreen>
   Future<void> stroke(String value, List<Offset> points) async {
     stop();
     final seed = strokeSeed;
-    setState(() => strokeSeed = (strokeSeed + 1) & 0xffffffff);
+    strokeSeed = (strokeSeed + 1) & 0xffffffff;
     await e.call('stroke', {
       'tool': value,
       'points': points.map((p) => [p.dx.floor(), p.dy.floor()]).toList(),
@@ -617,7 +548,7 @@ class _EditorScreenState extends State<EditorScreen>
             builder: (context) => AlertDialog(
               title: const Text('Draw on the go'),
               content: const Text(
-                'One finger or stylus draws. Two fingers pan and zoom; adding a second finger cancels the pending stroke.\n\nUse Pan for one-finger navigation, and Fit to recenter. Undo works on complete strokes.\n\nSave keeps the Aseprite layers, frames and metadata. PNG exports only the current frame.\n\nYour work is kept in a private recovery file after each completed edit. No accounts, ads, or internet access.',
+                'Draw with one finger or a stylus. Pan and zoom with two fingers.\n\nSave preserves layers, frames and metadata. PNG exports the current frame.\n\nUnsaved edits are kept in recovery copies.',
               ),
               actions: [
                 TextButton(
@@ -895,7 +826,7 @@ class _EditorScreenState extends State<EditorScreen>
                                         ),
                                       ),
                                       child: Icon(
-                                        Icons.color_lens_outlined,
+                                        Icons.colorize,
                                         color:
                                             Color(color).computeLuminance() > .5
                                             ? Colors.black
@@ -1219,6 +1150,11 @@ class _EditorScreenState extends State<EditorScreen>
     mirrorY: mirrorY,
     density: sprayDensity,
     seed: strokeSeed,
+    strength: effectStrength,
+    previewOptions: {
+      if (e.state['depth'] == 8 && selectedPaletteIndex != null)
+        'paletteIndex': selectedPaletteIndex,
+    },
     onPick: (value) => setState(() {
       color = value;
       selectedPaletteIndex = null;
@@ -1294,7 +1230,7 @@ class _EditorScreenState extends State<EditorScreen>
           value: 'density',
           child: Text('Spray density: $sprayDensity'),
         ),
-      if (tool == 'blur' || tool == 'jumble')
+      if (tool == 'blur' || tool == 'jumble' || tool == 'airbrush')
         PopupMenuItem(
           value: 'strength',
           child: Text('Strength: $effectStrength%'),
@@ -1373,7 +1309,7 @@ class _EditorScreenState extends State<EditorScreen>
                 child: Text('Density $sprayDensity'),
               ),
             ),
-          if (tool == 'blur' || tool == 'jumble')
+          if (tool == 'blur' || tool == 'jumble' || tool == 'airbrush')
             PopupMenuButton<int>(
               tooltip: 'Effect strength',
               onSelected: (value) => setState(() => effectStrength = value),
