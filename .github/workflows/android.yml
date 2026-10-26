@@ -200,13 +200,14 @@ jobs:
               echo '::error::Refusing a development signing certificate.'
               exit 1
             fi
-            grep -qi 'Signer #1 certificate SHA-256 digest: 8c66b44614c82edfa120b99f05101d938dbf6afac70d2ad8c55c058c757dd296' "$RUNNER_TEMP/signer-$abi.txt"
+            grep -qi 'Signer #1 certificate SHA-256 digest: 8c66b44614c82edfa120b99f05101d938dbf6afac70d2ad8c55c058c757dd296' "$RUNNER_TEMP/signer-$abi.txt" || { echo "::error::Permanent signing certificate mismatch for $abi"; exit 1; }
             badging=$("$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk")
             grep -q "^package: name='org.pocketpixel' " <<< "$badging"
             case "$abi" in
-              armeabi-v7a) offset=1000 ;; arm64-v8a) offset=2000 ;; x86_64) offset=3000 ;;
+              armeabi-v7a) offset=1000 ;; arm64-v8a) offset=2000 ;; x86_64) offset=4000 ;;
             esac
-            grep -q "versionCode='$((build_number + offset))'" <<< "$badging"
+            grep "^package:" <<< "$badging"
+            grep -q "versionCode='$((build_number + offset))'" <<< "$badging" || { echo "::error::Unexpected ABI versionCode for $abi"; exit 1; }
             grep -q "versionName='$version'" <<< "$badging"
             if grep -q 'application-debuggable' <<< "$badging"; then
               echo '::error::Refusing a debuggable APK.'
