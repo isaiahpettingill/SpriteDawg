@@ -1,4 +1,5 @@
 import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -156,28 +157,60 @@ void main() {
     expect(strokes.single.length, greaterThan(1));
     e.dispose();
   });
-  testWidgets('Adding a second finger cancels drawing for the whole gesture', (
-    tester,
-  ) async {
-    final e = Editor();
-    var count = 0;
-    await canvas(tester, e, (_, p) => count++);
-    final center = tester.getCenter(find.byKey(const Key('pixel-canvas')));
-    final one = await tester.startGesture(center, pointer: 1);
-    await one.moveBy(const Offset(10, 0));
-    final two = await tester.startGesture(
-      center + const Offset(40, 0),
-      pointer: 2,
-    );
-    await two.moveBy(const Offset(10, 10));
-    await two.up();
-    await one.moveBy(const Offset(30, 0));
-    await one.up();
-    expect(count, 0);
-    await tester.tapAt(center);
-    expect(count, 1);
-    e.dispose();
-  });
+  testWidgets(
+    'Adding a second finger preserves the stroke and pans without drawing',
+    (tester) async {
+      final e = Editor();
+      var count = 0;
+      await canvas(tester, e, (_, p) => count++);
+      final center = tester.getCenter(find.byKey(const Key('pixel-canvas')));
+      final one = await tester.startGesture(center, pointer: 1);
+      await one.moveBy(const Offset(10, 0));
+      final two = await tester.startGesture(
+        center + const Offset(40, 0),
+        pointer: 2,
+      );
+      await two.moveBy(const Offset(10, 10));
+      await two.up();
+      await one.moveBy(const Offset(30, 0));
+      await one.up();
+      expect(count, 1);
+      await tester.tapAt(center);
+      expect(count, 2);
+      e.dispose();
+    },
+  );
+  for (final continuousTool in ['spray', 'airbrush']) {
+    testWidgets('$continuousTool accumulates while held, then stops on pan', (
+      tester,
+    ) async {
+      final e = Editor();
+      final strokes = <List<Offset>>[];
+      await canvas(
+        tester,
+        e,
+        (_, points) => strokes.add(points),
+        tool: continuousTool,
+      );
+      final center = tester.getCenter(find.byKey(const Key('pixel-canvas')));
+      final one = await tester.startGesture(center, pointer: 1);
+      await tester.pump(const Duration(milliseconds: 220));
+      final two = await tester.startGesture(
+        center + const Offset(40, 0),
+        pointer: 2,
+      );
+      expect(strokes, hasLength(1));
+      expect(strokes.single.length, greaterThanOrEqualTo(5));
+      expect(strokes.single.toSet(), hasLength(1));
+      await tester.pump(const Duration(milliseconds: 200));
+      await two.up();
+      await one.up();
+      expect(strokes, hasLength(1));
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.pumpWidget(const SizedBox());
+      e.dispose();
+    });
+  }
   testWidgets('Canceled pointer and pan never commit pixels', (tester) async {
     final e = Editor();
     var count = 0;

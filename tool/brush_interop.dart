@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:typed_data';
+
 import 'package:spritedawg/engine/editor_engine.dart';
 
 /// Generate portable output consumed by Android's cross-backend regression test.
@@ -64,6 +65,30 @@ void main(List<String> arguments) {
     'mirrorX': true,
     'mirrorY': true,
     'color': 0x80c86432,
+  });
+  run('airbrush', true, {
+    'tool': 'airbrush',
+    'points': [
+      [5, 5],
+      [5, 5],
+      [13, 15],
+    ],
+    'size': 9,
+    'strength': 20,
+    'color': 0x80c86432,
+    'mirrorX': true,
+    'mirrorY': true,
+  });
+  run('alpha', true, {
+    'tool': 'pencil',
+    'points': [
+      [5, 5],
+      [13, 15],
+      [5, 5],
+    ],
+    'size': 5,
+    'color': 0x80c86432,
+    'mirrorX': true,
   });
   run('blur', true, {
     'tool': 'blur',

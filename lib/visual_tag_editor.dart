@@ -1,6 +1,8 @@
 import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
+
 import 'editor.dart';
 
 enum _RangeTarget { browse, start, end }
@@ -614,12 +616,17 @@ class _FrameCardState extends State<_FrameCard> {
   @override
   void initState() {
     super.initState();
+    widget.editor.documentChanges.addListener(_changed);
     _load();
   }
 
   @override
   void didUpdateWidget(_FrameCard oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.editor != widget.editor) {
+      oldWidget.editor.documentChanges.removeListener(_changed);
+      widget.editor.documentChanges.addListener(_changed);
+    }
     if (oldWidget.frame != widget.frame ||
         oldWidget.editor != widget.editor ||
         _revision != widget.editor.documentRevision) {
@@ -627,18 +634,22 @@ class _FrameCardState extends State<_FrameCard> {
     }
   }
 
+  void _changed() {
+    if (_revision != widget.editor.documentRevision) _load();
+  }
+
   Future<void> _load() async {
     final request = ++_request;
     _revision = widget.editor.documentRevision;
-    _image?.dispose();
-    _image = null;
-    _loading = true;
+    // Keep the previous preview visible while its replacement is decoded.
+    _loading = _image == null;
     final image = await widget.editor.thumbnail(widget.frame);
     if (!mounted || request != _request) {
       image?.dispose();
       return;
     }
     setState(() {
+      _image?.dispose();
       _image = image;
       _loading = false;
     });
@@ -647,6 +658,7 @@ class _FrameCardState extends State<_FrameCard> {
   @override
   void dispose() {
     _request++;
+    widget.editor.documentChanges.removeListener(_changed);
     _image?.dispose();
     super.dispose();
   }

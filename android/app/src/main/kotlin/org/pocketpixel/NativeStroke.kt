@@ -2,7 +2,7 @@ package org.pocketpixel
 
 import kotlin.math.*
 
-/** One immutable source and one deduplicated destination mask per gesture. */
+/** Native pixel operations. Ordinary ink covers once; spray/airbrush accumulate per dab. */
 internal object NativeStroke {
     fun apply(d: Document, frame: Int, layer: Int, args: Map<String, Any?>, points: List<Pair<Int,Int>>, size: Int, color: Int) {
         val tool = args["tool"] as? String ?: "pencil"
@@ -15,20 +15,25 @@ internal object NativeStroke {
             else d.drawingColor(color,frame,tool=="eraser")
         val mirrorX = args["mirrorX"] == true; val mirrorY = args["mirrorY"] == true
         val mask = linkedSetOf<Int>()
+        val painted = mutableSetOf<Int>()
+        val accumulates = tool == "spray" || tool == "airbrush"
+        fun paint(i: Int, ink: Int) {
+            if (!accumulates && !painted.add(i)) return
+            cel.pixels[i] = if (tool == "eraser" || d.depth == 8) ink else over(cel.pixels[i], ink)
+        }
         var randomState = ((args["seed"] as? Number)?.toLong() ?: 1L) and 0xffffffffL
         fun next(): Long { randomState=(randomState*1664525L+1013904223L) and 0xffffffffL; return randomState ushr 16 }
         fun index(x: Int,y: Int) = (y-cel.y)*cel.width+x-cel.x
-        fun add(x: Int,y: Int) {
-            if(x in 0 until d.width && y in 0 until d.height) {
-                val i = index(x,y)
-                if (effect) mask.add(i) else cel.pixels[i] = value
+        fun pixel(x: Int,y: Int, ink: Int = value, stamp: MutableSet<Int>? = null) {
+            val xs=linkedSetOf(x); val ys=linkedSetOf(y)
+            if(mirrorX) xs.add(d.width-1-x)
+            if(mirrorY) ys.add(d.height-1-y)
+            for(py in ys) for(px in xs) {
+                if(px !in 0 until d.width || py !in 0 until d.height) continue
+                val i=index(px,py)
+                if(stamp != null && !stamp.add(i)) continue
+                if(effect) mask.add(i) else paint(i,ink)
             }
-        }
-        fun pixel(x: Int,y: Int) {
-            add(x,y)
-            if(mirrorX) add(d.width-1-x,y)
-            if(mirrorY) add(x,d.height-1-y)
-            if(mirrorX && mirrorY) add(d.width-1-x,d.height-1-y)
         }
         fun dot(x: Int,y: Int) {
             for(py in y-size/2 until y-size/2+size) for(px in x-size/2 until x-size/2+size) pixel(px,py)
@@ -78,7 +83,7 @@ internal object NativeStroke {
                 val den=end-start
                 for(n in 0 until count) {
                     val i=region[n]
-                    if(!gradient) { cel.pixels[i]=value;continue }
+                    if(!gradient) { paint(i,value);continue }
                     var position=(if(direction=="horizontal") i%cel.width+cel.x else i/cel.width+cel.y)-start
                     if(reverse) position=den-position
                     var mixed=0
@@ -87,7 +92,7 @@ internal object NativeStroke {
                         val channel=if(den==0) ca else (ca*(den-position)+cb*position+den/2)/den
                         mixed=mixed or (channel shl shift)
                     }
-                    cel.pixels[i]=d.drawingColor(mixed,frame)
+                    paint(i,d.drawingColor(mixed,frame))
                 }
             }
             return
@@ -114,6 +119,35 @@ internal object NativeStroke {
                     for(i in 1..steps) { val t=2*PI*i/steps;val p=Pair((cx+rx*cos(t)).roundToInt(),(cy+ry*sin(t)).roundToInt());line(previous,p);previous=p }
                 }
             }
+            "airbrush" -> {
+                val strength=args.strictInteger("strength",50).coerceIn(1,100)
+                fun airbrush(x: Int,y: Int) {
+                    val stamp=mutableSetOf<Int>()
+                    val radiusSquared=size*size
+                    for(oy in 0 until size) for(ox in 0 until size) {
+                        val dx=2*ox-size+1;val dy=2*oy-size+1
+                        val distance=dx*dx+dy*dy
+                        if(distance>=radiusSquared) continue
+                        val alpha=((color ushr 24)*strength*(radiusSquared-distance)+radiusSquared*50)/(radiusSquared*100)
+                        if(alpha==0) continue
+                        val ink=(color and 0xffffff) or (alpha shl 24)
+                        val px=x-size/2+ox;val py=y-size/2+oy
+                        if(d.depth==8) {
+                            val xs=linkedSetOf(px);val ys=linkedSetOf(py)
+                            if(mirrorX) xs.add(d.width-1-px)
+                            if(mirrorY) ys.add(d.height-1-py)
+                            for(yy in ys) for(xx in xs) {
+                                if(xx !in 0 until d.width || yy !in 0 until d.height) continue
+                                val i=index(xx,yy)
+                                if(!stamp.add(i)) continue
+                                cel.pixels[i]=d.drawingColor(over(d.display(cel.pixels[i],frame,layer),ink),frame)
+                            }
+                        } else pixel(px,py,d.drawingColor(ink,frame),stamp)
+                    }
+                }
+                airbrush(a.first,a.second)
+                points.zipWithNext().forEach { if(it.first==it.second) airbrush(it.second.first,it.second.second) else line(it.first,it.second,true,::airbrush) }
+            }
             "spray" -> {
                 val density=args.strictInteger("density",12).coerceIn(1,100)
                 fun spray(x: Int,y: Int) {
@@ -124,17 +158,27 @@ internal object NativeStroke {
                     }
                 }
                 spray(a.first,a.second)
-                points.zipWithNext().forEach { line(it.first,it.second,true,::spray) }
+                points.zipWithNext().forEach { if(it.first==it.second) spray(it.second.first,it.second.second) else line(it.first,it.second,true,::spray) }
             }
             else -> { dot(a.first,a.second);points.zipWithNext().forEach { line(it.first,it.second,true) } }
         }
         if(tool=="blur" || tool=="jumble") {
             val strength=args.strictInteger("strength",50).coerceIn(1,100)
             if(tool=="jumble") {
-                val eligible=mask.filter { next()%100<strength }
-                val values=eligible.map { source[it] }.toMutableList()
-                for(i in values.lastIndex downTo 1) { val j=(next()%(i+1)).toInt();val old=values[i];values[i]=values[j];values[j]=old }
-                eligible.forEachIndexed { i,target -> cel.pixels[target]=values[i] }
+                // Local swaps make even a one-pixel brush useful and preserve
+                // native palette indices, transparent pixels and the histogram.
+                for(i in mask) {
+                    if(next()%100>=strength) continue
+                    val x=i%cel.width+cel.x;val y=i/cel.width+cel.y
+                    val neighbours=mutableListOf<Int>()
+                    for(yy in max(0,y-1)..min(d.height-1,y+1)) for(xx in max(0,x-1)..min(d.width-1,x+1)) {
+                        val j=index(xx,yy)
+                        if(j!=i && cel.pixels[j]!=cel.pixels[i]) neighbours.add(j)
+                    }
+                    if(neighbours.isEmpty()) continue
+                    val j=neighbours[(next()%neighbours.size).toInt()];val old=cel.pixels[i]
+                    cel.pixels[i]=cel.pixels[j];cel.pixels[j]=old
+                }
             } else for(i in mask) {
                 val x=i%cel.width+cel.x;val y=i/cel.width+cel.y
                 var count=0;var alpha=0;val sums=LongArray(3)
@@ -155,6 +199,6 @@ internal object NativeStroke {
                 }
                 cel.pixels[i]=d.drawingColor(mixed,frame)
             }
-        } else for(i in mask) cel.pixels[i]=value
+        }
     }
 }

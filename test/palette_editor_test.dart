@@ -35,6 +35,41 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+  testWidgets('Visual swatch picker stages a change until Apply', (
+    tester,
+  ) async {
+    final calls = <Map<String, dynamic>>[];
+    final state = <String, dynamic>{
+      'palette': [0xff000000, 0xffffffff],
+      'paletteNames': ['', ''],
+      'depth': 32,
+    };
+    final e = Editor(
+      transport: (method, args) async {
+        if (method == 'edit') calls.add(args!);
+        return state;
+      },
+    )..state = state;
+    addTearDown(e.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PaletteEditor(editor: e, onSelect: (_, _) {}),
+        ),
+      ),
+    );
+    await tester.tap(find.byTooltip('Choose swatch color'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('color-hex')), '80FF0000');
+    await tester.tap(find.text('Use color'));
+    await tester.pumpAndSettle();
+    expect(calls, isEmpty);
+    await tester.tap(find.text('Apply swatch'));
+    await tester.pumpAndSettle();
+    expect(calls.single['color'], 0x80ff0000);
+    expect(calls.single['index'], 0);
+    expect(tester.takeException(), isNull);
+  });
   testWidgets('Palette uses exact index and explicit edit transaction', (
     tester,
   ) async {

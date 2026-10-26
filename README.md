@@ -9,16 +9,19 @@ MIT licensed, no ads, accounts, tracking, networking or broad Android storage pe
 ## Draw
 
 - Pencil, eraser, flood fill, eyedropper, line, outlined/filled rectangles and
-  ellipses, spray, blur, jumble and pan. The eraser has its own eraser icon.
+  ellipses, dispersed spray, soft airbrush, blur, jumble and pan. The eraser has its own eraser icon.
 - Two-color horizontal/vertical gradients stay inside the connected fill region.
   Spray has adjustable density; blur/jumble have strength controls. Random tools
   use a fixed seed per gesture, and the entire gesture is one undo step.
 - Horizontal/vertical symmetry mirrors around the canvas center. Center-line
   pixels are not applied repeatedly. In indexed mode, gradients and blur map
   results to the current palette; jumble moves native pixel indices.
-- One finger/stylus draws; two fingers pan/pinch. Adding a second finger **cancels**
-  the pending stroke, and drawing cannot resume until all fingers lift.
-- Brush size, palette, custom RGBA color, grid, previous-frame onion skin and Fit.
+- One finger/stylus draws; two fingers pan/pinch. Adding a second finger **keeps**
+  the drawn segment and switches to navigation until all fingers lift.
+- Per-tool brush sizes, visual HSV/alpha color picker, palette, grid, previous-frame onion skin and Fit.
+- Spray and airbrush build up while held. Brush effects preview the actual engine
+  result before release; the gesture remains one undo step. RGB transparency blends
+  source-over without repeatedly darkening overlapping ordinary brush stamps.
 - Undo/redo; visible/editable layer safeguards; layers, opacity and ordering.
 - Frames, duration, duplication and animation playback with direction/repeat tags.
 - Visual tag editing keeps frame thumbnails visible with the selected range and

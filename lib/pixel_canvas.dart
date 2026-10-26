@@ -1,4 +1,8 @@
 import 'dart:math' as math;
+import 'dart:async';
+import 'dart:ui' as ui;
+import 'dart:typed_data';
+import 'rgba_image.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart' show PointerScrollEvent;
@@ -23,13 +27,16 @@ class PixelCanvas extends StatefulWidget {
     this.mirrorY = false,
     this.density = 12,
     this.seed = 1,
+    this.strength = 50,
+    this.previewOptions = const {},
   });
   final Editor editor;
   final String tool;
   final int color, brush, fitToken;
   final bool grid, onion;
   final bool filled, mirrorX, mirrorY;
-  final int density, seed;
+  final int density, seed, strength;
+  final Map<String, dynamic> previewOptions;
   final ValueChanged<int> onPick;
   final void Function(String, List<Offset>) onStroke;
   @override
@@ -43,6 +50,114 @@ class _PixelCanvasState extends State<PixelCanvas> {
   Offset origin = Offset.zero;
   Size viewport = Size.zero;
   bool fitted = false, navigating = false;
+  Timer? _spraying, _previewTimer;
+  Duration _startedAt = Duration.zero;
+  ui.Image? _preview;
+  bool _previewRunning = false;
+  int _previewEpoch = 0, _pointVersion = 0;
+  bool get _usesPreview =>
+      const {'spray', 'airbrush', 'blur', 'jumble'}.contains(widget.tool);
+  void _clearPreview() {
+    _previewEpoch++;
+    _previewTimer?.cancel();
+    _previewTimer = null;
+    _preview?.dispose();
+    _preview = null;
+  }
+
+  void _schedulePreview() {
+    _pointVersion++;
+    if (!_usesPreview ||
+        stroke.isEmpty ||
+        _previewTimer != null ||
+        _previewRunning) {
+      return;
+    }
+    _previewTimer = Timer(const Duration(milliseconds: 75), _loadPreview);
+  }
+
+  Future<void> _loadPreview() async {
+    _previewTimer = null;
+    if (!mounted || stroke.isEmpty || navigating || !_usesPreview) return;
+    if (widget.editor.busy) {
+      _schedulePreview();
+      return;
+    }
+    final epoch = _previewEpoch, version = _pointVersion;
+    final width = widget.editor.width, height = widget.editor.height;
+    _previewRunning = true;
+    try {
+      final result = await widget.editor.transport('previewStroke', {
+        ...widget.previewOptions,
+        'tool': widget.tool,
+        'color': widget.color,
+        'size': widget.brush,
+        'points': stroke.map((p) => [p.dx.floor(), p.dy.floor()]).toList(),
+        'seed': _strokeSeed,
+        'density': widget.density,
+        'strength': widget.strength,
+        'mirrorX': widget.mirrorX,
+        'mirrorY': widget.mirrorY,
+      });
+      final bytes = result?['pixels'];
+      if (bytes is Uint8List && bytes.length == width * height * 4) {
+        final next = await decodeStraightRgba(
+          bytes,
+          width: width,
+          height: height,
+        );
+        if (!mounted || epoch != _previewEpoch || stroke.isEmpty) {
+          next.dispose();
+        } else {
+          setState(() {
+            _preview?.dispose();
+            _preview = next;
+          });
+        }
+      }
+    } catch (_) {
+      // Preview is optional. The authoritative commit reports any real error.
+    } finally {
+      _previewRunning = false;
+      if (mounted && (epoch != _previewEpoch || version != _pointVersion)) {
+        // A newer gesture can start while the canceled gesture's request is
+        // still in flight. Restart for that gesture even if it is held still.
+        _schedulePreview();
+      }
+    }
+  }
+
+  late int _nextSeed = widget.seed;
+  late int _strokeSeed = widget.seed;
+  bool get _continuous => const {'spray', 'airbrush'}.contains(widget.tool);
+  void _stopSpraying() {
+    _spraying?.cancel();
+    _spraying = null;
+  }
+
+  void _startSpraying() {
+    _stopSpraying();
+    if (!_continuous) return;
+    _spraying = Timer.periodic(const Duration(milliseconds: 50), (_) {
+      if (!mounted || navigating || pointers.length != 1 || stroke.isEmpty) {
+        _stopSpraying();
+        return;
+      }
+      // Repeated positions are intentional stamps, including a held pointer.
+      if (stroke.length < 10000) {
+        setState(() => stroke.add(stroke.last));
+        _schedulePreview();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _stopSpraying();
+    _clearPreview();
+    super.dispose();
+  }
+
   Offset _pixel(Offset p) => (p - origin) / scale;
   Offset get centroid =>
       pointers.values.fold(Offset.zero, (a, b) => a + b) /
@@ -55,34 +170,61 @@ class _PixelCanvasState extends State<PixelCanvas> {
     super.didUpdateWidget(old);
     if (old.fitToken != widget.fitToken) {
       fitted = false;
+      _stopSpraying();
+      _clearPreview();
       stroke.clear();
       if (pointers.isNotEmpty) navigating = true;
     }
     if (old.tool != widget.tool ||
-        widget.editor.busy ||
+        (widget.editor.busy && !widget.editor.busyDrawing) ||
         old.color != widget.color ||
         old.brush != widget.brush ||
         old.filled != widget.filled ||
         old.mirrorX != widget.mirrorX ||
         old.mirrorY != widget.mirrorY ||
-        old.density != widget.density) {
+        old.density != widget.density ||
+        old.strength != widget.strength) {
+      _stopSpraying();
+      _clearPreview();
       stroke.clear();
       if (pointers.isNotEmpty) navigating = true;
     }
   }
 
   void down(PointerDownEvent e) {
-    if (widget.editor.busy) return;
+    if (widget.editor.busy && !widget.editor.busyDrawing && pointers.isEmpty) {
+      return;
+    }
+    // A second finger switches to navigation; it must not erase the stroke
+    // already shown. Commit the existing segment exactly once before panning.
+    final pending =
+        pointers.length == 1 &&
+            !navigating &&
+            stroke.isNotEmpty &&
+            (stroke.length > 1 ||
+                e.timeStamp - _startedAt > const Duration(milliseconds: 150))
+        ? List<Offset>.of(stroke)
+        : null;
     setState(() {
       pointers[e.pointer] = e.localPosition;
       if (pointers.length > 1 || widget.tool == 'pan' || e.buttons == 2) {
+        _stopSpraying();
+        _clearPreview();
         navigating = true;
         stroke.clear();
       } else {
         navigating = false;
+        _startedAt = e.timeStamp;
         stroke = [_pixel(e.localPosition)];
+        _strokeSeed = _nextSeed;
+        _startSpraying();
+        _schedulePreview();
       }
     });
+    if (pending != null && widget.tool != 'eyedropper') {
+      _nextSeed = (_nextSeed + 1) & 0xffffffff;
+      widget.onStroke(widget.tool, pending);
+    }
   }
 
   void move(PointerMoveEvent e) {
@@ -103,13 +245,18 @@ class _PixelCanvasState extends State<PixelCanvas> {
         scale = next;
       } else {
         final p = _pixel(e.localPosition);
-        if (stroke.isEmpty || (stroke.last - p).distance >= .15) stroke.add(p);
+        if (stroke.isEmpty || (stroke.last - p).distance >= .15) {
+          stroke.add(p);
+          _schedulePreview();
+        }
       }
     });
   }
 
   void up(PointerEvent e, {bool cancel = false}) {
     if (!pointers.containsKey(e.pointer)) return;
+    _stopSpraying();
+    _clearPreview();
     final points = List<Offset>.of(stroke);
     final commit =
         !cancel && !navigating && pointers.length == 1 && points.isNotEmpty;
@@ -136,6 +283,7 @@ class _PixelCanvasState extends State<PixelCanvas> {
         );
       }
     } else {
+      _nextSeed = (_nextSeed + 1) & 0xffffffff;
       widget.onStroke(widget.tool, points);
     }
   }
@@ -180,23 +328,27 @@ class _PixelCanvasState extends State<PixelCanvas> {
               });
             }
           },
-          child: CustomPaint(
-            size: size,
-            painter: _CanvasPainter(
-              widget.editor,
-              origin,
-              scale,
-              widget.grid,
-              widget.onion,
-              stroke,
-              widget.tool,
-              widget.color,
-              widget.brush,
-              widget.filled,
-              widget.mirrorX,
-              widget.mirrorY,
-              widget.density,
-              widget.seed,
+          child: RepaintBoundary(
+            child: CustomPaint(
+              size: size,
+              painter: _CanvasPainter(
+                widget.editor,
+                origin,
+                scale,
+                widget.grid,
+                widget.onion,
+                stroke,
+                widget.tool,
+                widget.color,
+                widget.brush,
+                widget.filled,
+                widget.mirrorX,
+                widget.mirrorY,
+                widget.density,
+                _strokeSeed,
+                widget.strength,
+                _preview,
+              ),
             ),
           ),
         ),
@@ -221,8 +373,11 @@ class _CanvasPainter extends CustomPainter {
     this.mirrorY,
     this.density,
     this.seed,
-  );
+    this.strength,
+    this.preview,
+  ) : super(repaint: editor.imageChanges);
   final Editor editor;
+  final ui.Image? preview;
   final Offset origin;
   final double scale;
   final bool grid, onion;
@@ -230,7 +385,7 @@ class _CanvasPainter extends CustomPainter {
   final String tool;
   final int color, brush;
   final bool filled, mirrorX, mirrorY;
-  final int density, seed;
+  final int density, seed, strength;
   @override
   void paint(Canvas canvas, Size size) {
     canvas.drawColor(const Color(0xff10141d), BlendMode.src);
@@ -269,7 +424,7 @@ class _CanvasPainter extends CustomPainter {
         }
       }
     }
-    final image = editor.image;
+    final image = preview ?? editor.image;
     if (onion && editor.previous != null) {
       canvas.drawImage(
         editor.previous!,
@@ -286,8 +441,11 @@ class _CanvasPainter extends CustomPainter {
         Paint()..filterQuality = FilterQuality.none,
       );
     }
-    if (points.isNotEmpty && tool != 'pan' && tool != 'eyedropper') {
-      if (const {'fill', 'blur', 'jumble'}.contains(tool)) {
+    if (preview == null &&
+        points.isNotEmpty &&
+        tool != 'pan' &&
+        tool != 'eyedropper') {
+      if (const {'fill', 'blur', 'jumble', 'airbrush'}.contains(tool)) {
         final point = tool == 'fill' ? points.first : points.last;
         final p = Paint()
           ..color = Colors.white

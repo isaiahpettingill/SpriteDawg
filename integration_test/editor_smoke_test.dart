@@ -133,8 +133,15 @@ void main() {
     expect(await editor.call('state'), true);
     expect(
       editor.state['pixels'],
+      isNot(orderedEquals(beforePinch)),
+      reason: 'Adding a second pointer preserves the drawn segment.',
+    );
+
+    expect(await editor.call('undo'), true);
+    expect(
+      editor.state['pixels'],
       orderedEquals(beforePinch),
-      reason: 'Adding a second pointer must cancel the uncommitted stroke.',
+      reason: 'The preserved segment must be exactly one undo step.',
     );
 
     // Tag ranges are contiguous Aseprite ranges, equally useful for tile variants
