@@ -228,6 +228,7 @@ class EditorEngine {
         'pencil',
         'eraser',
         'fill',
+        'gradient',
         'line',
         'rectangle',
         'ellipse',
@@ -247,6 +248,8 @@ class EditorEngine {
           points.every((p) => p.$1.abs() <= 8192 && p.$2.abs() <= 8192),
       'Stroke exceeds safe limits',
     );
+    // A tap has no direction and must not create an undo entry.
+    if (tool == 'gradient' && points.first == points.last) return;
     final size = _n(
           a,
           'size',
@@ -293,6 +296,7 @@ class EditorEngine {
               d.depth == 8 &&
                   paletteIndex != null &&
                   tool != 'eraser' &&
+                  tool != 'gradient' &&
                   !gradient &&
                   tool != 'blur'
               ? paletteIndex as int
@@ -429,7 +433,38 @@ class EditorEngine {
       }
 
       final first = points.first, last = points.last;
-      if (tool == 'fill') {
+      if (tool == 'gradient') {
+        // One canvas-wide field, independent of brush size and symmetry. Use
+        // integer projection/interpolation for exact native/Dart parity.
+        final dx = last.$1 - first.$1, dy = last.$2 - first.$2;
+        final denominator = dx * dx + dy * dy;
+        for (var y = 0; y < d.height; y++) {
+          for (var x = 0; x < d.width; x++) {
+            final position = ((x - first.$1) * dx + (y - first.$2) * dy).clamp(
+              0,
+              denominator,
+            );
+            var ink = 0;
+            for (final shift in [0, 8, 16, 24]) {
+              final from = color >> shift & 255, to = secondary >> shift & 255;
+              ink |=
+                  ((from * (denominator - position) +
+                          to * position +
+                          denominator ~/ 2) ~/
+                      denominator) <<
+                  shift;
+            }
+            final i = (y - c.y) * c.width + x - c.x;
+            // Blend before indexed quantization; transparent ink is a no-op
+            // that also preserves duplicate palette indices exactly.
+            if (ink >> 24 == 0) continue;
+            c.pixels[i] = d.drawingColor(
+              over(d.display(c.pixels[i], frame, layer), ink),
+              frame,
+            );
+          }
+        }
+      } else if (tool == 'fill') {
         final seeds = <(int, int, bool, bool)>[
           (first.$1, first.$2, false, false),
           if (mirrorX) (d.width - 1 - first.$1, first.$2, true, false),

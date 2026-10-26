@@ -79,6 +79,10 @@ class CiPlanTests(unittest.TestCase):
         self.jobs[0]['conclusion'] = 'skipped'
         self.assertIsNone(self.reuse())
 
+    def test_duplicate_job_name_is_ambiguous(self):
+        self.jobs.append(deepcopy(self.jobs[0]))
+        self.assertIsNone(self.reuse())
+
     def test_missing_job_reruns(self):
         self.jobs = []
         self.assertIsNone(self.reuse())

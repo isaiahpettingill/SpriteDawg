@@ -14,14 +14,22 @@ typedef EditorTransport =
       Map<String, dynamic>? arguments,
     );
 
+typedef EditorImageDecoder =
+    Future<ui.Image> Function(
+      Uint8List pixels, {
+      required int width,
+      required int height,
+    });
+
 class Editor extends ChangeNotifier {
-  Editor({EditorTransport? transport})
+  Editor({EditorTransport? transport, this.decodeImage = decodeStraightRgba})
     : transport =
           transport ??
           (defaultTargetPlatform == TargetPlatform.linux
               ? DesktopBackend().invoke
               : _native);
   final EditorTransport transport;
+  final EditorImageDecoder decodeImage;
   static Future<Map<String, dynamic>?> _native(
     String method,
     Map<String, dynamic>? args,
@@ -44,6 +52,7 @@ class Editor extends ChangeNotifier {
   bool _disposed = false;
   String? error;
   int revision = 0;
+  String? imageOperation;
   int documentRevision = 0;
   late final FrameThumbnailCache _thumbnails = FrameThumbnailCache(transport);
   Future<ui.Image?> thumbnail(int frame) => _thumbnails.get(frame);
@@ -61,7 +70,7 @@ class Editor extends ChangeNotifier {
       (state['palette'] as List? ?? [0xff000000, 0xffffffff]).cast<int>();
   Future<ui.Image?> _decode(dynamic data) async {
     if (data is! Uint8List || data.length != width * height * 4) return null;
-    return decodeStraightRgba(data, width: width, height: height);
+    return decodeImage(data, width: width, height: height);
   }
 
   Future<bool> call(String method, [Map<String, dynamic>? args]) async {
@@ -97,6 +106,7 @@ class Editor extends ChangeNotifier {
         image = next;
         previous = prev;
         revision++;
+        imageOperation = method;
         pixelsChanged = true;
         if (!const {
           'select',

@@ -52,6 +52,17 @@ void main(List<String> arguments) {
     'secondaryColor': 0x10010203,
     'mirrorX': true,
   }, barrier: true);
+  run('linear-gradient', true, {
+    'tool': 'gradient',
+    'points': [
+      [-8192, -8192],
+      [8192, 8192],
+    ],
+    'color': 0x80ff0000,
+    'secondaryColor': 0x200000ff,
+    'mirrorX': true,
+    'size': 32,
+  });
   run('spray', false, {
     'tool': 'spray',
     'points': [

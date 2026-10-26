@@ -66,9 +66,11 @@ def reusable_run(repo, sha, tree, get=api, download=download_record):
                     or run.get('status') != 'completed' or run.get('conclusion') != 'success'):
                 continue
             jobs = get(prefix + '/actions/runs/' + str(int(run['id'])) + '/jobs?per_page=100')
-            successful = {j.get('name') for j in jobs.get('jobs', [])
-                          if j.get('status') == 'completed' and j.get('conclusion') == 'success'}
-            if not REQUIRED_JOBS <= successful:
+            named_jobs = {name: [j for j in jobs.get('jobs', []) if j.get('name') == name]
+                          for name in REQUIRED_JOBS}
+            if any(len(matches) != 1 or matches[0].get('status') != 'completed'
+                   or matches[0].get('conclusion') != 'success'
+                   for matches in named_jobs.values()):
                 continue
             artifacts = get(prefix + '/actions/runs/' + str(int(run['id'])) + '/artifacts?name=validated-tree&per_page=100')
             for artifact in artifacts.get('artifacts', []):
