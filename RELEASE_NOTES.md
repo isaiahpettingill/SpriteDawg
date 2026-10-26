@@ -10,6 +10,8 @@ SpriteDawg is now a Flutter pixel-art editor for Android and Linux, focused on d
 
 ## Drawing and animation
 
+- Long-stroke and effect previews remain visible until the committed canvas image is decoded, including when switching to two-finger navigation. The image handoff retires the matching preview atomically to avoid translucent double-paint flashes.
+
 - Touch-first pencil, eraser, fill, eyedropper, line, rectangle, and ellipse tools.
 - Two-finger pan/zoom preserves the drawn stroke segment; one-finger Pan and Fit are also available.
 - Undo/redo, brush sizes, palette and color selection, layers, opacity, animation frames and timing, tags, playback, grid, and onion skin.
