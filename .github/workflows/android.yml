@@ -1,11 +1,14 @@
 name: SpriteDawg Flutter
 on:
   push:
-    branches: ['**']
+    branches: [main]
   pull_request:
-  workflow_dispatch:
+  workflow_dispatch:  # Run every suite manually, including device and parser checks.
 permissions:
   contents: read
+concurrency:
+  group: spritedawg-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   CI: 'true'
   FLUTTER_SUPPRESS_ANALYTICS: 'true'
@@ -14,18 +17,36 @@ env:
 jobs:
   version:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     outputs:
       version: ${{ steps.plan.outputs.version }}
       build_number: ${{ steps.plan.outputs.build_number }}
       tag: ${{ steps.plan.outputs.tag }}
+      native: ${{ steps.ci.outputs.native }}
+      device: ${{ steps.ci.outputs.device }}
+      interop: ${{ steps.ci.outputs.interop }}
+      linux: ${{ steps.ci.outputs.linux }}
+      reused_run: ${{ steps.ci.outputs.reused_run }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci_plan.py >> "$GITHUB_OUTPUT"
       - id: plan
         run: python3 scripts/release-plan.py --run-number "$GITHUB_RUN_NUMBER" --format env >> "$GITHUB_OUTPUT"
       - run: python3 -m unittest discover -s scripts -p 'test_*.py'
       - run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
   test:
+    needs: [version]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
@@ -38,19 +59,32 @@ jobs:
       - run: flutter analyze
       - run: flutter test --reporter expanded
       - name: Cross-check output with independent Aseprite parser
+        if: needs.version.outputs.interop == 'true'
         run: |
           dart tool/aseprite_interop.dart
           git clone https://github.com/TheCyberRonin/ase-parser.git /tmp/spritedawg-ase-parser
           git -C /tmp/spritedawg-ase-parser checkout 550bde9ec5d3dc03571d7ea5acd9612a49c61a80
           node scripts/check-ase-parser.cjs /tmp/spritedawg-ase-parser/Aseprite.js
+      - name: Record actual tested checkout tree
+        run: python3 scripts/ci_plan.py record
+      - uses: actions/upload-artifact@v4
+        with:
+          name: validated-tree
+          path: ci-tree.json
+          retention-days: 14
+          overwrite: true
   android:
+    needs: [version]
+    if: needs.version.outputs.native == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
@@ -81,13 +115,17 @@ jobs:
           name: native-test-reports
           path: build/app/reports/
   android-interaction:
+    needs: [version]
+    if: needs.version.outputs.device == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
@@ -111,6 +149,7 @@ jobs:
           script: flutter test integration_test/editor_smoke_test.dart -d emulator-5554 --reporter expanded
   linux:
     needs: [version]
+    if: needs.version.outputs.linux == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -120,9 +159,12 @@ jobs:
           - runner: ubuntu-24.04-arm
             arch: arm64
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-12-dev
+      - name: Install missing Linux build dependencies (bounded retries)
+        timeout-minutes: 7
+        run: bash scripts/install-linux-deps.sh
       - uses: subosito/flutter-action@v2
         if: matrix.arch == 'x64'
         with:
@@ -145,7 +187,12 @@ jobs:
           path: build/spritedawg-linux-${{ matrix.arch }}.tar.gz*
 
   signed-android:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    timeout-minutes: 25
+    if: >-
+      always() && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      needs.version.result == 'success' && needs.test.result == 'success' &&
+      (needs.android.result == 'success' || (needs.version.outputs.native == 'false' && needs.android.result == 'skipped')) &&
+      (needs.android-interaction.result == 'success' || (needs.version.outputs.device == 'false' && needs.android-interaction.result == 'skipped'))
     needs: [version, test, android, android-interaction]
     runs-on: ubuntu-latest
     env:
@@ -229,7 +276,13 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    timeout-minutes: 10
+    if: >-
+      always() && !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      needs.version.result == 'success' && needs.test.result == 'success' &&
+      needs.linux.result == 'success' && needs.signed-android.result == 'success' &&
+      (needs.android.result == 'success' || (needs.version.outputs.native == 'false' && needs.android.result == 'skipped')) &&
+      (needs.android-interaction.result == 'success' || (needs.version.outputs.device == 'false' && needs.android-interaction.result == 'skipped'))
     needs: [version, test, android, android-interaction, linux, signed-android]
     runs-on: ubuntu-latest
     permissions:
