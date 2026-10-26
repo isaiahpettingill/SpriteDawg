@@ -24,7 +24,7 @@ Future<void> hostContext(WidgetTester tester, Editor editor, int token) async {
               onion: false,
               fitToken: token,
               onPick: (_) {},
-              onStroke: (_, __) async {
+              onStroke: (_, _) async {
                 await editor.call('stroke');
               },
             ),
@@ -55,7 +55,7 @@ void main() {
       },
     );
     final next = Editor(
-      transport: (_, __) async => helpers.state(Uint8List(4096)),
+      transport: (_, _) async => helpers.state(Uint8List(4096)),
     );
     await tester.runAsync(() async {
       await old.call('init');
