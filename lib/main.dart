@@ -8,7 +8,7 @@ import 'pixel_canvas.dart';
 import 'visual_tag_editor.dart';
 import 'palette_editor.dart';
 import 'color_picker.dart';
-import 'eraser_icon.dart';
+import 'tool_groups.dart';
 import 'document_tabs.dart';
 import 'responsive_editor_shell.dart';
 
@@ -69,6 +69,7 @@ class _EditorScreenState extends State<EditorScreen>
     'pencil': (Icons.edit, 'Pencil'),
     'eraser': (Icons.auto_fix_normal, 'Eraser'),
     'fill': (Icons.format_color_fill, 'Fill'),
+    'gradient': (Icons.gradient, 'Gradient'),
     'eyedropper': (Icons.colorize, 'Eyedropper'),
     'line': (Icons.show_chart, 'Line'),
     'rectangle': (Icons.crop_square, 'Rectangle'),
@@ -396,14 +397,41 @@ class _EditorScreenState extends State<EditorScreen>
     'jumble': 5,
   };
   final _strengths = <String, int>{'airbrush': 20};
+  final _groupTools = <String, String>{};
+  String get selectedSubtool =>
+      (tool == 'rectangle' || tool == 'ellipse') && filledShape
+      ? '${tool}Filled'
+      : tool;
+  List<Widget> groupedTools() => [
+    for (final entry in drawingToolGroups.entries)
+      DrawingToolGroupButton(
+        group: entry.key,
+        current: entry.value.any((t) => t.id == selectedSubtool)
+            ? selectedSubtool
+            : (_groupTools[entry.key] ?? entry.value.first.id),
+        active: entry.value.any((t) => t.id == selectedSubtool),
+        onSelected: chooseTool,
+      ),
+  ];
   void chooseTool(String value) {
     stop();
     setState(() {
       _brushSizes[tool] = brush;
       _strengths[tool] = effectStrength;
-      tool = value;
-      brush = _brushSizes[value] ?? 1;
-      effectStrength = _strengths[value] ?? 50;
+      for (final entry in drawingToolGroups.entries) {
+        if (entry.value.any((t) => t.id == selectedSubtool)) {
+          _groupTools[entry.key] = selectedSubtool;
+        }
+        if (entry.value.any((t) => t.id == value)) {
+          _groupTools[entry.key] = value;
+        }
+      }
+      if (value.startsWith('rectangle') || value.startsWith('ellipse')) {
+        filledShape = value.endsWith('Filled');
+      }
+      tool = value.replaceAll('Filled', '');
+      brush = _brushSizes[tool] ?? 1;
+      effectStrength = _strengths[tool] ?? 50;
     });
   }
 
@@ -548,7 +576,7 @@ class _EditorScreenState extends State<EditorScreen>
             builder: (context) => AlertDialog(
               title: const Text('Draw on the go'),
               content: const Text(
-                'Draw with one finger or a stylus. Pan and zoom with two fingers.\n\nSave preserves layers, frames and metadata. PNG exports the current frame.\n\nUnsaved edits are kept in recovery copies.',
+                'Draw with one finger or a stylus. Pan and zoom with two fingers. Long-hold a toolbar group for subtools. Gradient paints the whole active layer; drag from Start to End.\n\nSave preserves layers, frames and metadata. PNG exports the current frame.\n\nUnsaved edits are kept in recovery copies.',
               ),
               actions: [
                 TextButton(
@@ -742,7 +770,9 @@ class _EditorScreenState extends State<EditorScreen>
                             children: [
                               Expanded(
                                 child: Text(
-                                  '${tools[tool]!.$2} · $layerName',
+                                  tool == 'gradient'
+                                      ? 'Gradient · whole active layer'
+                                      : '${tools[tool]!.$2} · $layerName',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: Theme.of(
@@ -865,57 +895,33 @@ class _EditorScreenState extends State<EditorScreen>
                                 onPressed: e.busy ? null : managePalette,
                                 icon: const Icon(Icons.palette_outlined),
                               ),
-                              PopupMenuButton<int>(
-                                tooltip: 'Brush size',
-                                initialValue: brush,
-                                onSelected: (v) => setState(() => brush = v),
-                                itemBuilder: (_) =>
-                                    [1, 2, 3, 4, 6, 8, 12, 16, 24, 32]
-                                        .map(
-                                          (v) => PopupMenuItem(
-                                            value: v,
-                                            child: Text('$v px'),
-                                          ),
-                                        )
-                                        .toList(),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(12),
-                                  child: Text('$brush px'),
+                              if (tool != 'gradient')
+                                PopupMenuButton<int>(
+                                  tooltip: 'Brush size',
+                                  initialValue: brush,
+                                  onSelected: (v) => setState(() => brush = v),
+                                  itemBuilder: (_) =>
+                                      [1, 2, 3, 4, 6, 8, 12, 16, 24, 32]
+                                          .map(
+                                            (v) => PopupMenuItem(
+                                              value: v,
+                                              child: Text('$v px'),
+                                            ),
+                                          )
+                                          .toList(),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(12),
+                                    child: Text('$brush px'),
+                                  ),
                                 ),
-                              ),
                             ],
                           ),
                         ),
                       if (!hideDrawingStrips && !tightHeight) strokeOptions(),
                       if (!hideDrawingStrips)
-                        SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            children: tools.entries
-                                .map(
-                                  (entry) => Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 2,
-                                    ),
-                                    child: IconButton.filledTonal(
-                                      tooltip: entry.value.$2,
-                                      isSelected: tool == entry.key,
-                                      onPressed: () => chooseTool(entry.key),
-                                      style: IconButton.styleFrom(
-                                        backgroundColor: tool == entry.key
-                                            ? Theme.of(
-                                                context,
-                                              ).colorScheme.primaryContainer
-                                            : Colors.transparent,
-                                      ),
-                                      icon: entry.key == 'eraser'
-                                          ? const EraserIcon()
-                                          : Icon(entry.value.$1),
-                                    ),
-                                  ),
-                                )
-                                .toList(),
-                          ),
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          children: groupedTools(),
                         ),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -1130,6 +1136,7 @@ class _EditorScreenState extends State<EditorScreen>
     seed: strokeSeed,
     strength: effectStrength,
     previewOptions: {
+      'secondaryColor': secondaryColor,
       if (e.state['depth'] == 8 && selectedPaletteIndex != null)
         'paletteIndex': selectedPaletteIndex,
     },
@@ -1153,6 +1160,8 @@ class _EditorScreenState extends State<EditorScreen>
           setState(() => filledShape = !filledShape);
         case 'gradient':
           setState(() => gradientFill = !gradientFill);
+        case 'primary':
+          await colorDialog();
         case 'secondary':
           await colorDialog(secondary: true);
         case 'axis':
@@ -1180,7 +1189,8 @@ class _EditorScreenState extends State<EditorScreen>
       }
     },
     itemBuilder: (_) => [
-      PopupMenuItem(value: 'size', child: Text('Brush size: $brush px')),
+      if (tool != 'gradient')
+        PopupMenuItem(value: 'size', child: Text('Brush size: $brush px')),
       if (tool == 'rectangle' || tool == 'ellipse')
         CheckedPopupMenuItem(
           value: 'filled',
@@ -1193,15 +1203,18 @@ class _EditorScreenState extends State<EditorScreen>
           checked: gradientFill,
           child: const Text('Gradient fill'),
         ),
-      if (tool == 'fill' && gradientFill) ...[
+      if (tool == 'gradient')
+        const PopupMenuItem(value: 'primary', child: Text('Start color')),
+      if (tool == 'gradient' || (tool == 'fill' && gradientFill)) ...[
         const PopupMenuItem(
           value: 'secondary',
           child: Text('Second gradient color'),
         ),
-        PopupMenuItem(
-          value: 'axis',
-          child: Text('Gradient: $gradientDirection'),
-        ),
+        if (tool == 'fill')
+          PopupMenuItem(
+            value: 'axis',
+            child: Text('Gradient: $gradientDirection'),
+          ),
       ],
       if (tool == 'spray')
         PopupMenuItem(
@@ -1213,16 +1226,18 @@ class _EditorScreenState extends State<EditorScreen>
           value: 'strength',
           child: Text('Strength: $effectStrength%'),
         ),
-      CheckedPopupMenuItem(
-        value: 'x',
-        checked: mirrorX,
-        child: const Text('Mirror X'),
-      ),
-      CheckedPopupMenuItem(
-        value: 'y',
-        checked: mirrorY,
-        child: const Text('Mirror Y'),
-      ),
+      if (tool != 'gradient')
+        CheckedPopupMenuItem(
+          value: 'x',
+          checked: mirrorX,
+          child: const Text('Mirror X'),
+        ),
+      if (tool != 'gradient')
+        CheckedPopupMenuItem(
+          value: 'y',
+          checked: mirrorY,
+          child: const Text('Mirror Y'),
+        ),
     ],
   );
 
@@ -1246,30 +1261,44 @@ class _EditorScreenState extends State<EditorScreen>
               ),
               label: Text(gradientFill ? 'Gradient' : 'Solid fill'),
             ),
-          if (tool == 'fill' && gradientFill) ...[
+          if (tool == 'gradient')
+            TextButton.icon(
+              onPressed: colorDialog,
+              icon: BrushColorSwatch(color: color),
+              label: const Text('Start'),
+            ),
+          if (tool == 'gradient' || (tool == 'fill' && gradientFill)) ...[
             TextButton.icon(
               onPressed: () => colorDialog(secondary: true),
-              icon: Container(
-                width: 20,
-                height: 20,
-                color: Color(secondaryColor),
-              ),
-              label: const Text('Second color'),
+              icon: BrushColorSwatch(color: secondaryColor),
+              label: Text(tool == 'gradient' ? 'End' : 'Second color'),
             ),
-            TextButton.icon(
-              onPressed: () => setState(
-                () => gradientDirection = gradientDirection == 'vertical'
-                    ? 'horizontal'
-                    : 'vertical',
+            if (tool == 'fill')
+              TextButton.icon(
+                onPressed: () => setState(
+                  () => gradientDirection = gradientDirection == 'vertical'
+                      ? 'horizontal'
+                      : 'vertical',
+                ),
+                icon: Icon(
+                  gradientDirection == 'vertical' ? Icons.south : Icons.east,
+                ),
+                label: Text(
+                  gradientDirection == 'vertical' ? 'Vertical' : 'Horizontal',
+                ),
               ),
-              icon: Icon(
-                gradientDirection == 'vertical' ? Icons.south : Icons.east,
-              ),
-              label: Text(
-                gradientDirection == 'vertical' ? 'Vertical' : 'Horizontal',
-              ),
-            ),
           ],
+          if (tool == 'gradient')
+            IconButton(
+              tooltip: 'Swap gradient colors',
+              onPressed: () => setState(() {
+                final old = color;
+                color = secondaryColor;
+                secondaryColor = old;
+                selectedPaletteIndex = null;
+              }),
+              icon: const Icon(Icons.swap_horiz),
+            ),
           if (tool == 'spray')
             PopupMenuButton<int>(
               tooltip: 'Spray density',
@@ -1299,35 +1328,29 @@ class _EditorScreenState extends State<EditorScreen>
                 child: Text('Strength $effectStrength%'),
               ),
             ),
-          TextButton.icon(
-            onPressed: () => setState(() => mirrorX = !mirrorX),
-            icon: Icon(
-              mirrorX ? Icons.check_box : Icons.check_box_outline_blank,
+          if (tool != 'gradient')
+            TextButton.icon(
+              onPressed: () => setState(() => mirrorX = !mirrorX),
+              icon: Icon(
+                mirrorX ? Icons.check_box : Icons.check_box_outline_blank,
+              ),
+              label: const Text('Mirror X'),
             ),
-            label: const Text('Mirror X'),
-          ),
-          TextButton.icon(
-            onPressed: () => setState(() => mirrorY = !mirrorY),
-            icon: Icon(
-              mirrorY ? Icons.check_box : Icons.check_box_outline_blank,
+          if (tool != 'gradient')
+            TextButton.icon(
+              onPressed: () => setState(() => mirrorY = !mirrorY),
+              icon: Icon(
+                mirrorY ? Icons.check_box : Icons.check_box_outline_blank,
+              ),
+              label: const Text('Mirror Y'),
             ),
-            label: const Text('Mirror Y'),
-          ),
         ],
       ),
     ),
   );
   Widget toolRail() => Column(
     children: [
-      for (final entry in tools.entries)
-        IconButton.filledTonal(
-          tooltip: entry.value.$2,
-          isSelected: tool == entry.key,
-          onPressed: () => chooseTool(entry.key),
-          icon: entry.key == 'eraser'
-              ? const EraserIcon()
-              : Icon(entry.value.$1),
-        ),
+      ...groupedTools(),
       const Divider(),
       IconButton(
         tooltip: 'Brush color',
@@ -1339,24 +1362,25 @@ class _EditorScreenState extends State<EditorScreen>
         onPressed: managePalette,
         icon: const Icon(Icons.palette_outlined),
       ),
-      PopupMenuButton<int>(
-        tooltip: 'Brush size',
-        onSelected: (value) => setState(() => brush = value),
-        itemBuilder: (_) => [
-          1,
-          2,
-          4,
-          8,
-          12,
-          16,
-          24,
-          32,
-        ].map((v) => PopupMenuItem(value: v, child: Text('$v px'))).toList(),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Text('$brush px'),
+      if (tool != 'gradient')
+        PopupMenuButton<int>(
+          tooltip: 'Brush size',
+          onSelected: (value) => setState(() => brush = value),
+          itemBuilder: (_) => [
+            1,
+            2,
+            4,
+            8,
+            12,
+            16,
+            24,
+            32,
+          ].map((v) => PopupMenuItem(value: v, child: Text('$v px'))).toList(),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Text('$brush px'),
+          ),
         ),
-      ),
       IconButton(
         tooltip: 'Undo',
         onPressed: e.canUndo && !e.busy ? () => e.call('undo') : null,

@@ -11,7 +11,7 @@ internal object NativeStroke {
         val source = if (effect || tool == "fill") cel.pixels.copyOf() else cel.pixels
         val paletteIndex = if (args.containsKey("paletteIndex")) args.strictInteger("paletteIndex", -1) else null
         if (d.depth == 8 && paletteIndex != null) require(paletteIndex in d.frames[frame].palette.indices) { "Invalid palette index" }
-        val value = if (d.depth == 8 && paletteIndex != null && tool != "eraser" && tool != "blur" && !(tool == "fill" && args["gradient"] == true)) paletteIndex
+        val value = if (d.depth == 8 && paletteIndex != null && tool != "eraser" && tool != "gradient" && tool != "blur" && !(tool == "fill" && args["gradient"] == true)) paletteIndex
             else d.drawingColor(color,frame,tool=="eraser")
         val mirrorX = args["mirrorX"] == true; val mirrorY = args["mirrorY"] == true
         val mask = linkedSetOf<Int>()
@@ -52,6 +52,26 @@ internal object NativeStroke {
             }
         }
         val a=points.first();val b=points.last()
+        if(tool=="gradient") {
+            // Canvas-wide linear field: size and mirror settings do not apply.
+            val dx=(b.first-a.first).toLong();val dy=(b.second-a.second).toLong()
+            val denominator=dx*dx+dy*dy
+            if(denominator==0L) return
+            val second=(args["secondaryColor"] as? Number)?.toLong()?.toInt() ?: color
+            for(y in 0 until d.height) for(x in 0 until d.width) {
+                val position=((x-a.first)*dx+(y-a.second)*dy).coerceIn(0L,denominator)
+                var ink=0
+                for(shift in listOf(0,8,16,24)) {
+                    val from=color ushr shift and 255;val to=second ushr shift and 255
+                    val channel=(from*(denominator-position)+to*position+denominator/2)/denominator
+                    ink=ink or (channel.toInt() shl shift)
+                }
+                if(ink ushr 24==0) continue
+                val i=index(x,y)
+                cel.pixels[i]=d.drawingColor(over(d.display(cel.pixels[i],frame,layer),ink),frame)
+            }
+            return
+        }
         if(tool=="fill") {
             val gradient=args["gradient"]==true
             val second=(args["secondaryColor"] as? Number)?.toLong()?.toInt() ?: color
