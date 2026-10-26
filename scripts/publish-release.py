@@ -2,7 +2,8 @@
 """Publish verified CI artifacts without replacing tags or existing assets.
 
 Requires gh authentication via its normal environment. Never prints credentials.
-Reruns resume a draft; already-published matching releases are read-only successes.
+Reruns resume a draft; published assets stay immutable while latest metadata
+converges on the highest published stable semantic version.
 """
 import argparse
 import hashlib
@@ -73,6 +74,40 @@ def release_list(repo):
     return [release for page in pages for release in page]
 
 
+def reconcile_latest(repo):
+    """Converge concurrent publishers on maximum stable semantic version.
+
+    Every writer rechecks after its PATCH, so a stale writer repairs its own
+    update instead of leaving an older release latest. A failed request is not
+    hidden; rerunning publication safely retries only latest metadata.
+    """
+    for _ in range(20):
+        candidates = []
+        for release in release_list(repo):
+            if release['draft'] or release.get('prerelease'):
+                continue
+            try:
+                candidates.append((version(release['tag_name']), release))
+            except ValueError:
+                continue
+        if not candidates:
+            raise ValueError('No published stable release to mark latest')
+        newest = max(candidates, key=lambda item: item[0])[1]
+        try:
+            latest = api(f'repos/{repo}/releases/latest')
+        except subprocess.CalledProcessError as error:
+            # A brand-new repository can have no latest release yet. Treat only
+            # an explicit HTTP 404 as absence, never authentication/network errors.
+            if b'HTTP 404' not in (error.stderr or b''):
+                raise
+            latest = None
+        if latest and latest['id'] == newest['id']:
+            return
+        api(f'repos/{repo}/releases/{newest["id"]}', '--method', 'PATCH',
+            '-f', 'make_latest=true')
+    raise RuntimeError('Latest release did not stabilize; retry publication')
+
+
 def verify_asset(repo, asset, digest):
     remote = asset.get('digest')
     if not remote:
@@ -127,6 +162,7 @@ def publish(repo, sha, tag, assets, notes):
         remote_hashes['SHA256SUMS'] = hashlib.sha256(data).hexdigest()
         for name, asset in remote_assets.items():
             verify_asset(repo, asset, remote_hashes[name])
+        reconcile_latest(repo)
         return release['html_url']
     if len(remote_assets) != len(release['assets']) or not set(remote_assets) <= set(files):
         raise ValueError('Unexpected or duplicate remote release assets')
@@ -147,21 +183,13 @@ def publish(repo, sha, tag, assets, notes):
         commit = tag_commit(repo, tag)
         if commit is not None and commit != sha:
             raise ValueError('Tag changed before publication')
-        # Re-read release ordering. GitHub legacy ordering avoids forcing an older
-        # finishing run over a newer version if concurrent jobs race this check.
-        newer = False
-        for other in release_list(repo):
-            if other['draft'] or other.get('prerelease'):
-                continue
-            try:
-                newer |= version(other['tag_name']) > version(tag)
-            except ValueError:
-                continue
+        # Publication must never implicitly replace a newer latest release.
         api(f'repos/{repo}/releases/{release["id"]}', '--method', 'PATCH',
-            '-F', 'draft=false', '-f', f'make_latest={"false" if newer else "legacy"}')
+            '-F', 'draft=false', '-f', 'make_latest=false')
     final = api(f'repos/{repo}/releases/{release["id"]}')
     if final['draft'] or tag_commit(repo, tag) != sha:
         raise ValueError('Publication verification failed')
+    reconcile_latest(repo)
     return final['html_url']
 
 

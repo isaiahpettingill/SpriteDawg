@@ -34,16 +34,58 @@ class MainActivity : FlutterActivity() {
         get() = sessions.active.recoveryError
         set(value) { sessions.active.recoveryError=value }
     private var pendingDocument = 0
+    private val externalUris = java.util.concurrent.ConcurrentLinkedQueue<Uri>()
+    private var externalChannel: MethodChannel? = null
+    private var externalOpenError: String? = null
+    @Volatile private var externalQueueError: String? = null
+    private fun enqueueExternal(value: Intent?) {
+        if(value?.action != Intent.ACTION_VIEW) return
+        val uri=value.data ?: return
+        if(uri.scheme != "content" && uri.scheme != "file") return
+        if(externalUris.size >= 8) {
+            externalQueueError="Too many pending projects. Open the remaining files again after these finish."
+            externalChannel?.invokeMethod("pending", null)
+            return
+        }
+        externalQueueError=null
+        externalUris.add(uri)
+        val permissions=value.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        try { contentResolver.takePersistableUriPermission(uri, permissions) } catch(_: SecurityException) { }
+        externalChannel?.invokeMethod("pending", null)
+    }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        enqueueExternal(intent)
+    }
+    private fun openExternal() {
+        val uri=externalUris.poll() ?: return
+        externalOpenError=null
+        try {
+            require(sessions.documents.size < 8) { "Close a document before opening another (8 maximum)." }
+            val loaded=contentResolver.openInputStream(uri)?.use { stream ->
+                val out=java.io.ByteArrayOutputStream();val buffer=ByteArray(65536)
+                while(true) {val n=stream.read(buffer);if(n<0)break;require(out.size()+n<=Aseprite.MAX_FILE) {"File exceeds the 64 MiB safety limit"};out.write(buffer,0,n)}
+                Aseprite.read(out.toByteArray())
+            } ?: error("The provider could not read this project")
+            val opened=sessions.add(loaded, uri.lastPathSegment?.substringAfterLast('/') ?: "Opened document")
+            // VIEW commonly grants read-only access. Saving always asks for a destination.
+            opened.path=null
+            revision++
+        } catch(e: Exception) { externalOpenError="Could not open project: ${e.message}" }
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        externalChannel=MethodChannel(flutterEngine.dartExecutor.binaryMessenger,"pocketpixel/external")
+        enqueueExternal(intent)
         val files=recoveryFiles()
         files.forEach { f -> Regex("recovery-([0-9]+)\\.aseprite").matchEntire(f.name)?.groupValues?.get(1)?.toIntOrNull()?.let { sessions.nextId=maxOf(sessions.nextId,it+1) } }
         if(files.isNotEmpty()) {sessions.documents.clear();val blank=EditorSession(sessions.nextId++);sessions.configure(blank);sessions.documents.add(blank);sessions.activeId=blank.id;startupRecovery=true}
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger,"pocketpixel/editor").setMethodCallHandler(::handle)
     }
     private fun recoveryFiles() = recoveryBaseFiles(filesDir)
-    private fun state() = sessions.state(startupRecovery || recovery.baseFile.exists() || File(recovery.baseFile.path+".bak").exists())
+    private fun state() = sessions.state(startupRecovery || recovery.baseFile.exists() || File(recovery.baseFile.path+".bak").exists()) + mapOf("externalPending" to externalUris.isNotEmpty(), "externalOpenError" to (externalQueueError ?: externalOpenError))
     private fun recoverDocuments() {
         val files=recoveryFiles()
         val existing=sessions.documents.map { it.id }.toSet()
@@ -96,6 +138,7 @@ class MainActivity : FlutterActivity() {
         execute(result) {
             when(call.method) {
                 "init", "state" -> Unit
+                "openExternal" -> openExternal()
                 "thumbnails" -> return@execute editor.thumbnails(args)
                 "new" -> { sessions.add(Document.create(args.number("width",32),args.number("height",32)),unsaved=true); changed() }
                 "selectDocument" -> sessions.select(args.number("id",-1))

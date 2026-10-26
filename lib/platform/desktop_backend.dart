@@ -151,17 +151,29 @@ class DesktopBackend {
       case 'thumbnails':
         return engine.invoke(method, args);
       case 'open':
-        final chosen = await _openPath();
+      case 'openExternal':
+        final chosen = method == 'openExternal'
+            ? args['path'] as String?
+            : await _openPath();
         if (chosen == null) break;
-        final file = File(chosen);
+        if (sessions.documents.length >= 8) {
+          throw StateError(
+            'Close a document before opening another (8 maximum).',
+          );
+        }
+        final uri = Uri.tryParse(chosen);
+        if (uri != null && uri.hasScheme && uri.scheme != 'file') {
+          throw const FormatException('Only local project files can be opened');
+        }
+        final file = uri?.scheme == 'file' ? File.fromUri(uri!) : File(chosen);
         if (await file.length() > AsepriteCodec.maxFile) {
           throw const FormatException('File exceeds the 64 MiB safety limit');
         }
         final bytes = await file.readAsBytes();
         // Decode must succeed completely before changing document/path/history.
         final decoded = AsepriteCodec.decode(bytes);
-        final opened = sessions.add(decoded, title: chosen.split('/').last);
-        opened.path = chosen;
+        final opened = sessions.add(decoded, title: file.path.split('/').last);
+        opened.path = file.path;
       case 'save':
       case 'saveAs':
         var path = method == 'save' ? _path : null;

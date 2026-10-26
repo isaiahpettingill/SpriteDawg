@@ -1,0 +1,9 @@
+# Open Aseprite projects from a file manager
+
+Android registers SpriteDawg for `image/x-aseprite` and `application/x-aseprite`, and for `.aseprite`/`.ase` URI paths with no MIME type or `application/octet-stream`. Choose **Open with → SpriteDawg**. Both cold starts and subsequent VIEW intents open additional document tabs without replacing dirty work. The full Aseprite decoder validates content before adding a document. Files opened via VIEW use Save As because many providers grant read-only access. No storage-wide permission is requested.
+
+Some Android providers send only an opaque content URI and `application/octet-stream`, without a filename in the URI. Android cannot match the filename in that case; use SpriteDawg's Open picker instead. The app intentionally does not claim every binary file. Association availability is provider-dependent; physical-device validation is not claimed.
+
+Linux: extract the whole platform archive, install distribution packages `shared-mime-info` and `desktop-file-utils`, and run `./install-desktop.sh` from the extracted folder. This installs per-user desktop/MIME registration and refreshes both databases. It **does not change your default application**. Select SpriteDawg in your file manager's Open With menu; optionally choose it as the default yourself. Keep the extracted folder in place. `.aseprite` and `.ase` files use the Aseprite MIME type; `%F` passes multiple local paths safely. A running instance receives later opens through GApplication and queues them until Flutter is ready. Non-local URLs are refused, not downloaded.
+
+File content is validated, not trusted because of its extension. Existing session limits and recovery safeguards still apply. Failures show an error without replacing another document. Save important work separately; association registration is not a guarantee of every desktop/provider's file manager behavior.

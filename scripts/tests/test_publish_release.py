@@ -36,6 +36,7 @@ class PublisherTests(unittest.TestCase):
         self.commit = None
         self.calls = []
         self.others = []
+        self.latest = None
         self.patch = patch.object(publisher, 'gh', side_effect=self.fake_gh)
         self.patch.start()
         self.addCleanup(self.patch.stop)
@@ -76,11 +77,20 @@ class PublisherTests(unittest.TestCase):
         elif '/releases/assets/' in endpoint:
             asset = next(a for a in self.release['assets'] if str(a['id']) == endpoint.rsplit('/', 1)[1])
             return self.payloads[asset['name']]
-        elif endpoint.endswith('/releases/42'):
+        elif endpoint.endswith('/releases/latest'):
+            if self.latest is None:
+                raise subprocess.CalledProcessError(1, ['gh'], stderr=b'HTTP 404')
+            value = copy.deepcopy(self.latest)
+        elif '/releases/' in endpoint:
+            identifier = int(endpoint.rsplit('/', 1)[1])
+            target = next(r for r in [self.release, *self.others] if r['id'] == identifier)
             if '--method' in args:
-                self.release['draft'] = False
-                self.commit = SHA
-            value = copy.deepcopy(self.release)
+                if 'draft=false' in args:
+                    target['draft'] = False
+                    self.commit = SHA
+                if 'make_latest=true' in args:
+                    self.latest = target
+            value = copy.deepcopy(target)
         else:
             raise AssertionError(args)
         return json.dumps(value)
@@ -92,7 +102,8 @@ class PublisherTests(unittest.TestCase):
         self.assertIn(TAG, self.publish())
         self.assertEqual(len(self.release['assets']), 6)
         self.assertFalse(self.release['draft'])
-        self.assertTrue(any('make_latest=legacy' in c for c in self.calls))
+        self.assertTrue(any('make_latest=false' in c for c in self.calls))
+        self.assertEqual(self.latest['id'], self.release['id'])
         self.assertFalse(any('--clobber' in c for c in self.calls))
 
     def test_partial_draft_resumes_only_missing(self):
@@ -106,6 +117,7 @@ class PublisherTests(unittest.TestCase):
     def test_published_rerun_uses_remote_manifest_and_never_mutates(self):
         self.make_release(draft=False, names=self.files)
         self.commit = SHA
+        self.latest = self.release
         next(p for n, p in self.files.items() if n.endswith('.apk')).write_bytes(b'rebuilt bytes')
         self.write_manifest()
         self.publish()
@@ -132,9 +144,43 @@ class PublisherTests(unittest.TestCase):
         self.assertFalse(any(c[0] == 'release' for c in self.calls))
 
     def test_older_release_does_not_become_latest(self):
-        self.others = [{'tag_name': 'v0.3.26', 'draft': False, 'prerelease': False}]
+        self.others = [{'id': 99, 'tag_name': 'v0.3.26', 'draft': False, 'prerelease': False}]
+        self.latest = self.others[0]
         self.publish()
         self.assertTrue(any('make_latest=false' in c for c in self.calls))
+        self.assertEqual(self.latest['id'], 99)
+
+    def test_concurrent_newer_publication_repairs_stale_latest_write(self):
+        original = self.fake_gh
+        inserted = False
+        def interleaved(*args, **kwargs):
+            nonlocal inserted
+            if 'make_latest=true' in args and not inserted:
+                # A newer run publishes between this run's read and stale PATCH.
+                self.others = [{'id': 99, 'tag_name': 'v0.3.26',
+                                'draft': False, 'prerelease': False}]
+                self.latest = self.others[0]
+                inserted = True
+            return original(*args, **kwargs)
+        with patch.object(publisher, 'gh', side_effect=interleaved):
+            self.publish()
+        self.assertEqual(self.latest['id'], 99)
+        writes = [c[1] for c in self.calls if 'make_latest=true' in c]
+        self.assertEqual(writes, [f'repos/{REPO}/releases/42', f'repos/{REPO}/releases/99'])
+
+    def test_published_retry_repairs_latest_metadata_only(self):
+        self.make_release(draft=False, names=self.files)
+        self.commit = SHA
+        self.others = [{'id': 99, 'tag_name': 'v0.3.24',
+                        'draft': False, 'prerelease': False}]
+        self.latest = self.others[0]
+        self.publish()
+        self.assertEqual(self.latest['id'], 42)
+        self.assertFalse(any(c[0] == 'release' for c in self.calls))
+        writes = [c for c in self.calls if '--method' in c]
+        self.assertEqual(len(writes), 1)
+        self.assertIn('make_latest=true', writes[0])
+        self.assertNotIn('draft=false', writes[0])
 
     def test_api_failure_is_not_interpreted_as_absent(self):
         with patch.object(publisher, 'gh', side_effect=subprocess.CalledProcessError(1, ['gh'])):
