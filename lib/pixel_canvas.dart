@@ -38,7 +38,7 @@ class PixelCanvas extends StatefulWidget {
   final int density, seed, strength;
   final Map<String, dynamic> previewOptions;
   final ValueChanged<int> onPick;
-  final void Function(String, List<Offset>) onStroke;
+  final FutureOr<void> Function(String, List<Offset>) onStroke;
   @override
   State<PixelCanvas> createState() => _PixelCanvasState();
 }
@@ -53,6 +53,77 @@ class _PixelCanvasState extends State<PixelCanvas> {
   Timer? _spraying, _previewTimer;
   Duration _startedAt = Duration.zero;
   ui.Image? _preview;
+  final List<_CanvasPainter> _committing = [];
+
+  @override
+  void initState() {
+    super.initState();
+    widget.editor.imageChanges.addListener(_imageReady);
+  }
+
+  void _imageReady() {
+    // Retire the matching visual synchronously with the decoded image swap,
+    // before the painter sees it. Waiting for the callback Future alone can
+    // leave one frame with both the committed pixels and their alpha overlay.
+    if (widget.editor.imageOperation == 'stroke') {
+      if (_committing.isNotEmpty) {
+        _committing.removeAt(0).preview?.dispose();
+      }
+    } else {
+      _clearCommitting();
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _clearCommitting() {
+    for (final visual in _committing) {
+      visual.preview?.dispose();
+    }
+    _committing.clear();
+  }
+
+  _CanvasPainter _visual(List<Offset> points, ui.Image? preview) =>
+      _CanvasPainter(
+        widget.editor,
+        origin,
+        scale,
+        widget.grid,
+        widget.onion,
+        points,
+        widget.tool,
+        widget.color,
+        widget.brush,
+        widget.filled,
+        widget.mirrorX,
+        widget.mirrorY,
+        widget.density,
+        _strokeSeed,
+        widget.strength,
+        preview,
+      );
+
+  void _commit(List<Offset> points) {
+    // Transfer ownership of the live preview to a retained commit visual.
+    // Removing it at pointer-up exposes the previous image while the backend
+    // and RGBA decoder are still busy, especially for long strokes.
+    final visual = _visual(points, _preview);
+    _preview = null;
+    _clearPreview();
+    _committing.add(visual);
+    _nextSeed = (_nextSeed + 1) & 0xffffffff;
+    void finish() {
+      if (_committing.remove(visual)) {
+        visual.preview?.dispose();
+        if (mounted) setState(() {});
+      }
+    }
+
+    Future<void>.sync(() => widget.onStroke(visual.tool, points)).then(
+      (_) => finish(),
+      onError: (Object error, StackTrace stack) => finish(),
+    );
+  }
+
   bool _previewRunning = false;
   int _previewEpoch = 0, _pointVersion = 0;
   bool get _usesPreview =>
@@ -153,8 +224,10 @@ class _PixelCanvasState extends State<PixelCanvas> {
 
   @override
   void dispose() {
+    widget.editor.imageChanges.removeListener(_imageReady);
     _stopSpraying();
     _clearPreview();
+    _clearCommitting();
     super.dispose();
   }
 
@@ -168,12 +241,21 @@ class _PixelCanvasState extends State<PixelCanvas> {
   @override
   void didUpdateWidget(PixelCanvas old) {
     super.didUpdateWidget(old);
+    if (!identical(old.editor, widget.editor)) {
+      old.editor.imageChanges.removeListener(_imageReady);
+      widget.editor.imageChanges.addListener(_imageReady);
+    }
     if (old.fitToken != widget.fitToken) {
+      _clearCommitting();
       fitted = false;
       _stopSpraying();
       _clearPreview();
       stroke.clear();
       if (pointers.isNotEmpty) navigating = true;
+    }
+    if (!identical(old.editor, widget.editor) ||
+        (widget.editor.busy && !widget.editor.busyDrawing)) {
+      _clearCommitting();
     }
     if (old.tool != widget.tool ||
         (widget.editor.busy && !widget.editor.busyDrawing) ||
@@ -205,6 +287,7 @@ class _PixelCanvasState extends State<PixelCanvas> {
                 e.timeStamp - _startedAt > const Duration(milliseconds: 150))
         ? List<Offset>.of(stroke)
         : null;
+    if (pending != null && widget.tool != 'eyedropper') _commit(pending);
     setState(() {
       pointers[e.pointer] = e.localPosition;
       if (pointers.length > 1 || widget.tool == 'pan' || e.buttons == 2) {
@@ -221,10 +304,6 @@ class _PixelCanvasState extends State<PixelCanvas> {
         _schedulePreview();
       }
     });
-    if (pending != null && widget.tool != 'eyedropper') {
-      _nextSeed = (_nextSeed + 1) & 0xffffffff;
-      widget.onStroke(widget.tool, pending);
-    }
   }
 
   void move(PointerMoveEvent e) {
@@ -256,10 +335,14 @@ class _PixelCanvasState extends State<PixelCanvas> {
   void up(PointerEvent e, {bool cancel = false}) {
     if (!pointers.containsKey(e.pointer)) return;
     _stopSpraying();
-    _clearPreview();
     final points = List<Offset>.of(stroke);
     final commit =
         !cancel && !navigating && pointers.length == 1 && points.isNotEmpty;
+    if (commit && widget.tool != 'eyedropper') {
+      _commit(points);
+    } else {
+      _clearPreview();
+    }
     setState(() {
       pointers.remove(e.pointer);
       stroke.clear();
@@ -282,9 +365,6 @@ class _PixelCanvasState extends State<PixelCanvas> {
               bytes[i + 2],
         );
       }
-    } else {
-      _nextSeed = (_nextSeed + 1) & 0xffffffff;
-      widget.onStroke(widget.tool, points);
     }
   }
 
@@ -348,6 +428,7 @@ class _PixelCanvasState extends State<PixelCanvas> {
                 _strokeSeed,
                 widget.strength,
                 _preview,
+                committing: _committing,
               ),
             ),
           ),
@@ -374,10 +455,12 @@ class _CanvasPainter extends CustomPainter {
     this.density,
     this.seed,
     this.strength,
-    this.preview,
-  ) : super(repaint: editor.imageChanges);
+    this.preview, {
+    this.committing = const [],
+  }) : super(repaint: editor.imageChanges);
   final Editor editor;
   final ui.Image? preview;
+  final List<_CanvasPainter> committing;
   final Offset origin;
   final double scale;
   final bool grid, onion;
@@ -424,7 +507,7 @@ class _CanvasPainter extends CustomPainter {
         }
       }
     }
-    final image = preview ?? editor.image;
+    final image = editor.image;
     if (onion && editor.previous != null) {
       canvas.drawImage(
         editor.previous!,
@@ -434,11 +517,82 @@ class _CanvasPainter extends CustomPainter {
           ..color = const Color(0x55ffffff),
       );
     }
+    canvas.saveLayer(bounds, Paint());
     if (image != null) {
       canvas.drawImage(
         image,
         Offset.zero,
         Paint()..filterQuality = FilterQuality.none,
+      );
+    }
+    for (final visual in committing) {
+      visual.paintStroke(canvas);
+    }
+    paintStroke(canvas);
+    canvas.restore();
+    if (mirrorX || mirrorY) {
+      final p = Paint()
+        ..color = const Color(0x9989a7ff)
+        ..strokeWidth = 1 / scale;
+      if (mirrorX) {
+        canvas.drawLine(
+          Offset(editor.width / 2, 0),
+          Offset(editor.width / 2, editor.height.toDouble()),
+          p,
+        );
+      }
+      if (mirrorY) {
+        canvas.drawLine(
+          Offset(0, editor.height / 2),
+          Offset(editor.width.toDouble(), editor.height / 2),
+          p,
+        );
+      }
+    }
+    if (grid && scale >= 6) {
+      final p = Paint()
+        ..color = const Color(0x44000000)
+        ..strokeWidth = 1 / scale;
+      for (var x = 0; x <= editor.width; x++) {
+        canvas.drawLine(
+          Offset(x.toDouble(), 0),
+          Offset(x.toDouble(), editor.height.toDouble()),
+          p,
+        );
+      }
+      for (var y = 0; y <= editor.height; y++) {
+        canvas.drawLine(
+          Offset(0, y.toDouble()),
+          Offset(editor.width.toDouble(), y.toDouble()),
+          p,
+        );
+      }
+    }
+    canvas.restore();
+    canvas.drawRect(
+      Rect.fromLTWH(
+        origin.dx,
+        origin.dy,
+        bounds.width * scale,
+        bounds.height * scale,
+      ),
+      Paint()
+        ..color = const Color(0xff596277)
+        ..style = PaintingStyle.stroke,
+    );
+  }
+
+  void paintStroke(Canvas canvas) {
+    if (preview != null) {
+      // Effect previews contain the complete composited frame, including its
+      // transparency. Replace the prior frame rather than alpha-blending it
+      // twice. The checkerboard remains outside this isolated pixel layer.
+      canvas.drawImage(
+        preview!,
+        Offset.zero,
+        Paint()
+          ..filterQuality = FilterQuality.none
+          ..blendMode = BlendMode.src,
       );
     }
     if (preview == null &&
@@ -492,56 +646,6 @@ class _CanvasPainter extends CustomPainter {
         }
       }
     }
-    if (mirrorX || mirrorY) {
-      final p = Paint()
-        ..color = const Color(0x9989a7ff)
-        ..strokeWidth = 1 / scale;
-      if (mirrorX) {
-        canvas.drawLine(
-          Offset(editor.width / 2, 0),
-          Offset(editor.width / 2, editor.height.toDouble()),
-          p,
-        );
-      }
-      if (mirrorY) {
-        canvas.drawLine(
-          Offset(0, editor.height / 2),
-          Offset(editor.width.toDouble(), editor.height / 2),
-          p,
-        );
-      }
-    }
-    if (grid && scale >= 6) {
-      final p = Paint()
-        ..color = const Color(0x44000000)
-        ..strokeWidth = 1 / scale;
-      for (var x = 0; x <= editor.width; x++) {
-        canvas.drawLine(
-          Offset(x.toDouble(), 0),
-          Offset(x.toDouble(), editor.height.toDouble()),
-          p,
-        );
-      }
-      for (var y = 0; y <= editor.height; y++) {
-        canvas.drawLine(
-          Offset(0, y.toDouble()),
-          Offset(editor.width.toDouble(), y.toDouble()),
-          p,
-        );
-      }
-    }
-    canvas.restore();
-    canvas.drawRect(
-      Rect.fromLTWH(
-        origin.dx,
-        origin.dy,
-        bounds.width * scale,
-        bounds.height * scale,
-      ),
-      Paint()
-        ..color = const Color(0xff596277)
-        ..style = PaintingStyle.stroke,
-    );
   }
 
   @override
