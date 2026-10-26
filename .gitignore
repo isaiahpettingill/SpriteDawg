@@ -46,3 +46,6 @@ linux/flutter/ephemeral/
 # Test-only upstream Aseprite assets (download and hash verify with scripts/fetch-fixtures.py)
 app/src/test/resources/upstream/
 android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
+
+# Python release tooling caches
+__pycache__/

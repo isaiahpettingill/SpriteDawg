@@ -1,4 +1,4 @@
-# SpriteDawg 0.2.0
+# SpriteDawg 0.3 — visual tags and multi-document workspaces
 
 SpriteDawg is now a Flutter pixel-art editor for Android and Linux, focused on drawing on the go. Free, open source, offline: no accounts, ads, analytics, or Android internet permission.
 
@@ -26,4 +26,14 @@ Extract the entire Linux archive and run `spritedawg` from its extracted directo
 
 The release is gated on Flutter tests/analyzer, native codec/interoperability tests and lint, Android emulator interaction tests, Linux builds on both architectures, and verified production signing. See the repository's compatibility documentation for format limits; this is not complete Aseprite desktop feature parity.
 
-Maintainers publish only through a matching version tag or an explicitly marked `[release]` merge commit on `main`. Ordinary pushes do not publish. The workflow requires the existing permanent Android signing configuration and all platform checks before creating release assets.
+## New in the 0.3 series
+
+- See frame thumbnails while tagging, adjust ranges/rename inline, duplicate tags, and choose static variant browsing or animation playback.
+- Open up to eight documents with independent undo/save/recovery; copy whole tagged frame sections between compatible documents, or paste as a new document without lossy conversion.
+- Roomier desktop/tablet workspace and larger play/pause controls.
+- Filled rectangles/ellipses, two-color gradient flood fill, spray, alpha-aware blur, jumble, and horizontal/vertical symmetry.
+- Indexed conversion and named palette swatches with exact index selection, add/edit/reorder/remove with explicit remapping and undo.
+
+Tags remain contiguous Aseprite tags. Clipboard copies one selected tag, not overlapping tags. Mismatched canvas/depth/layer schemas are refused rather than silently converted. Physical Pixel/GrapheneOS/Linux phone validation is not claimed.
+
+Every successful trusted push/merge to main now publishes automatically after all checks, Linux builds, and permanent-signature verification pass. No commit marker is needed. Version names use the release series plus the immutable workflow run number; retries reuse the same tag. Existing tags/assets are never overwritten. PR and tag pushes cannot publish.
