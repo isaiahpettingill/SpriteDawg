@@ -95,6 +95,8 @@ void main() {
   });
   test('add adds common index retaining perframe palettes', () {
     final e = indexed();
+    final before = e.encode();
+    final pixels = [for (var f = 0; f < 2; f++) e.document.composite(f)];
     e.invoke('edit', {
       'action': 'paletteAdd',
       'color': 0x80445566,
@@ -103,6 +105,14 @@ void main() {
     expect(e.document.frames[0].palette[3], 0x80445566);
     expect(e.document.frames[1].palette[1], 0xff0000ff);
     expect(AsepriteCodec.decode(e.encode()).frames[1].paletteNames[3], 'glow');
+    for (var f = 0; f < 2; f++) {
+      expect(e.document.composite(f), pixels[f]);
+      expect(AsepriteCodec.decode(e.encode()).composite(f), pixels[f]);
+    }
+    e.invoke('undo');
+    expect(e.encode(), before);
+    e.invoke('redo');
+    expect(e.document.frames[0].palette[3], 0x80445566);
   });
   test(
     'remove requires explicit nontransparent replacement and remaps linked data',

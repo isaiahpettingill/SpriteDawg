@@ -808,34 +808,10 @@ class _EditorScreenState extends State<EditorScreen>
                           height: 50,
                           child: Row(
                             children: [
-                              Padding(
-                                padding: const EdgeInsets.only(left: 8),
-                                child: Tooltip(
-                                  message: 'Custom brush color',
-                                  child: InkWell(
-                                    onTap: colorDialog,
-                                    child: Container(
-                                      width: 40,
-                                      height: 36,
-                                      decoration: BoxDecoration(
-                                        color: Color(color),
-                                        borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(
-                                          color: Colors.white70,
-                                          width: 2,
-                                        ),
-                                      ),
-                                      child: Icon(
-                                        Icons.colorize,
-                                        color:
-                                            Color(color).computeLuminance() > .5
-                                            ? Colors.black
-                                            : Colors.white,
-                                        size: 20,
-                                      ),
-                                    ),
-                                  ),
-                                ),
+                              IconButton(
+                                tooltip: 'Brush color',
+                                onPressed: colorDialog,
+                                icon: BrushColorSwatch(color: color),
                               ),
                               const SizedBox(width: 8),
                               Expanded(
@@ -1127,6 +1103,8 @@ class _EditorScreenState extends State<EditorScreen>
     await showPaletteEditor(
       context,
       editor: e,
+      currentColor: () => color,
+      currentPaletteIndex: () => selectedPaletteIndex,
       onSelect: (value, index) {
         setState(() {
           color = value;
@@ -1354,14 +1332,7 @@ class _EditorScreenState extends State<EditorScreen>
       IconButton(
         tooltip: 'Brush color',
         onPressed: colorDialog,
-        icon: Container(
-          width: 24,
-          height: 24,
-          decoration: BoxDecoration(
-            color: Color(color),
-            border: Border.all(color: Colors.white70),
-          ),
-        ),
+        icon: BrushColorSwatch(color: color),
       ),
       IconButton(
         tooltip: 'Manage palette and color mode',
