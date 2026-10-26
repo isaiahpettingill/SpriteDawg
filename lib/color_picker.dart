@@ -24,6 +24,8 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog> {
   bool valid = true;
   @override
   Widget build(BuildContext context) => AlertDialog(
+    scrollable: true,
+    insetPadding: const EdgeInsets.all(12),
     title: Text(widget.title),
     content: SizedBox(
       width: 320,
@@ -324,4 +326,27 @@ class ColorCheckerPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(ColorCheckerPainter old) => false;
+}
+
+/// A color control, deliberately not an eyedropper (which samples the canvas).
+class BrushColorSwatch extends StatelessWidget {
+  const BrushColorSwatch({super.key, required this.color, this.size = 28});
+  final int color;
+  final double size;
+  @override
+  Widget build(BuildContext context) => Container(
+    width: size,
+    height: size,
+    decoration: BoxDecoration(
+      border: Border.all(color: Theme.of(context).colorScheme.outline),
+      borderRadius: BorderRadius.circular(4),
+    ),
+    child: ClipRRect(
+      borderRadius: BorderRadius.circular(3),
+      child: CustomPaint(
+        painter: const ColorCheckerPainter(),
+        child: ColoredBox(color: Color(color)),
+      ),
+    ),
+  );
 }

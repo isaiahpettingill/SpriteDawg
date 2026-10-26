@@ -2,10 +2,16 @@
 
 SpriteDawg is now a Flutter pixel-art editor for Android and Linux, focused on drawing on the go. Free, open source, offline: no accounts, ads, analytics, or Android internet permission.
 
+## Palette controls
+
+- Brush color uses an alpha-aware color swatch; the eyedropper icon only samples the canvas.
+- Compact palette dialog with **Add current color** and **Edit selected color**. Existing exact colors are selected without adding duplicate entries; explicit indexed selections retain their index.
+- Naming, reordering, removing, color-mode conversion, and undo/redo live under **Palette options**. Removal and mode conversion retain their confirmation safeguards.
+
 ## Drawing and animation
 
 - Touch-first pencil, eraser, fill, eyedropper, line, rectangle, and ellipse tools.
-- Two-finger pan/zoom cancels the pending stroke instead of leaving stray marks; one-finger Pan and Fit are also available.
+- Two-finger pan/zoom preserves the drawn stroke segment; one-finger Pan and Fit are also available.
 - Undo/redo, brush sizes, palette and color selection, layers, opacity, animation frames and timing, tags, playback, grid, and onion skin.
 - Aseprite RGB, indexed, and grayscale/alpha editing with metadata preservation, including user-data text and existing typed properties. Unsupported rendering features are refused rather than silently flattened.
 - Android document picker, Linux file dialogs, straight-alpha PNG export, and local recovery after completed edits.
