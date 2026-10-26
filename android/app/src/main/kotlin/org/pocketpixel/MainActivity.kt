@@ -49,8 +49,8 @@ class MainActivity : FlutterActivity() {
         }
         externalQueueError=null
         externalUris.add(uri)
-        val permissions=value.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-        try { contentResolver.takePersistableUriPermission(uri, permissions) } catch(_: SecurityException) { }
+        // VIEW grants are transient; decode while this activity owns the grant.
+        // Save As avoids retaining unnecessary provider access.
         externalChannel?.invokeMethod("pending", null)
     }
     override fun onNewIntent(intent: Intent) {
