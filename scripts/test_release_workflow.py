@@ -23,6 +23,10 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn('--build-number "$build_number"', source)
         self.assertIn('group: spritedawg-production-release-${{ github.run_id }}', source)
         self.assertNotIn('--clobber', source)
+        # Flutter3.47 retains3 for removed x86; x86_64 is4.
+        self.assertIn('armeabi-v7a) offset=1000', source)
+        self.assertIn('arm64-v8a) offset=2000', source)
+        self.assertIn('x86_64) offset=4000', source)
 
 if __name__ == '__main__':
     unittest.main()

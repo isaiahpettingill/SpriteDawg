@@ -32,7 +32,7 @@ class ReleasePlanTests(unittest.TestCase):
 
     def test_play_limit_includes_largest_abi(self):
         limit = module.PLAY_MAX_VERSION_CODE - module.BUILD_OFFSET - module.MAX_ABI_OFFSET
-        self.assertEqual(module.release_plan("version: 0.3.0", str(limit))["build_number"] + 3000,
+        self.assertEqual(module.release_plan("version: 0.3.0", str(limit))["build_number"] + 4000,
                          module.PLAY_MAX_VERSION_CODE)
         with self.assertRaises(ValueError):
             module.release_plan("version: 0.3.0", str(limit + 1))

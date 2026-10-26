@@ -13,7 +13,7 @@ from pathlib import Path
 
 PLAY_MAX_VERSION_CODE = 2_100_000_000
 BUILD_OFFSET = 10_000
-MAX_ABI_OFFSET = 3_000
+MAX_ABI_OFFSET = 4_000
 
 
 def release_plan(pubspec: str, run_number: str) -> dict[str, str | int]:
