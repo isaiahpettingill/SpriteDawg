@@ -291,39 +291,36 @@ void main() {
     },
   );
 
-  testWidgets(
-    'failed commit removes retained ink',
-    (tester) async {
-      final gate = Completer<void>();
-      final editor = Editor(
-        transport: (method, _) async {
-          if (method == 'stroke') {
-            await gate.future;
-            throw StateError('failed write');
-          }
-          return state(Uint8List(4096));
-        },
-      );
-      await tester.runAsync(() => editor.call('init'));
-      await host(tester, editor);
-      final blank = await capture(tester);
-      final a = await tester.startGesture(
-        tester.getCenter(find.byKey(const Key('pixel-canvas'))),
-      );
-      await a.moveBy(const Offset(60, 0));
-      await a.up();
-      await tester.pump();
-      expect(await capture(tester), isNot(orderedEquals(blank)));
-      gate.complete();
-      await tester.pump();
-      await tester.pump();
-      expect(editor.error, contains('failed write'));
-      expect(await capture(tester), orderedEquals(blank));
-      await tester.pumpWidget(const SizedBox.shrink());
-      editor.dispose();
-      expect(tester.takeException(), isNull);
-    },
-  );
+  testWidgets('failed commit removes retained ink', (tester) async {
+    final gate = Completer<void>();
+    final editor = Editor(
+      transport: (method, _) async {
+        if (method == 'stroke') {
+          await gate.future;
+          throw StateError('failed write');
+        }
+        return state(Uint8List(4096));
+      },
+    );
+    await tester.runAsync(() => editor.call('init'));
+    await host(tester, editor);
+    final blank = await capture(tester);
+    final a = await tester.startGesture(
+      tester.getCenter(find.byKey(const Key('pixel-canvas'))),
+    );
+    await a.moveBy(const Offset(60, 0));
+    await a.up();
+    await tester.pump();
+    expect(await capture(tester), isNot(orderedEquals(blank)));
+    gate.complete();
+    await tester.pump();
+    await tester.pump();
+    expect(editor.error, contains('failed write'));
+    expect(await capture(tester), orderedEquals(blank));
+    await tester.pumpWidget(const SizedBox.shrink());
+    editor.dispose();
+    expect(tester.takeException(), isNull);
+  });
 
   for (final tool in ['blur', 'jumble', 'spray', 'airbrush']) {
     testWidgets('$tool retains exact decoded preview during slow commit', (
