@@ -61,15 +61,17 @@ class PublisherTests(unittest.TestCase):
 
     def fake_gh(self, *args, binary=False):
         self.calls.append(args)
-        if args[:2] == ('release', 'create'):
-            self.make_release()
-            return ''
         if args[:2] == ('release', 'upload'):
             self.add_asset(Path(args[3]).name)
             return ''
         self.assertEqual(args[0], 'api')
         endpoint = args[1]
-        if '/git/matching-refs/' in endpoint:
+        if endpoint.endswith('/releases') and '--method' in args and 'POST' in args:
+            self.assertIn('draft=true', args)
+            self.assertIn('tag_name=' + TAG, args)
+            self.assertIn('target_commitish=' + SHA, args)
+            value = copy.deepcopy(self.make_release())
+        elif '/git/matching-refs/' in endpoint:
             value = [] if self.commit is None else [{'ref': 'refs/tags/' + TAG,
                                                     'object': {'sha': self.commit, 'type': 'commit'}}]
         elif endpoint.endswith('/releases?per_page=100'):
@@ -105,6 +107,34 @@ class PublisherTests(unittest.TestCase):
         self.assertTrue(any('make_latest=false' in c for c in self.calls))
         self.assertEqual(self.latest['id'], self.release['id'])
         self.assertFalse(any('--clobber' in c for c in self.calls))
+
+    def test_new_draft_uses_create_response_when_list_never_shows_drafts(self):
+        original = self.fake_gh
+        def lagging(*args, **kwargs):
+            if args[0] == 'api' and args[1].endswith('/releases?per_page=100'):
+                if self.release is None or self.release['draft']:
+                    self.calls.append(args)
+                    return '[[]]'
+            return original(*args, **kwargs)
+        with patch.object(publisher, 'gh', side_effect=lagging):
+            self.publish()
+        self.assertFalse(self.release['draft'])
+        self.assertEqual(len(self.release['assets']), 6)
+        self.assertEqual(len([c for c in self.calls if 'POST' in c]), 1)
+
+    def test_created_draft_response_mismatch_stops_before_upload(self):
+        original = self.fake_gh
+        def wrong_response(*args, **kwargs):
+            response = original(*args, **kwargs)
+            if args[0] == 'api' and args[1].endswith('/releases') and 'POST' in args:
+                release = json.loads(response)
+                release['target_commitish'] = 'b' * 40
+                return json.dumps(release)
+            return response
+        with patch.object(publisher, 'gh', side_effect=wrong_response):
+            with self.assertRaisesRegex(ValueError, 'Created draft response'):
+                self.publish()
+        self.assertFalse(any(c[:2] == ('release', 'upload') for c in self.calls))
 
     def test_partial_draft_resumes_only_missing(self):
         existing = next(iter(self.files))

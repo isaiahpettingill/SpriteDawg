@@ -135,9 +135,20 @@ def publish(repo, sha, tag, assets, notes):
         raise ValueError('Duplicate release tag')
     release = matches[0] if matches else None
     if release is None:
-        gh('release', 'create', tag, '--repo', repo, '--target', sha, '--draft',
-           '--title', f'SpriteDawg {tag}', '--notes-file', str(notes))
-        release = next(r for r in release_list(repo) if r['tag_name'] == tag)
+        # The list endpoint can lag after creation. Use the authoritative POST
+        # response instead of immediately rediscovering the new draft in a list.
+        release = api(f'repos/{repo}/releases', '--method', 'POST',
+                      '-f', f'tag_name={tag}', '-f', f'target_commitish={sha}',
+                      '-f', f'name=SpriteDawg {tag}', '-F', 'draft=true',
+                      '-F', 'prerelease=false', '-f', 'make_latest=false',
+                      '-F', f'body=@{notes}')
+        if (type(release.get('id')) is not int or release['id'] <= 0
+                or release.get('tag_name') != tag
+                or release.get('target_commitish') != sha
+                or release.get('draft') is not True
+                or release.get('prerelease') is not False
+                or not isinstance(release.get('assets'), list)):
+            raise ValueError('Created draft response does not match requested release')
     if release['draft'] and release['target_commitish'] != sha:
         raise ValueError('Existing draft is not pinned to the expected commit')
     if not release['draft'] and commit != sha:
