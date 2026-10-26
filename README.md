@@ -138,7 +138,7 @@ claimed tested unless explicitly recorded in the PR verification results.
 
 CI runs Dart analysis/widget/codec tests, Android native codec tests/lint/APK build,
 and separate Linux x64 + ARM64 release builds. Branches produce workflow artifacts.
-Explicit version tags or a main-branch merge marked `[release]` publish releases
+Trusted main-branch pushes/merges automatically publish releases
 only after all required checks pass and production Android signing succeeds.
 Release assets include architecture-specific
 Android APKs, Linux x64/ARM64 archives, and basename-relative SHA256 checksums.
@@ -156,3 +156,15 @@ Authorized release builds may use the existing permanent key via `POCKET_KEYSTOR
 are not silently debug-signed, and no new permanent credential is generated.
 The old native UI remains in `app/` as migration/reference source, but the default
 build is the Flutter app in `android/`; its obsolete Compose UI is not packaged.
+
+## Automatic releases
+
+Merges/pushes to `main` publish only after Flutter tests/analyzer, independent codec checks, Android unit/lint/emulator checks, Linux x64/ARM64 builds, and production signing pass. PRs, feature branches, manual workflow dispatches and tag pushes do not publish. Existing permanent signing secrets are required; no development-key fallback is permitted. The public v0.2.0 signer fingerprint is pinned to protect update compatibility.
+
+The workflow retains its existing identity and allocates version `MAJOR.MINOR.RUN_NUMBER` from the pubspec series (`0.3`), with Android base build number `10000 + RUN_NUMBER` plus Flutter's ABI offset. Run attempts reuse identifiers; new runs advance monotonically beyond v0.2.0. Do not recreate/rename the workflow or lower the release series without an explicit migration. CI passes these identifiers to Android and Linux builds without committing version bumps.
+
+Publication stages a draft, checks all five platform assets against `SHA256SUMS`, then publishes. Interrupted drafts resume missing uploads without replacing existing bytes; conflicting bytes or a tag pointing elsewhere stop publication. Published retries verify the existing immutable release. Distinct runs use distinct tags; Publication explicitly reconciles the latest pointer to the highest published semantic version, rechecking after updates so an older finishing run cannot permanently downgrade it. No release asset is clobbered. Re-run failed jobs to resume the same build artifacts; a full rebuild that changes a partial draft's bytes intentionally fails rather than silently replacing them.
+
+### Open with SpriteDawg
+
+Android registers narrow Aseprite MIME/extension handlers; Linux bundles include MIME registration and a per-user installer. External opens add document tabs instead of replacing unsaved work. See [file association installation and provider limitations](FILE_ASSOCIATIONS.md).

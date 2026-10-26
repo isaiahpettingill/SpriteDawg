@@ -10,9 +10,31 @@
 struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
+  FlMethodChannel* external_channel;
+  FlValue* pending_files;
+  gboolean dart_ready;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
+
+static void flush_external_files(MyApplication* self) {
+  if (!self->dart_ready || self->pending_files == nullptr || fl_value_get_length(self->pending_files) == 0) return;
+  fl_method_channel_invoke_method(self->external_channel, "files", self->pending_files,
+                                 nullptr, nullptr, nullptr);
+  g_clear_pointer(&self->pending_files, fl_value_unref);
+}
+
+static void external_method_call(FlMethodChannel* channel, FlMethodCall* call,
+                                 gpointer user_data) {
+  MyApplication* self = MY_APPLICATION(user_data);
+  if (g_strcmp0(fl_method_call_get_name(call), "ready") == 0) {
+    self->dart_ready = TRUE;
+    flush_external_files(self);
+    fl_method_call_respond_success(call, nullptr, nullptr);
+  } else {
+    fl_method_call_respond_not_implemented(call, nullptr);
+  }
+}
 
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
@@ -22,6 +44,8 @@ static void first_frame_cb(MyApplication* self, FlView* view) {
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
+  GtkWindow* existing = gtk_application_get_active_window(GTK_APPLICATION(application));
+  if (existing != nullptr) { gtk_window_present(existing); return; }
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
 
@@ -74,29 +98,38 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_realize(GTK_WIDGET(view));
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
+  g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
+  self->external_channel = fl_method_channel_new(
+      fl_engine_get_binary_messenger(fl_view_get_engine(view)),
+      "pocketpixel/external", FL_METHOD_CODEC(codec));
+  fl_method_channel_set_method_call_handler(self->external_channel, external_method_call, self, nullptr);
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
 
-// Implements GApplication::local_command_line.
-static gboolean my_application_local_command_line(GApplication* application,
-                                                  gchar*** arguments,
-                                                  int* exit_status) {
+// GApplication routes subsequent file-manager opens to this existing process.
+static void my_application_open(GApplication* application, GFile** files,
+                                gint count, const gchar* hint) {
   MyApplication* self = MY_APPLICATION(application);
-  // Strip out the first argument as it is the binary name.
-  self->dart_entrypoint_arguments = g_strdupv(*arguments + 1);
-
-  g_autoptr(GError) error = nullptr;
-  if (!g_application_register(application, nullptr, &error)) {
-    g_warning("Failed to register: %s", error->message);
-    *exit_status = 1;
-    return TRUE;
+  g_autoptr(FlValue) paths = fl_value_new_list();
+  for (gint i = 0; i < count; ++i) {
+    g_autofree gchar* path = g_file_get_path(files[i]);
+    if (path != nullptr) fl_value_append_take(paths, fl_value_new_string(path));
   }
-
-  g_application_activate(application);
-  *exit_status = 0;
-
-  return TRUE;
+  if (self->external_channel == nullptr) {
+    g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
+    self->dart_entrypoint_arguments = g_new0(gchar*, fl_value_get_length(paths) + 1);
+    for (size_t i = 0; i < fl_value_get_length(paths); ++i) {
+      self->dart_entrypoint_arguments[i] = g_strdup(fl_value_get_string(fl_value_get_list_value(paths, i)));
+    }
+    g_application_activate(application);
+  } else {
+    if (self->pending_files == nullptr) self->pending_files = fl_value_new_list();
+    for (size_t i = 0; i < fl_value_get_length(paths); ++i)
+      fl_value_append(self->pending_files, fl_value_get_list_value(paths, i));
+    flush_external_files(self);
+    g_application_activate(application);
+  }
 }
 
 // Implements GApplication::startup.
@@ -121,13 +154,14 @@ static void my_application_shutdown(GApplication* application) {
 static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
+  g_clear_object(&self->external_channel);
+  g_clear_pointer(&self->pending_files, fl_value_unref);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }
 
 static void my_application_class_init(MyApplicationClass* klass) {
   G_APPLICATION_CLASS(klass)->activate = my_application_activate;
-  G_APPLICATION_CLASS(klass)->local_command_line =
-      my_application_local_command_line;
+  G_APPLICATION_CLASS(klass)->open = my_application_open;
   G_APPLICATION_CLASS(klass)->startup = my_application_startup;
   G_APPLICATION_CLASS(klass)->shutdown = my_application_shutdown;
   G_OBJECT_CLASS(klass)->dispose = my_application_dispose;
@@ -144,5 +178,5 @@ MyApplication* my_application_new() {
 
   return MY_APPLICATION(g_object_new(my_application_get_type(),
                                      "application-id", APPLICATION_ID, "flags",
-                                     G_APPLICATION_NON_UNIQUE, nullptr));
+                                     G_APPLICATION_HANDLES_OPEN, nullptr));
 }

@@ -11,10 +11,11 @@ import 'eraser_icon.dart';
 import 'document_tabs.dart';
 import 'responsive_editor_shell.dart';
 
-void main() => runApp(const PocketPixelApp());
+void main(List<String> args) => runApp(PocketPixelApp(initialFiles: args));
 
 class PocketPixelApp extends StatelessWidget {
-  const PocketPixelApp({super.key, this.editor});
+  const PocketPixelApp({super.key, this.editor, this.initialFiles = const []});
+  final List<String> initialFiles;
   final Editor? editor;
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -28,12 +29,13 @@ class PocketPixelApp extends StatelessWidget {
       useMaterial3: true,
       scaffoldBackgroundColor: const Color(0xff151a25),
     ),
-    home: EditorScreen(editor: editor),
+    home: EditorScreen(editor: editor, initialFiles: initialFiles),
   );
 }
 
 class EditorScreen extends StatefulWidget {
-  const EditorScreen({super.key, this.editor});
+  const EditorScreen({super.key, this.editor, this.initialFiles = const []});
+  final List<String> initialFiles;
   final Editor? editor;
   @override
   State<EditorScreen> createState() => _EditorScreenState();
@@ -58,6 +60,10 @@ class _EditorScreenState extends State<EditorScreen>
   int selectedTag = -1;
   Timer? playback;
   String? lastError;
+  static const _externalChannel = MethodChannel('pocketpixel/external');
+  final _externalFiles = <String>[];
+  bool _initialized = false, _drainingExternal = false, _nativeExternal = false;
+
   static const tools = <String, (IconData, String)>{
     'pencil': (Icons.edit, 'Pencil'),
     'eraser': (Icons.auto_fix_normal, 'Eraser'),
@@ -76,6 +82,15 @@ class _EditorScreenState extends State<EditorScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     e.addListener(update);
+    _externalFiles.addAll(widget.initialFiles);
+    _externalChannel.setMethodCallHandler((call) async {
+      if (call.method == 'files') {
+        _externalFiles.addAll((call.arguments as List).cast<String>());
+      } else if (call.method == 'pending') {
+        _nativeExternal = true;
+      }
+      _scheduleExternal();
+    });
     initialize();
   }
 
@@ -106,6 +121,61 @@ class _EditorScreenState extends State<EditorScreen>
       await e.call(recover == true ? 'recover' : 'discardRecovery');
       if (mounted) setState(() => fitToken++);
     }
+    _initialized = true;
+    try {
+      await _externalChannel.invokeMethod<void>('ready');
+    } on MissingPluginException {
+      /* Tests and platforms without an external opener. */
+    }
+    _scheduleExternal();
+  }
+
+  void _scheduleExternal() {
+    if (!_initialized || _drainingExternal || e.busy || !mounted) return;
+    if (!_nativeExternal &&
+        _externalFiles.isEmpty &&
+        e.state['externalPending'] != true) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _openExternal();
+    });
+    WidgetsBinding.instance.scheduleFrame();
+  }
+
+  Future<void> _openExternal() async {
+    if (_drainingExternal || e.busy || !mounted) return;
+    _drainingExternal = true;
+    var readyToOpen = false;
+    try {
+      stop();
+      if (!await (_tagEditorKey.currentState?.savePending() ??
+          Future.value(true))) {
+        return;
+      }
+      readyToOpen = true;
+      do {
+        if (_externalFiles.isNotEmpty) {
+          final path = _externalFiles.removeAt(0);
+          await e.call('openExternal', {'path': path});
+        } else {
+          _nativeExternal = false;
+          await e.call('openExternal');
+        }
+        if (mounted) {
+          setState(() {
+            selectedTag = -1;
+            fitToken++;
+          });
+        }
+      } while (mounted &&
+          (_nativeExternal ||
+              _externalFiles.isNotEmpty ||
+              e.state['externalPending'] == true));
+    } finally {
+      _drainingExternal = false;
+      if (readyToOpen) _scheduleExternal();
+    }
   }
 
   void update() {
@@ -118,7 +188,10 @@ class _EditorScreenState extends State<EditorScreen>
       color = e.palette[selectedPaletteIndex!];
     }
     setState(() {});
-    final issue = e.error ?? e.state['recoveryError'] as String?;
+    final issue =
+        e.error ??
+        e.state['externalOpenError'] as String? ??
+        e.state['recoveryError'] as String?;
     if (issue != null && lastError != issue) {
       lastError = issue;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -133,11 +206,13 @@ class _EditorScreenState extends State<EditorScreen>
       });
     }
     if (issue == null) lastError = null;
+    _scheduleExternal();
   }
 
   @override
   void dispose() {
     playback?.cancel();
+    _externalChannel.setMethodCallHandler(null);
     WidgetsBinding.instance.removeObserver(this);
     e.removeListener(update);
     e.dispose();

@@ -2,7 +2,6 @@ name: SpriteDawg Flutter
 on:
   push:
     branches: ['**']
-    tags: ['v*']
   pull_request:
   workflow_dispatch:
 permissions:
@@ -13,6 +12,18 @@ env:
   DASH__SUPPRESS_ANALYTICS: 'true'
   FLUTTER_VERSION: '3.47.8'
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      build_number: ${{ steps.plan.outputs.build_number }}
+      tag: ${{ steps.plan.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: plan
+        run: python3 scripts/release-plan.py --run-number "$GITHUB_RUN_NUMBER" --format env >> "$GITHUB_OUTPUT"
+      - run: python3 -m unittest discover -s scripts -p 'test_*.py'
+      - run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
   test:
     runs-on: ubuntu-latest
     steps:
@@ -60,11 +71,13 @@ jobs:
           SPRITEDAWG_BRUSH_INTEROP_DIR: /tmp/spritedawg-dart-brush-interop
       - uses: actions/upload-artifact@v4
         with:
+          overwrite: true
           name: spritedawg-android-debug
           path: build/app/outputs/flutter-apk/app-debug.apk
       - uses: actions/upload-artifact@v4
         if: always()
         with:
+          overwrite: true
           name: native-test-reports
           path: build/app/reports/
   android-interaction:
@@ -97,6 +110,7 @@ jobs:
           disable-animations: true
           script: flutter test integration_test/editor_smoke_test.dart -d emulator-5554 --reporter expanded
   linux:
+    needs: [version]
     strategy:
       fail-fast: false
       matrix:
@@ -122,29 +136,26 @@ jobs:
           echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
           "$RUNNER_TEMP/flutter/bin/flutter" --version
       - run: flutter pub get
-      - run: flutter build linux --release
+      - run: flutter build linux --release --build-name "${{ needs.version.outputs.version }}" --build-number "${{ needs.version.outputs.build_number }}"
       - run: scripts/package-linux.sh ${{ matrix.arch }}
       - uses: actions/upload-artifact@v4
         with:
+          overwrite: true
           name: spritedawg-linux-${{ matrix.arch }}
           path: build/spritedawg-linux-${{ matrix.arch }}.tar.gz*
 
   signed-android:
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
-    needs: [test, android, android-interaction]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [version, test, android, android-interaction]
     runs-on: ubuntu-latest
     env:
-      RELEASE_REQUESTED: ${{ startsWith(github.ref, 'refs/tags/v') || (github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[release]')) }}
       HAS_SIGNING_KEY: ${{ secrets.POCKET_KEYSTORE_BASE64 != '' && secrets.POCKET_STORE_PASSWORD != '' && secrets.POCKET_KEY_ALIAS != '' && secrets.POCKET_KEY_PASSWORD != '' }}
     steps:
-      - name: Require the existing permanent key for an explicit release
+      - name: Require the existing permanent key
         if: env.HAS_SIGNING_KEY != 'true'
         run: |
-          if [[ "$RELEASE_REQUESTED" == true ]]; then
-            echo '::error::All four existing POCKET signing secrets must be configured. No fallback or new key is allowed.'
-            exit 1
-          fi
-          echo 'Permanent release signing is not configured; debug CI artifacts are not releases.'
+          echo '::error::All four existing POCKET signing secrets are required. No fallback or new key is allowed.'
+          exit 1
       - uses: actions/checkout@v4
         if: env.HAS_SIGNING_KEY == 'true'
       - uses: actions/setup-java@v4
@@ -176,14 +187,10 @@ jobs:
           trap 'rm -f "$POCKET_KEYSTORE"' EXIT
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$POCKET_KEYSTORE"
           sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
-          version=$(sed -n 's/^version: *\([^+ ]*\).*/\1/p' pubspec.yaml)
-          test -n "$version"
-          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "v$version" ]]; then
-            echo '::error::Release tag must match pubspec.yaml version.'
-            exit 1
-          fi
+          version="${{ needs.version.outputs.version }}"
+          build_number="${{ needs.version.outputs.build_number }}"
           flutter pub get
-          flutter build apk --release --split-per-abi
+          flutter build apk --release --split-per-abi --build-name "$version" --build-number "$build_number"
           mkdir -p signed-assets
           for abi in armeabi-v7a arm64-v8a x86_64; do
             apk="build/app/outputs/flutter-apk/app-$abi-release.apk"
@@ -193,8 +200,14 @@ jobs:
               echo '::error::Refusing a development signing certificate.'
               exit 1
             fi
+            grep -qi 'Signer #1 certificate SHA-256 digest: 8c66b44614c82edfa120b99f05101d938dbf6afac70d2ad8c55c058c757dd296' "$RUNNER_TEMP/signer-$abi.txt"
             badging=$("$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk")
             grep -q "^package: name='org.pocketpixel' " <<< "$badging"
+            case "$abi" in
+              armeabi-v7a) offset=1000 ;; arm64-v8a) offset=2000 ;; x86_64) offset=3000 ;;
+            esac
+            grep -q "versionCode='$((build_number + offset))'" <<< "$badging"
+            grep -q "versionName='$version'" <<< "$badging"
             if grep -q 'application-debuggable' <<< "$badging"; then
               echo '::error::Refusing a debuggable APK.'
               exit 1
@@ -209,31 +222,26 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: env.HAS_SIGNING_KEY == 'true'
         with:
+          overwrite: true
           name: spritedawg-android-signed
           path: signed-assets/*.apk
           if-no-files-found: error
 
   release:
-    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || (github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[release]')))
-    needs: [test, android, android-interaction, linux, signed-android]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [version, test, android, android-interaction, linux, signed-android]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     concurrency:
-      group: spritedawg-production-release
+      group: spritedawg-production-release-${{ github.run_id }}
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
-      - name: Validate release version
+      - name: Use the same immutable build identifiers
         run: |
-          set -euo pipefail
-          version=$(sed -n 's/^version: *\([^+ ]*\).*/\1/p' pubspec.yaml)
-          test -n "$version"
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            test "$GITHUB_REF_NAME" = "v$version"
-          fi
-          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
-          echo "RELEASE_TAG=v$version" >> "$GITHUB_ENV"
+          echo 'RELEASE_VERSION=${{ needs.version.outputs.version }}' >> "$GITHUB_ENV"
+          echo 'RELEASE_TAG=${{ needs.version.outputs.tag }}' >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v4
         with:
           name: spritedawg-android-signed
@@ -262,30 +270,7 @@ jobs:
           test "$(find . -maxdepth 1 -type f | wc -l)" -eq 5
           sha256sum *.apk *.tar.gz > SHA256SUMS
           sha256sum --check SHA256SUMS
-      - name: Publish a new version without replacing an existing release
+      - name: Publish or safely resume this tested main release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          # API errors fail this job; they must not be mistaken for an absent release.
-          tags=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq '.[].tag_name')
-          if grep -Fxq "$RELEASE_TAG" <<< "$tags"; then
-            echo '::error::This release already exists. Inspect it explicitly; no assets were overwritten.'
-            exit 1
-          fi
-          refs=$(git ls-remote origin "refs/tags/$RELEASE_TAG" "refs/tags/$RELEASE_TAG^{}")
-          if [[ -n "$refs" ]]; then
-            # Prefer the peeled commit for an annotated tag.
-            tag_commit=$(awk '{ if ($2 ~ /\^\{\}$/) peeled=$1; else direct=$1 } END { print peeled != "" ? peeled : direct }' <<< "$refs")
-            if [[ "$tag_commit" != "$GITHUB_SHA" ]]; then
-              echo '::error::The version tag already points at a different commit; refusing to publish mismatched assets.'
-              exit 1
-            fi
-          fi
-          # A marked main merge creates its version tag at the exact tested commit.
-          # A pre-existing tag trigger must already exist and match pubspec.yaml.
-          tag_options=()
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then tag_options+=(--verify-tag); fi
-          gh release create "$RELEASE_TAG" release-assets/* \
-            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" "${tag_options[@]}" \
-            --title "SpriteDawg $RELEASE_TAG" --notes-file RELEASE_NOTES.md --latest
+        run: python3 scripts/publish-release.py --repo "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA" --tag "$RELEASE_TAG" --assets release-assets --notes RELEASE_NOTES.md
