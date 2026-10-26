@@ -54,13 +54,14 @@ class EditorEngine {
     }
     fun stroke(args: Map<String, Any?>) {
         val tool = args["tool"] as? String ?: "pencil"
-        require(tool in listOf("pencil", "eraser", "fill", "line", "rectangle", "ellipse", "spray", "airbrush", "blur", "jumble")) { "Unknown drawing tool" }
+        require(tool in listOf("pencil", "eraser", "fill", "gradient", "line", "rectangle", "ellipse", "spray", "airbrush", "blur", "jumble")) { "Unknown drawing tool" }
         val points = (args["points"] as? List<*>)?.map { p ->
             val a = p as List<*>; Pair((a[0] as Number).toInt(), (a[1] as Number).toInt())
         } ?: emptyList()
         if (points.isEmpty()) return
         require(points.size <= 100000) { "Stroke is too long" }
         require(points.all { abs(it.first.toLong()) <= 8192 && abs(it.second.toLong()) <= 8192 }) { "Stroke exceeds canvas limits" }
+        if (tool == "gradient" && points.first() == points.last()) return
         val size = args.number("size", if(tool == "spray" || tool == "airbrush") 12 else 1).coerceIn(1, 32)
         val color = (args["color"] as? Number)?.toLong()?.toInt() ?: 0xff000000.toInt()
         require(document.layers[layer].visible) { "Show this layer before drawing" }

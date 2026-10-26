@@ -16,6 +16,7 @@ class BrushInteropTest {
         assertArrayEquals(name,File(out,"$name.rgba").readBytes(),e.state(false)["pixels"] as ByteArray)
     }
     run("gradient",false,mapOf("tool" to "fill","points" to listOf(listOf(2,3)),"gradient" to true,"gradientDirection" to "horizontal","color" to 0xffc86432L,"secondaryColor" to 0x10010203L,"mirrorX" to true),true)
+    run("linear-gradient",true,mapOf("tool" to "gradient","points" to listOf(listOf(-8192,-8192),listOf(8192,8192)),"color" to 0x80ff0000L,"secondaryColor" to 0x200000ffL,"mirrorX" to true,"size" to 32))
     run("spray",false,mapOf("tool" to "spray","points" to listOf(listOf(4,5),listOf(18,19),listOf(20,19)),"size" to 8,"density" to 70,"seed" to 42,"mirrorX" to true,"mirrorY" to true,"color" to 0x80c86432L))
     run("airbrush",true,mapOf("tool" to "airbrush","points" to listOf(listOf(5,5),listOf(5,5),listOf(13,15)),"size" to 9,"strength" to 20,"color" to 0x80c86432L,"mirrorX" to true,"mirrorY" to true))
     run("alpha",true,mapOf("tool" to "pencil","points" to listOf(listOf(5,5),listOf(13,15),listOf(5,5)),"size" to 5,"color" to 0x80c86432L,"mirrorX" to true))

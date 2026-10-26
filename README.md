@@ -10,7 +10,16 @@ MIT licensed, no ads, accounts, tracking, networking or broad Android storage pe
 
 - Pencil, eraser, flood fill, eyedropper, line, outlined/filled rectangles and
   ellipses, dispersed spray, soft airbrush, blur, jumble and pan. The eraser has its own eraser icon.
-- Two-color horizontal/vertical gradients stay inside the connected fill region.
+- Long-hold a toolbar group to choose a subtool (right-click or the Menu key on desktop).
+  Tap to use its last-selected tool; groups include ink, fill/gradient, shapes and effects.
+  Filled rectangles/ellipses live with the outline shapes. Seven touch-sized group buttons
+  wrap on very narrow phones rather than hiding tools in a long scrolling strip.
+- The dedicated **Gradient** subtool paints a linear gradient across the **whole active
+  layer's canvas area**. Choose Start and End colors (including alpha), then drag to set
+  direction and endpoint positions; outside the endpoints the respective color is clamped.
+  A tap without a drag does nothing. It blends source-over, is one undo, and ignores brush
+  size/symmetry. Indexed and grayscale results follow their mode's color mapping.
+- Bucket fill's existing two-color horizontal/vertical gradients stay inside the connected fill region.
   Spray has adjustable density; blur/jumble have strength controls. Random tools
   use a fixed seed per gesture, and the entire gesture is one undo step.
 - Horizontal/vertical symmetry mirrors around the canvas center. Center-line

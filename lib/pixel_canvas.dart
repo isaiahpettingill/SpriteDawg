@@ -126,8 +126,13 @@ class _PixelCanvasState extends State<PixelCanvas> {
 
   bool _previewRunning = false;
   int _previewEpoch = 0, _pointVersion = 0;
-  bool get _usesPreview =>
-      const {'spray', 'airbrush', 'blur', 'jumble'}.contains(widget.tool);
+  bool get _usesPreview => const {
+    'spray',
+    'airbrush',
+    'blur',
+    'jumble',
+    'gradient',
+  }.contains(widget.tool);
   void _clearPreview() {
     _previewEpoch++;
     _previewTimer?.cancel();
@@ -599,7 +604,16 @@ class _CanvasPainter extends CustomPainter {
         points.isNotEmpty &&
         tool != 'pan' &&
         tool != 'eyedropper') {
-      if (const {'fill', 'blur', 'jumble', 'airbrush'}.contains(tool)) {
+      if (tool == 'gradient') {
+        final guide = Paint()
+          ..color = Colors.white
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1 / scale;
+        canvas.drawLine(points.first, points.last, guide);
+        for (final endpoint in [points.first, points.last]) {
+          canvas.drawCircle(endpoint, 3 / scale, guide);
+        }
+      } else if (const {'fill', 'blur', 'jumble', 'airbrush'}.contains(tool)) {
         final point = tool == 'fill' ? points.first : points.last;
         final p = Paint()
           ..color = Colors.white
