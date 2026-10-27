@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:spritedawg/engine/aseprite.dart';
 import 'package:spritedawg/engine/document.dart';
@@ -54,6 +55,236 @@ EditorEngine indexed() {
 }
 
 void main() {
+  test(
+    'RGBA preset replaces all swatches without changing artwork or links',
+    () {
+      final e = indexed();
+      e.invoke('edit', {'action': 'convertMode', 'depth': 32});
+      // Start with real persisted palette chunks and a linked RGBA cel.
+      e.document.frames[1].cels[0] = Cel(
+        0,
+        0,
+        0,
+        0,
+        Uint32List(0),
+        link: 0,
+        data: UserData(text: 'linked-rgba'),
+      );
+      e.document.frames[0].metadata.add(RawChunk(0x2007, Uint8List(16)));
+      e.replace(AsepriteCodec.decode(e.encode()));
+      final before = e.encode();
+      final pixels = [for (var f = 0; f < 2; f++) e.document.composite(f)];
+      final colors = [0xff123456, 0x80765432];
+      expect(e.document.frames[0].metadata.any((c) => c.type == 0x2019), true);
+      e.invoke('edit', {'action': 'palettePreset', 'colors': colors});
+      expect(e.document.depth, 32);
+      expect(e.document.frames[1].cels[0]!.link, 0);
+      for (var f = 0; f < 2; f++) {
+        expect(e.document.frames[f].palette, colors);
+        expect(e.document.frames[f].paletteNames, isEmpty);
+        expect(e.document.frames[f].palettePatches, isEmpty);
+        expect(
+          e.document.frames[f].metadata.where(
+            (c) => [4, 17, 0x2019].contains(c.type),
+          ),
+          isEmpty,
+        );
+        expect(e.document.composite(f), pixels[f]);
+      }
+      expect(e.document.frames[0].metadata.single.type, 0x2007);
+      final reopened = AsepriteCodec.decode(e.encode());
+      expect(reopened.frames[1].cels[0]!.data!.text, 'linked-rgba');
+      expect(reopened.data!.text, 'sprite-meta');
+      for (var f = 0; f < 2; f++) {
+        expect(reopened.frames[f].palette, colors);
+        expect(reopened.frames[f].paletteNames, isEmpty);
+        expect(reopened.composite(f), pixels[f]);
+      }
+      e.invoke('undo');
+      expect(e.encode(), before);
+      expect(e.state()['canUndo'], false);
+      e.invoke('redo');
+      expect(e.document.frames[0].palette, colors);
+      // Each frame and the input own their palette list.
+      colors[0] = 0;
+      e.document.frames[0].palette[0] = 0;
+      expect(e.document.frames[1].palette[0], 0xff123456);
+    },
+  );
+  test('indexed preset remaps per-frame links and background transparency', () {
+    final e = indexed();
+    e.document.frames[1].palette.add(0xff999999);
+    e.document.frames[1].cels[0]!.opacity = 128;
+    final before = e.encode();
+    final pixels = [for (var f = 0; f < 2; f++) e.document.composite(f)];
+    final colors = [0xff0000ff, 0xffff0000, 0xff102030, 0xff00ff00];
+    e.invoke('edit', {
+      'action': 'palettePreset',
+      'colors': colors,
+      'remap': true,
+    });
+    expect(e.document.depth, 8);
+    expect(e.document.transparentIndex, 4);
+    expect(e.document.frames[0].cels[0]!.pixels, [1, 4]);
+    expect(e.document.frames[0].cels[1]!.pixels, [2, 3]);
+    expect(e.document.frames[1].cels[0]!.pixels, [0, 4]);
+    expect(e.document.frames[1].cels[0]!.link, isNull);
+    expect(e.document.frames[1].cels[0]!.opacity, 128);
+    expect(e.document.frames[1].cels[0]!.data!.text, 'linked-meta');
+    expect(e.document.layers[1].flags, 11);
+    final reopened = AsepriteCodec.decode(e.encode());
+    for (var f = 0; f < 2; f++) {
+      expect(e.document.frames[f].palette, [...colors, 0]);
+      expect(e.document.frames[f].paletteNames, isEmpty);
+      expect(reopened.frames[f].palette, [...colors, 0]);
+      expect(reopened.composite(f), pixels[f]);
+    }
+    e.invoke('undo');
+    expect(e.encode(), before);
+    expect(e.state()['canUndo'], false);
+    e.invoke('redo');
+    expect(e.document.frames[1].cels[0]!.pixels, [0, 4]);
+  });
+  test(
+    'preset quantization includes alpha and deterministically resolves ties',
+    () {
+      final e = EditorEngine();
+      e.replace(
+        SpriteDocument(
+          4,
+          1,
+          [Layer('Ink')],
+          [
+            Frame(
+              palette: [0, 0xff101010, 0x80101010, 0xff808080],
+              cels: [
+                Cel(0, 0, 4, 1, Uint32List.fromList([0, 1, 2, 3])),
+              ],
+            ),
+          ],
+          depth: 8,
+        ),
+      );
+      e.invoke('edit', {
+        'action': 'palettePreset',
+        'colors': [0xff101010, 0x80101010, 0xff7f8080, 0xff818080],
+        'remap': true,
+      });
+      expect(e.document.frames[0].cels[0]!.pixels, [4, 0, 1, 2]);
+    },
+  );
+  test(
+    'preset input and indexed confirmation failures leave history untouched',
+    () {
+      final e = EditorEngine();
+      final before = e.encode();
+      for (final colors in <dynamic>[
+        null,
+        'not a list',
+        [],
+        List.filled(257, 0),
+        [-1],
+        [0x100000000],
+        [1.0],
+        ['ffffff'],
+        [null],
+      ]) {
+        expect(
+          () => e.invoke('edit', {'action': 'palettePreset', 'colors': colors}),
+          throwsFormatException,
+        );
+        expect(e.encode(), before);
+        expect(e.state()['canUndo'], false);
+        expect(e.state()['dirty'], false);
+      }
+      final i = indexed(), indexedBefore = i.encode();
+      for (final args in [
+        {
+          'colors': [0xff000000],
+        },
+        {
+          'colors': [0xff000000],
+          'remap': false,
+        },
+        {
+          'colors': [0xff000000],
+          'remap': 'true',
+        },
+        {'colors': List.filled(256, 0xff000000), 'remap': true},
+      ]) {
+        expect(
+          () => i.invoke('edit', {'action': 'palettePreset', ...args}),
+          throwsFormatException,
+        );
+        expect(i.encode(), indexedBefore);
+        expect(i.state()['canUndo'], false);
+      }
+    },
+  );
+  test('preset accepts full RGBA and maximum indexed palettes', () {
+    final e = EditorEngine();
+    final colors = List.generate(256, (i) => 0xff000000 | i);
+    e.invoke('edit', {'action': 'palettePreset', 'colors': colors});
+    expect(AsepriteCodec.decode(e.encode()).frames[0].palette, colors);
+    final i = indexed();
+    i.invoke('edit', {
+      'action': 'palettePreset',
+      'colors': colors.sublist(0, 255),
+      'remap': true,
+    });
+    expect(i.document.transparentIndex, 255);
+    expect(AsepriteCodec.decode(i.encode()).frames[0].palette.length, 256);
+  });
+  test('preset remap refuses oversized linked expansion before committing', () {
+    final e = EditorEngine();
+    final d = SpriteDocument(
+      2048,
+      2048,
+      [Layer('Ink')],
+      [
+        for (var f = 0; f < 5; f++)
+          Frame(
+            cels: [
+              f == 0
+                  ? Cel(0, 0, 2048, 2048, Uint32List(maxPixels))
+                  : Cel(0, 0, 0, 0, Uint32List(0), link: 0),
+            ],
+          ),
+      ],
+      depth: 8,
+    );
+    e.replace(d);
+    expect(
+      () => e.invoke('edit', {
+        'action': 'palettePreset',
+        'colors': [0xff000000],
+        'remap': true,
+      }),
+      throwsFormatException,
+    );
+    expect(identical(e.document, d), true);
+    expect(e.document.frames[4].cels[0]!.link, 0);
+    expect(e.state()['canUndo'], false);
+  });
+  test('preset validation rollback preserves document and redo history', () {
+    final e = indexed();
+    final args = {
+      'action': 'palettePreset',
+      'colors': [0xff000000, 0xffffffff],
+      'remap': true,
+    };
+    e.invoke('edit', args);
+    e.invoke('undo');
+    final before = e.encode();
+    e.validateCandidate = (_) => throw const FormatException('Test rejection');
+    expect(() => e.invoke('edit', args), throwsFormatException);
+    expect(e.encode(), before);
+    expect(e.state()['canUndo'], false);
+    expect(e.state()['canRedo'], true);
+    e.validateCandidate = null;
+    e.invoke('redo');
+    expect(e.document.transparentIndex, 2);
+  });
   test(
     'palette reorder preserves appearances links names transparency and undo',
     () {

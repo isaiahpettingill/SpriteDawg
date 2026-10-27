@@ -689,6 +689,7 @@ class EditorEngine {
         case 'paletteEdit':
         case 'paletteMove':
         case 'paletteRemove':
+        case 'palettePreset':
         case 'convertMode':
           applyPaletteAction(d, a, frame);
         case 'addLayer':

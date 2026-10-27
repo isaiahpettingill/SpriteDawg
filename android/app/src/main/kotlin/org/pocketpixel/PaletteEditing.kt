@@ -24,6 +24,75 @@ fun applyPaletteAction(d: Document, args: Map<String, Any?>, frame: Int) {
         if(d.depth==8)d.transparentIndex=mapping[d.transparentIndex]
     }
     when(args["action"]) {
+        "palettePreset" -> {
+            val values = args["colors"] as? List<*>
+            require(values != null && values.size in 1..256) { "A palette preset must contain 1–256 colors" }
+            val colors = values.map { value ->
+                require(value is Int || value is Long) { "Invalid preset RGBA color" }
+                val color = (value as Number).toLong()
+                require(color in 0..0xffffffffL) { "Invalid preset RGBA color" }
+                color.toInt()
+            }.toMutableList()
+            require(!args.containsKey("remap") || args["remap"] is Boolean) { "Remap must be a boolean" }
+            if (d.depth == 8) {
+                require(args["remap"] == true) { "Confirm indexed color remapping before applying a preset" }
+                require(colors.size < 256) { "Indexed presets need a free transparency slot (255 colors maximum)" }
+                // Check materialized size before allocating. Snapshot every linked
+                // cel before changing a source, preserving per-frame palettes.
+                var count = 0L
+                for (f in d.frames.indices) for (l in d.layers.indices) {
+                    count += d.resolved(f, l)?.pixels?.size?.toLong() ?: 0L
+                    require(count <= 16777216L) { "Palette remapping would exceed decoded pixel budget" }
+                }
+                val resolved = d.frames.indices.map { f ->
+                    d.layers.indices.map { l -> d.resolved(f, l)?.copyDeep() }
+                }
+                val transparent = colors.size
+                fun nearest(color: Int): Int {
+                    if (color ushr 24 == 0) return transparent
+                    var best = 0
+                    var distance = Int.MAX_VALUE
+                    for (i in colors.indices) {
+                        var candidate = 0
+                        for (shift in listOf(0, 8, 16, 24)) {
+                            val delta = (colors[i] ushr shift and 255) - (color ushr shift and 255)
+                            candidate += delta * delta
+                        }
+                        if (candidate < distance) {
+                            best = i
+                            distance = candidate
+                        }
+                    }
+                    return best
+                }
+                for (f in d.frames.indices) {
+                    // Quantize palette entries once, not once per decoded pixel.
+                    val mapping = d.frames[f].palette.map(::nearest)
+                    for (l in d.layers.indices) {
+                        val c = resolved[f][l]
+                        if (c != null) {
+                            for (p in c.pixels.indices) {
+                                val value = c.pixels[p]
+                                require(value in mapping.indices) { "Invalid pixel index" }
+                                // Background layers display the old transparency
+                                // swatch; ordinary layers use it as a hole.
+                                c.pixels[p] = if (value == d.transparentIndex && d.layers[l].flags and 8 == 0)
+                                    transparent else mapping[value]
+                            }
+                            c.link = null
+                        }
+                        d.frames[f].cels[l] = c
+                    }
+                }
+                colors.add(0)
+                d.transparentIndex = transparent
+            }
+            for (f in d.frames) {
+                f.palette = colors.toIntArray()
+                f.paletteNames.clear()
+                clean(f)
+            }
+        }
         "paletteEdit" -> { val i=number("index");index(i);val c=color();val n=name();val f=d.frames[frame];f.palette[i]=c;if(n.isEmpty())f.paletteNames.remove(i) else f.paletteNames[i]=n;clean(f) }
         "paletteAdd" -> { uniform();val c=color();val n=name();require(d.frames[frame].palette.size<256){"Palette is full (256 entries)"};for(f in d.frames){val i=f.palette.size;f.palette=f.palette+c;if(n.isNotEmpty())f.paletteNames[i]=n;clean(f)} }
         "paletteMove" -> { uniform();val i=number("index");val to=number("to");index(i);index(to);val order=d.frames[frame].palette.indices.toMutableList();order.add(to,order.removeAt(i));val mapping=IntArray(order.size);order.forEachIndexed { j,v -> mapping[v]=j };reorder(order,mapping) }

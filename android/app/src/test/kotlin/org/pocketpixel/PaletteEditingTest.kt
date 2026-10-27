@@ -3,6 +3,144 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PaletteEditingTest {
+ @Test fun rgbaPresetChangesSwatchesButNotArtworkOrLinks() {
+  val e = indexed()
+  e.edit(mapOf("action" to "convertMode", "depth" to 32))
+  e.document.frames[1].cels[0] = Cel(0, 0, 0, 0, intArrayOf(), link = 0, data = UserData(text = "linked-rgba"))
+  e.document.frames[0].metadata.add(0x2007 to ByteArray(16))
+  e.replace(Aseprite.read(Aseprite.write(e.document)))
+  val before = Aseprite.write(e.document)
+  val pixels = (0..1).map { e.document.composite(it) }
+  val colors = listOf(0xff123456L, 0x80765432L)
+  assertTrue(e.document.frames[0].metadata.any { it.first == 0x2019 })
+  e.edit(mapOf("action" to "palettePreset", "colors" to colors))
+  assertEquals(32, e.document.depth)
+  assertEquals(0, e.document.frames[1].cels[0]!!.link)
+  assertEquals(colors.map { it.toInt() }, e.document.palette)
+  for (f in 0..1) {
+   assertArrayEquals(colors.map { it.toInt() }.toIntArray(), e.document.frames[f].palette)
+   assertTrue(e.document.frames[f].paletteNames.isEmpty())
+   assertTrue(e.document.frames[f].palettePatches.isEmpty())
+   assertFalse(e.document.frames[f].metadata.any { it.first in listOf(4, 17, 0x2019) })
+   assertArrayEquals(pixels[f], e.document.composite(f))
+  }
+  assertEquals(0x2007, e.document.frames[0].metadata.single().first)
+  val reopened = Aseprite.read(Aseprite.write(e.document))
+  assertEquals("linked-rgba", reopened.frames[1].cels[0]!!.data!!.text)
+  assertEquals("sprite-meta", reopened.data!!.text)
+  for (f in 0..1) {
+   assertArrayEquals(colors.map { it.toInt() }.toIntArray(), reopened.frames[f].palette)
+   assertTrue(reopened.frames[f].paletteNames.isEmpty())
+   assertArrayEquals(pixels[f], reopened.composite(f))
+  }
+  e.undo()
+  assertArrayEquals(before, Aseprite.write(e.document))
+  assertEquals(false, e.state(false)["canUndo"])
+  e.redo()
+  e.document.frames[0].palette[0] = 0
+  assertEquals(0xff123456.toInt(), e.document.frames[1].palette[0])
+ }
+ @Test fun indexedPresetResolvesFrameColorsAndPreservesBackgroundTransparency() {
+  val e = indexed()
+  e.document.frames[1].palette += 0xff999999.toInt()
+  e.document.frames[1].cels[0]!!.opacity = 128
+  val before = Aseprite.write(e.document)
+  val pixels = (0..1).map { e.document.composite(it) }
+  val colors = listOf(0xff0000ffL, 0xffff0000L, 0xff102030L, 0xff00ff00L)
+  e.edit(mapOf("action" to "palettePreset", "colors" to colors, "remap" to true))
+  assertEquals(8, e.document.depth)
+  assertEquals(4, e.document.transparentIndex)
+  assertArrayEquals(intArrayOf(1, 4), e.document.frames[0].cels[0]!!.pixels)
+  assertArrayEquals(intArrayOf(2, 3), e.document.frames[0].cels[1]!!.pixels)
+  assertArrayEquals(intArrayOf(0, 4), e.document.frames[1].cels[0]!!.pixels)
+  assertNull(e.document.frames[1].cels[0]!!.link)
+  assertEquals(128, e.document.frames[1].cels[0]!!.opacity)
+  assertEquals("linked-meta", e.document.frames[1].cels[0]!!.data!!.text)
+  assertEquals(11, e.document.layers[1].flags)
+  val reopened = Aseprite.read(Aseprite.write(e.document))
+  for (f in 0..1) {
+   assertArrayEquals((colors + 0L).map { it.toInt() }.toIntArray(), reopened.frames[f].palette)
+   assertTrue(reopened.frames[f].paletteNames.isEmpty())
+   assertArrayEquals(pixels[f], reopened.composite(f))
+  }
+  e.undo()
+  assertArrayEquals(before, Aseprite.write(e.document))
+  assertEquals(false, e.state(false)["canUndo"])
+  e.redo()
+  assertArrayEquals(intArrayOf(0, 4), e.document.frames[1].cels[0]!!.pixels)
+ }
+ @Test fun presetQuantizationIncludesAlphaAndResolvesTiesDeterministically() {
+  val e = EditorEngine()
+  e.replace(Document(4, 1, mutableListOf(Layer("Ink")), mutableListOf(
+   Frame(palette = intArrayOf(0, 0xff101010.toInt(), 0x80101010.toInt(), 0xff808080.toInt()),
+    cels = mutableListOf(Cel(0, 0, 4, 1, intArrayOf(0, 1, 2, 3))))
+  ), depth = 8))
+  e.edit(mapOf("action" to "palettePreset", "colors" to listOf(0xff101010L, 0x80101010L, 0xff7f8080L, 0xff818080L), "remap" to true))
+  assertArrayEquals(intArrayOf(4, 0, 1, 2), e.document.frames[0].cels[0]!!.pixels)
+ }
+ @Test fun invalidPresetsAndUnconfirmedRemapsDoNotChangeHistory() {
+  val e = EditorEngine()
+  val before = Aseprite.write(e.document)
+  for (colors in listOf(null, "not a list", emptyList<Int>(), List(257) { 0 }, listOf(-1), listOf(0x100000000L), listOf(1.0), listOf("ffffff"), listOf(null))) {
+   try { e.edit(mapOf("action" to "palettePreset", "colors" to colors)); fail("must reject") }
+   catch (_: IllegalArgumentException) {}
+   assertArrayEquals(before, Aseprite.write(e.document))
+   assertEquals(false, e.state(false)["canUndo"])
+   assertFalse(e.dirty)
+  }
+  val i = indexed()
+  val indexedBefore = Aseprite.write(i.document)
+  for (args in listOf(
+   mapOf("colors" to listOf(0xff000000L)),
+   mapOf("colors" to listOf(0xff000000L), "remap" to false),
+   mapOf("colors" to listOf(0xff000000L), "remap" to "true"),
+   mapOf("colors" to List(256) { 0xff000000L }, "remap" to true)
+  )) {
+   try { i.edit(mapOf("action" to "palettePreset") + args); fail("must reject") }
+   catch (_: IllegalArgumentException) {}
+   assertArrayEquals(indexedBefore, Aseprite.write(i.document))
+   assertEquals(false, i.state(false)["canUndo"])
+  }
+ }
+ @Test fun presetAcceptsMaximumRgbaAndIndexedPaletteSizes() {
+  val e = EditorEngine()
+  val colors = List(256) { 0xff000000L or it.toLong() }
+  e.edit(mapOf("action" to "palettePreset", "colors" to colors))
+  assertArrayEquals(colors.map { it.toInt() }.toIntArray(), Aseprite.read(Aseprite.write(e.document)).frames[0].palette)
+  val i = indexed()
+  i.edit(mapOf("action" to "palettePreset", "colors" to colors.take(255), "remap" to true))
+  assertEquals(255, i.document.transparentIndex)
+  assertEquals(256, Aseprite.read(Aseprite.write(i.document)).frames[0].palette.size)
+ }
+ @Test fun presetRejectsLinkedExpansionBeyondDecodedPixelBudget() {
+  val e = EditorEngine()
+  val d = Document(2048, 2048, mutableListOf(Layer("Ink")), (0..4).map { f ->
+   Frame(palette = intArrayOf(0xff000000.toInt()), cels = mutableListOf(
+    if (f == 0) Cel(0, 0, 2048, 2048, IntArray(Document.MAX_PIXELS))
+    else Cel(0, 0, 0, 0, intArrayOf(), link = 0)))
+  }.toMutableList(), depth = 8)
+  e.replace(d)
+  try { e.edit(mapOf("action" to "palettePreset", "colors" to listOf(0xff000000L), "remap" to true)); fail("must reject") }
+  catch (_: IllegalArgumentException) {}
+  assertSame(d, e.document)
+  assertEquals(0, e.document.frames[4].cels[0]!!.link)
+  assertEquals(false, e.state(false)["canUndo"])
+ }
+ @Test fun presetValidatorFailurePreservesDocumentAndRedoHistory() {
+  val e = indexed()
+  val args = mapOf("action" to "palettePreset", "colors" to listOf(0xff000000L, 0xffffffffL), "remap" to true)
+  e.edit(args)
+  e.undo()
+  val before = Aseprite.write(e.document)
+  e.validateCandidate = { throw IllegalArgumentException("Test rejection") }
+  try { e.edit(args); fail("must reject") } catch (_: IllegalArgumentException) {}
+  assertArrayEquals(before, Aseprite.write(e.document))
+  assertEquals(false, e.state(false)["canUndo"])
+  assertEquals(true, e.state(false)["canRedo"])
+  e.validateCandidate = null
+  e.redo()
+  assertEquals(2, e.document.transparentIndex)
+ }
  private fun indexed():EditorEngine {
   val e=EditorEngine()
   e.replace(Document(2,1,mutableListOf(Layer("Ink"),Layer("Background",flags=11)),mutableListOf(
