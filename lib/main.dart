@@ -100,13 +100,6 @@ class _EditorScreenState extends State<EditorScreen>
     'airbrush': (Icons.blur_circular, 'Airbrush'),
     'blur': (Icons.blur_on, 'Blur'),
     'jumble': (Icons.shuffle, 'Jumble'),
-    'metal': (Icons.brightness_medium, 'Metal'),
-    'cluster': (Icons.grain, 'Cluster'),
-    'stripes': (Icons.texture, 'Stripes'),
-    'sphere': (Icons.circle, 'Sphere'),
-    'knife': (Icons.architecture, 'Knife'),
-    'ditherPaint': (Icons.gradient, 'Dither Paint'),
-    'ditherRetouch': (Icons.grid_4x4, 'Dither Retouch'),
     'pan': (Icons.pan_tool_alt, 'Pan'),
   };
   @override
@@ -424,13 +417,6 @@ class _EditorScreenState extends State<EditorScreen>
     'airbrush': 12,
     'blur': 5,
     'jumble': 5,
-    'metal': 12,
-    'cluster': 12,
-    'stripes': 12,
-    'sphere': 12,
-    'knife': 12,
-    'ditherPaint': 12,
-    'ditherRetouch': 12,
   };
   final _strengths = <String, int>{'airbrush': 20};
   final _groupTools = <String, String>{};
@@ -1266,10 +1252,7 @@ class _EditorScreenState extends State<EditorScreen>
           value: 'density',
           child: Text('Spray density: $sprayDensity'),
         ),
-      if (tool == 'blur' ||
-          tool == 'jumble' ||
-          tool == 'airbrush' ||
-          tool == 'ditherPaint')
+      if (tool == 'blur' || tool == 'jumble' || tool == 'airbrush')
         PopupMenuItem(
           value: 'strength',
           child: Text('Strength: $effectStrength%'),
@@ -1364,10 +1347,7 @@ class _EditorScreenState extends State<EditorScreen>
                 child: Text('Density $sprayDensity'),
               ),
             ),
-          if (tool == 'blur' ||
-              tool == 'jumble' ||
-              tool == 'airbrush' ||
-              tool == 'ditherPaint')
+          if (tool == 'blur' || tool == 'jumble' || tool == 'airbrush')
             PopupMenuButton<int>(
               tooltip: 'Effect strength',
               onSelected: (value) => setState(() => effectStrength = value),

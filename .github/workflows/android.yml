@@ -163,7 +163,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install missing Linux build dependencies (bounded retries)
-        timeout-minutes: 7
+        timeout-minutes: 15
         run: bash scripts/install-linux-deps.sh
       - uses: subosito/flutter-action@v2
         if: matrix.arch == 'x64'
