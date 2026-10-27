@@ -37,7 +37,12 @@ class Editor extends ChangeNotifier {
   ) => channel.invokeMapMethod<String, dynamic>(method, args);
   static const channel = MethodChannel('pocketpixel/editor');
   Map<String, dynamic> state = {};
-  ui.Image? image, previous;
+  ui.Image? image, previous, next;
+  bool _slideViewEnabled = false, _slideLoading = false;
+  int _slideEpoch = 0;
+  (int, int)? _slideKey;
+  final _viewChanges = _EditorSignal();
+  Listenable get viewChanges => _viewChanges;
   bool busy = false;
   bool get busyDrawing => busy && _drawing;
   bool _drawing = false;
@@ -72,6 +77,75 @@ class Editor extends ChangeNotifier {
   Future<ui.Image?> _decode(dynamic data) async {
     if (data is! Uint8List || data.length != width * height * 4) return null;
     return decodeImage(data, width: width, height: height);
+  }
+
+  /// View-only decoding is separate from stroke commits and never delays input.
+  void setSlideViewEnabled(bool enabled) {
+    if (_disposed || enabled == _slideViewEnabled) return;
+    _slideViewEnabled = enabled;
+    _slideEpoch++;
+    if (!enabled) {
+      next?.dispose();
+      next = null;
+      _slideKey = null;
+      _viewChanges.emit();
+    } else {
+      _scheduleSlidePreview();
+    }
+  }
+
+  void _scheduleSlidePreview() {
+    if (_disposed || !_slideViewEnabled) return;
+    final key = (documentRevision, frame);
+    if (key != _slideKey) {
+      _slideEpoch++;
+      _slideKey = key;
+      next?.dispose();
+      next = null;
+      _viewChanges.emit();
+    }
+    scheduleMicrotask(_loadSlidePreview);
+  }
+
+  Future<void> _loadSlidePreview() async {
+    if (_disposed ||
+        !_slideViewEnabled ||
+        busy ||
+        _slideLoading ||
+        next != null) {
+      return;
+    }
+    final count = (state['frames'] as List? ?? const []).length;
+    if (frame + 1 >= count) return;
+    final epoch = _slideEpoch;
+    final index = frame + 1, w = width, h = height;
+    _slideLoading = true;
+    ui.Image? decoded;
+    try {
+      final result = await transport('frameImage', {'frame': index});
+      if (_disposed || !_slideViewEnabled || epoch != _slideEpoch) return;
+      final data = result?['pixels'];
+      if (result?['frame'] != index ||
+          result?['width'] != w ||
+          result?['height'] != h ||
+          data is! Uint8List ||
+          data.length != w * h * 4) {
+        return;
+      }
+      decoded = await decodeImage(data, width: w, height: h);
+      if (_disposed || !_slideViewEnabled || epoch != _slideEpoch) return;
+      next = decoded;
+      decoded = null;
+      _viewChanges.emit();
+    } catch (_) {
+      // A neighbor preview must never fail the edit or replace document state.
+    } finally {
+      decoded?.dispose();
+      _slideLoading = false;
+      if (!_disposed && _slideViewEnabled && epoch != _slideEpoch) {
+        scheduleMicrotask(_loadSlidePreview);
+      }
+    }
   }
 
   Future<bool> call(String method, [Map<String, dynamic>? args]) async {
@@ -144,6 +218,7 @@ class Editor extends ChangeNotifier {
         }
       }
       finished?.complete();
+      _scheduleSlidePreview();
     }
   }
 
@@ -207,6 +282,10 @@ class Editor extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _slideEpoch++;
+    next?.dispose();
+    next = null;
+    _viewChanges.dispose();
     _thumbnails.dispose();
     _imageChanges.dispose();
     _documentChanges.dispose();

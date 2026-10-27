@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'editor.dart';
 import 'export_dialog.dart';
 import 'pixel_canvas.dart';
+import 'canvas_view_mode.dart';
 import 'visual_tag_editor.dart';
 import 'palette_editor.dart';
 import 'engine/palette_presets.dart';
@@ -87,6 +88,7 @@ class _EditorScreenState extends State<EditorScreen>
   String gradientDirection = 'vertical';
   int sprayDensity = 12, effectStrength = 50, strokeSeed = 1;
   bool grid = false, onion = false, playing = false, allowExit = false;
+  CanvasViewMode canvasViewMode = CanvasViewMode.normal;
   String? panel;
   bool editingText = false;
   final _tagEditorKey = GlobalKey<VisualTagEditorState>();
@@ -608,6 +610,12 @@ class _EditorScreenState extends State<EditorScreen>
         setState(() => grid = !grid);
       case 'onion':
         setState(() => onion = !onion);
+      case 'viewNormal':
+        setState(() => canvasViewMode = CanvasViewMode.normal);
+      case 'viewTiled':
+        setState(() => canvasViewMode = CanvasViewMode.tiled);
+      case 'viewSlide':
+        setState(() => canvasViewMode = CanvasViewMode.slide);
       case 'fit':
         setState(() => fitToken++);
       case 'flipHorizontal':
@@ -763,6 +771,21 @@ class _EditorScreenState extends State<EditorScreen>
                   value: 'onion',
                   checked: onion,
                   child: const Text('Onion skin'),
+                ),
+                CheckedPopupMenuItem(
+                  value: 'viewNormal',
+                  checked: canvasViewMode == CanvasViewMode.normal,
+                  child: const Text('View · Normal'),
+                ),
+                CheckedPopupMenuItem(
+                  value: 'viewTiled',
+                  checked: canvasViewMode == CanvasViewMode.tiled,
+                  child: const Text('View · Tiled (3×3)'),
+                ),
+                CheckedPopupMenuItem(
+                  value: 'viewSlide',
+                  checked: canvasViewMode == CanvasViewMode.slide,
+                  child: const Text('View · Slide'),
                 ),
                 const PopupMenuItem(value: 'fit', child: Text('Fit canvas')),
                 const PopupMenuItem(
@@ -1180,6 +1203,7 @@ class _EditorScreenState extends State<EditorScreen>
     brush: brush,
     grid: grid,
     onion: onion,
+    viewMode: canvasViewMode,
     fitToken: fitToken,
     filled: filledShape,
     mirrorX: mirrorX,

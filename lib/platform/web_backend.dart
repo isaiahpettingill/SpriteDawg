@@ -157,6 +157,7 @@ class DesktopBackend {
       case 'recover':
       case 'discardRecovery':
         break;
+      case 'frameImage':
       case 'thumbnails':
       case 'previewStroke':
         return engine.invoke(method, args);

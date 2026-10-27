@@ -22,6 +22,11 @@ SpriteDawg is now a Flutter pixel-art editor for Android and Linux, focused on d
 - Compact palette dialog with **Add current color** and **Edit selected color**. Existing exact colors are selected without adding duplicate entries; explicit indexed selections retain their index.
 - Naming, reordering, removing, color-mode conversion, and undo/redo live under **Palette options**. Removal and mode conversion retain their confirmation safeguards.
 
+## Canvas views
+
+- Optional View · Tiled (3×3) and View · Slide in the overflow menu. Neighbors are read-only; only the center edits. Slide replaces onion overlay with adjacent previous/next frames and does not wrap at the ends.
+- View modes are off by default, preserve pan/zoom and pending strokes, and never alter document/export data.
+
 ## Drawing and animation
 
 - Palette-aware Metal, Cluster, Stripes, Sphere and Knife brushes; Dither Paint under Pencil and Dither Retouch under Blur. See `docs/PALETTE_BRUSHES.md` for palette and alpha behavior.
