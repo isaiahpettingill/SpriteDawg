@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'editor.dart';
 import 'color_picker.dart';
 import 'palette_presets.dart';
+import 'user_palette_store.dart';
+import 'preset_color_editor.dart';
 
 Future<void> showPaletteEditor(
   BuildContext context, {
@@ -28,8 +30,10 @@ class PaletteEditor extends StatefulWidget {
     required this.onSelect,
     this.currentColor,
     this.currentPaletteIndex,
+    this.presetStore,
   });
   final Editor editor;
+  final UserPaletteStore? presetStore;
   final int Function()? currentColor;
   final int? Function()? currentPaletteIndex;
   final void Function(int color, int index) onSelect;
@@ -41,6 +45,7 @@ class _PaletteEditorState extends State<PaletteEditor> {
   final name = TextEditingController();
   int selected = 0;
   String? message;
+  bool savingPreset = false;
   Editor get e => widget.editor;
   @override
   void initState() {
@@ -67,6 +72,14 @@ class _PaletteEditorState extends State<PaletteEditor> {
     name.text = names is List && selected < names.length
         ? '${names[selected] ?? ''}'
         : '';
+  }
+
+  String _swatchName(int index) {
+    final names = e.state['paletteNames'];
+    final value = names is List && index < names.length ? names[index] : null;
+    return value is String && value.isNotEmpty
+        ? 'Swatch ${index + 1} · $value'
+        : 'Swatch ${index + 1}';
   }
 
   Future<bool> _edit(String action, Map<String, dynamic> args) async {
@@ -129,9 +142,49 @@ class _PaletteEditorState extends State<PaletteEditor> {
     }
   }
 
+  Future<void> _savePreset() async {
+    if (e.busy || savingPreset || e.palette.isEmpty) return;
+    setState(() => savingPreset = true);
+    // Snapshot immediately: editing this draft never edits the open document.
+    final colors = List<int>.of(e.palette);
+    final rawNames = e.state['paletteNames'];
+    final names = List<String>.generate(colors.length, (i) {
+      final value = rawNames is List && i < rawNames.length
+          ? rawNames[i]
+          : null;
+      return value is String ? value : '';
+    });
+    try {
+      final draft = await showPresetColorEditor(
+        context,
+        name: 'My palette',
+        colors: colors,
+        colorNames: names,
+      );
+      if (draft == null) return;
+      final saved = await (widget.presetStore ?? UserPaletteStore.shared).save(
+        name: draft.name,
+        colors: draft.colors,
+        colorNames: draft.colorNames,
+      );
+      if (mounted) {
+        setState(() => message = '${saved.name} saved to My palettes');
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => message =
+              'Could not save preset. Your previous presets and document are unchanged.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => savingPreset = false);
+    }
+  }
+
   Future<void> _preset() async {
     if (e.busy) return;
-    final preset = await showPalettePresets(context);
+    final preset = await showPalettePresets(context, store: widget.presetStore);
     if (preset == null || !mounted) return;
     final indexed = e.state['depth'] == 8;
     if (indexed) {
@@ -159,6 +212,7 @@ class _PaletteEditorState extends State<PaletteEditor> {
     if (await _edit('palettePreset', {
           'colors': preset.colors,
           'remap': indexed,
+          if (preset.colorNames.isNotEmpty) 'names': preset.colorNames,
         }) &&
         mounted) {
       setState(
@@ -431,6 +485,18 @@ class _PaletteEditorState extends State<PaletteEditor> {
                       icon: const Icon(Icons.collections_bookmark_outlined),
                       label: const Text('Preset palettes'),
                     ),
+                    Tooltip(
+                      message:
+                          'Save swatches; indexed transparency is document-specific.',
+                      child: TextButton.icon(
+                        key: const Key('save-palette-preset'),
+                        onPressed: e.busy || savingPreset || colors.isEmpty
+                            ? null
+                            : _savePreset,
+                        icon: const Icon(Icons.bookmark_add_outlined),
+                        label: const Text('Save as preset…'),
+                      ),
+                    ),
                     const SizedBox(height: 8),
                     if (widget.currentColor != null) ...[
                       FilledButton.tonalIcon(
@@ -456,12 +522,16 @@ class _PaletteEditorState extends State<PaletteEditor> {
                         for (var i = 0; i < colors.length; i++)
                           Semantics(
                             label:
-                                'Swatch ${i + 1}${indexed && i == e.state['transparentIndex'] ? ', transparent index' : ''}',
+                                '${paletteSwatchLabel(colors[i], _swatchName(i))}${indexed && i == e.state['transparentIndex'] ? ', transparent index' : ''}',
                             selected: selected == i,
                             button: true,
                             child: Tooltip(
-                              message:
-                                  'Swatch ${i + 1} · #${colors[i].toRadixString(16).padLeft(8, '0')}',
+                              message: colors[i] >> 24 == 255
+                                  ? 'Swatch ${i + 1} · #${colors[i].toRadixString(16).padLeft(8, '0')}'
+                                  : paletteSwatchLabel(
+                                      colors[i],
+                                      _swatchName(i),
+                                    ),
                               child: InkWell(
                                 onTap: e.busy
                                     ? null
