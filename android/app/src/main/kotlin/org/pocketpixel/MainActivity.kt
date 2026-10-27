@@ -18,6 +18,7 @@ class MainActivity : FlutterActivity() {
     private val editor get() = sessions.active.engine
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
+    private val exportFiles by lazy { ExportFiles(this, worker, main) }
     private val recovery get() = AtomicFile(File(filesDir,"recovery-${sessions.activeId}.aseprite"))
     private var currentUri: Uri?
         get() = sessions.active.path?.let(Uri::parse)
@@ -134,11 +135,17 @@ class MainActivity : FlutterActivity() {
     @Suppress("UNCHECKED_CAST")
     private fun handle(call: MethodCall, result: MethodChannel.Result) {
         val args=call.arguments as? Map<String, Any?> ?: emptyMap()
+        if (call.method == "saveExport") {
+            if (pending != null) { result.error("busy", "Finish the file picker first", null); return }
+            exportFiles.begin(args, result); return
+        }
+        if (exportFiles.busy) { result.error("busy", "Finish the export first", null); return }
         if (call.method in listOf("open","saveAs","exportPng")) { launchPicker(call.method,result); return }
         execute(result) {
             when(call.method) {
                 "init", "state" -> Unit
                 "openExternal" -> openExternal()
+                "exportSnapshot" -> return@execute exportSnapshot(editor.document, editor.frame, args)
                 "thumbnails" -> return@execute editor.thumbnails(args)
                 "previewStroke" -> return@execute editor.previewStroke(args)
                 "new" -> { sessions.add(Document.create(args.number("width",32),args.number("height",32)),unsaved=true); changed() }
@@ -201,6 +208,7 @@ class MainActivity : FlutterActivity() {
     @Deprecated("Android activity result callback is required by FlutterActivity's SAF bridge")
     override fun onActivityResult(requestCode: Int,resultCode: Int,data: Intent?) {
         super.onActivityResult(requestCode,resultCode,data)
+        if (requestCode == ExportFiles.REQUEST) { exportFiles.complete(resultCode, data); return }
         if(requestCode!=42) return
         val result=pending ?: return
         val kind=pendingKind; val bytes=pendingBytes; val snapshotRevision=pendingRevision; val snapshotDocument=pendingDocument

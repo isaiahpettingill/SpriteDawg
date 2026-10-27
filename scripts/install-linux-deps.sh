@@ -2,7 +2,7 @@
 # Hosted runners already contain most tools. Don't refresh every APT source if
 # every required package is installed. Limit transient mirror waits and retries.
 set -euo pipefail
-packages=(clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-12-dev)
+packages=(clang cmake ninja-build meson nasm pkg-config libgtk-3-dev libstdc++-12-dev)
 missing=()
 for package in "${packages[@]}"; do
   if [[ "$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null || true)" != 'install ok installed' ]]; then

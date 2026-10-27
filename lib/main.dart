@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'editor.dart';
+import 'export_dialog.dart';
 import 'pixel_canvas.dart';
 import 'visual_tag_editor.dart';
 import 'palette_editor.dart';
@@ -32,6 +33,14 @@ void main(List<String> args) {
     yield const LicenseEntryWithLineBreaks([
       'DawnBringer 16 palette',
     ], dawnBringerPaletteLicense);
+  });
+  LicenseRegistry.addLicense(() async* {
+    yield LicenseEntryWithLineBreaks(
+      const ['Image export codecs and dependencies'],
+      await rootBundle.loadString(
+        'packages/spritedawg_avif_linux/THIRD_PARTY_NOTICES.txt',
+      ),
+    );
   });
   runApp(PocketPixelApp(initialFiles: args));
 }
@@ -593,7 +602,7 @@ class _EditorScreenState extends State<EditorScreen>
       case 'saveAs':
         await fileAction('saveAs');
       case 'exportPng':
-        await fileAction('exportPng');
+        await showExportDialog(context, e);
       case 'grid':
         setState(() => grid = !grid);
       case 'onion':
@@ -742,10 +751,7 @@ class _EditorScreenState extends State<EditorScreen>
               itemBuilder: (context) => [
                 const PopupMenuItem(value: 'new', child: Text('New canvas')),
                 const PopupMenuItem(value: 'saveAs', child: Text('Save as…')),
-                const PopupMenuItem(
-                  value: 'exportPng',
-                  child: Text('Export current frame as PNG'),
-                ),
+                const PopupMenuItem(value: 'exportPng', child: Text('Export…')),
                 const PopupMenuDivider(),
                 CheckedPopupMenuItem(
                   value: 'grid',
