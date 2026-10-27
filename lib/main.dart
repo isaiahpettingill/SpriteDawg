@@ -15,7 +15,7 @@ import 'document_tabs.dart';
 import 'responsive_editor_shell.dart';
 
 void main(List<String> args) {
-  LicenseRegistry.addLicense(() sync* {
+  LicenseRegistry.addLicense(() async* {
     yield const LicenseEntryWithLineBreaks([
       'Solarized palette',
     ], solarizedPaletteLicense);
