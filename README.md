@@ -130,7 +130,7 @@ flutter test
 flutter build apk --debug
 (cd android && ./gradlew :app:testDebugUnitTest :app:lintDebug)
 flutter build linux --release
-scripts/package-linux.sh x64 # arm64 on an ARM64 Linux host
+scripts/package-linux.sh x64 0.3.65 # pass your build version; arm64 on ARM64
 ```
 
 The fixture script verifies immutable upstream Git blob hashes. Test sprites retain
@@ -138,7 +138,7 @@ upstream copyright, are ignored by Git, and are never packaged in the applicatio
 
 Debug builds include Flutter's development VM-service Internet permission for
 emulator/device testing; release builds do not request Internet permission. The
-editor itself contains no networking or analytics.
+Android editor contains no networking or analytics. Linux only contacts GitHub when you choose **Check for updates…**.
 
 Independent reader regression (Node.js, no runtime app dependency):
 
@@ -192,3 +192,27 @@ Publication stages a draft, checks all five platform assets against `SHA256SUMS`
 ### Open with SpriteDawg
 
 Android registers narrow Aseprite MIME/extension handlers; Linux bundles include MIME registration and a per-user installer. External opens add document tabs instead of replacing unsaved work. See [file association installation and provider limitations](FILE_ASSOCIATIONS.md).
+
+### Linux installer and updates
+
+Download `install-spritedawg.sh` from the [latest release](https://github.com/isaiahpettingill/SpriteDawg/releases/latest), review it, then run:
+
+```sh
+bash ~/Downloads/install-spritedawg.sh
+```
+
+Requires Python 3.9+, Linux x64 or ARM64, and the GTK runtime used by the app.
+No sudo. It downloads the latest stable build, checks its SHA-256 against the
+release manifest, validates the archive, and installs into
+`${XDG_DATA_HOME:-$HOME/.local/share}/spritedawg`. The launcher, icon and Aseprite
+file associations are refreshed without changing your default editor.
+`shared-mime-info` and `desktop-file-utils` enable immediate desktop cache refresh.
+Checksums detect corrupted downloads; they are not an independent release signature.
+
+On Linux, use the overflow menu **Check for updates…**, then **Install update**.
+Checks are manual and installation requires confirmation. Your running editor and
+unsaved drawings stay open; save and restart from the application menu when ready.
+Old version folders are retained so running processes keep their libraries. Updates
+use a staged, verified bundle and atomically switch the `current` launcher target;
+failed activation restores the previous registration. Documents and preferences
+are never removed. The installer also supports `--check` and `--version vX.Y.Z`.

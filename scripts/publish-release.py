@@ -34,10 +34,11 @@ def local_assets(directory, tag):
     expected = {f'spritedawg-{tag}-android-{abi}.apk' for abi in
                 ('armeabi-v7a', 'arm64-v8a', 'x86_64')}
     expected.update(f'spritedawg-{tag}-linux-{arch}.tar.gz' for arch in ('x64', 'arm64'))
+    expected.add('install-spritedawg.sh')
     directory = Path(directory)
     files = {p.name: p for p in directory.iterdir()}
     if set(files) != expected | {'SHA256SUMS'}:
-        raise ValueError('Expected exactly three APKs, two Linux archives and SHA256SUMS')
+        raise ValueError('Expected exactly three APKs, two Linux archives, installer and SHA256SUMS')
     if any(p.is_symlink() or not p.is_file() or p.stat().st_size == 0 for p in files.values()):
         raise ValueError('Release assets must be nonempty regular files, not symlinks')
     manifest = {}
@@ -47,7 +48,7 @@ def local_assets(directory, tag):
             raise ValueError('Malformed or duplicate checksum entry')
         manifest[match[2]] = match[1]
     if set(manifest) != expected:
-        raise ValueError('Checksum manifest must cover exactly the five platform assets')
+        raise ValueError('Checksum manifest must cover exactly the six platform/installer assets')
     hashes = {name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in files.items()}
     if any(hashes[name] != digest for name, digest in manifest.items()):
         raise ValueError('Local asset checksum mismatch')
