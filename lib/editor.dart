@@ -1,4 +1,5 @@
-import 'platform/desktop_backend.dart';
+import 'platform/desktop_backend.dart'
+    if (dart.library.js_interop) 'platform/web_backend.dart';
 import 'rgba_image.dart';
 import 'frame_thumbnails.dart';
 
@@ -25,7 +26,7 @@ class Editor extends ChangeNotifier {
   Editor({EditorTransport? transport, this.decodeImage = decodeStraightRgba})
     : transport =
           transport ??
-          (defaultTargetPlatform == TargetPlatform.linux
+          (kIsWeb || defaultTargetPlatform == TargetPlatform.linux
               ? DesktopBackend().invoke
               : _native);
   final EditorTransport transport;
