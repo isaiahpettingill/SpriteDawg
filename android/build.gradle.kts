@@ -47,6 +47,9 @@ subprojects {
                 "Review flutter_avif_android source changes before skipping its duplicate registrar"
             }
             extensions.configure<LibraryExtension> {
+                // Match the app's compile SDK for Flutter embedding AndroidX
+                // dependencies; minimum supported Android remains unchanged.
+                compileSdk = 36
                 // Upstream ships equivalent Java and Kotlin registrar stubs.
                 // AGP 9 compiles Kotlin automatically. Retain the Java stub
                 // that upstream previously compiled, not the duplicate Kotlin

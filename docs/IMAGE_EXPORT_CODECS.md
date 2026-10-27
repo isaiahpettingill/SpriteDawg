@@ -86,4 +86,6 @@ detach behavior). AGP 9 automatically compiles both, causing a redeclaration.
 Only this dependency's redundant Kotlin compilation is disabled; a source-count
 and exact-path guard fails if new Kotlin logic appears. The original Java
 registrar and all JNI binaries remain compiled/packaged. App Kotlin, lint,
-unit tests and the device AVIF encode/decode test are not disabled.
+unit tests and the device AVIF encode/decode test are not disabled. The plugin
+compile SDK is aligned to the app's 36 for current Flutter AndroidX metadata;
+this does not raise the app's minimum supported Android version.
