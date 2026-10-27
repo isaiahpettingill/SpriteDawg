@@ -40,7 +40,7 @@ MIT licensed, no ads, accounts, tracking, networking or broad Android storage pe
 - Sprite/layer/cel/tag user-data text; existing binary typed-property payloads remain
   attached to their original objects. Unsupported advanced features are refused,
   rather than silently flattened.
-- Aseprite open/save/save-as; PNG export only flattens the exported image.
+- Aseprite open/save/save-as; offline PNG, GIF, APNG, WebP, QOI and AVIF export, plus PNG spritesheets with JSON. Exports flatten visible layers without changing the project.
 - Atomic app-private recovery after edits. A failed recovery write is shown, not
   treated as success. Recovering opens an **unsaved copy**, never an old save path.
 
@@ -143,7 +143,7 @@ flutter test
 flutter build apk --debug
 (cd android && ./gradlew :app:testDebugUnitTest :app:lintDebug)
 flutter build linux --release
-scripts/package-linux.sh x64 # arm64 on an ARM64 Linux host
+scripts/package-linux.sh x64 0.3.65 # pass your build version; arm64 on ARM64
 ```
 
 The fixture script verifies immutable upstream Git blob hashes. Test sprites retain
@@ -151,7 +151,7 @@ upstream copyright, are ignored by Git, and are never packaged in the applicatio
 
 Debug builds include Flutter's development VM-service Internet permission for
 emulator/device testing; release builds do not request Internet permission. The
-editor itself contains no networking or analytics.
+Android editor contains no networking or analytics. Linux only contacts GitHub when you choose **Check for updates…**.
 
 Independent reader regression (Node.js, no runtime app dependency):
 
@@ -216,3 +216,41 @@ these modes do not change exports or document data. Only the outlined central
 canvas is editable; dragging a neighbor pans. Frame ends stay blank (no wrap).
 Fit includes the context cells. Slide lazily caches one additional full-resolution
 next-frame image, discards stale responses, and releases it when disabled.
+
+### Linux installer and updates
+
+Download `install-spritedawg.sh` from the [latest release](https://github.com/isaiahpettingill/SpriteDawg/releases/latest), review it, then run:
+
+```sh
+bash ~/Downloads/install-spritedawg.sh
+```
+
+Requires Python 3.9+, Linux x64 or ARM64, and the GTK runtime used by the app.
+No sudo. It downloads the latest stable build, checks its SHA-256 against the
+release manifest, validates the archive, and installs into
+`${XDG_DATA_HOME:-$HOME/.local/share}/spritedawg`. The launcher, icon and Aseprite
+file associations are refreshed without changing your default editor.
+`shared-mime-info` and `desktop-file-utils` enable immediate desktop cache refresh.
+Checksums detect corrupted downloads; they are not an independent release signature.
+
+On Linux, use the overflow menu **Check for updates…**, then **Install update**.
+Checks are manual and installation requires confirmation. Your running editor and
+unsaved drawings stay open; save and restart from the application menu when ready.
+Old version folders are retained so running processes keep their libraries. Updates
+use a staged, verified bundle and atomically switch the `current` launcher target;
+failed activation restores the previous registration. Documents and preferences
+are never removed. The installer also supports `--check` and `--version vX.Y.Z`.
+## Image and spritesheet export
+
+Choose **⋮ → Export…**. GIF, APNG and WebP can export the current frame, all
+frames, or a tag; tag direction and frame timing are retained within format
+limits. PNG/QOI/AVIF export the current frame. GIF warns before reducing colors,
+transparency or timing. AVIF is high-quality lossy (including alpha) and requires
+at least 16×16 pixels; use PNG/APNG, lossless WebP or QOI for pixel-exact artwork.
+
+**Spritesheet + JSON** writes untrimmed PNG cells with Aseprite-style JSON-array
+frame rectangles, durations and tags. Choose columns and padding; the picker
+creates a new folder containing both matching files, never overwriting an old
+pair. Cancel leaves the project untouched. Exports are bounded to 32 MiB of
+selected frame pixels; split large animations into tags if needed.
+See [codec details and verification](docs/IMAGE_EXPORT_CODECS.md).

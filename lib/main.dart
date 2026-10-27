@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'editor.dart';
+import 'export_dialog.dart';
 import 'pixel_canvas.dart';
 import 'canvas_view_mode.dart';
 import 'visual_tag_editor.dart';
@@ -13,6 +14,7 @@ import 'engine/palette_presets.dart';
 import 'color_picker.dart';
 import 'tool_groups.dart';
 import 'document_tabs.dart';
+import 'linux_updater.dart';
 import 'responsive_editor_shell.dart';
 
 void main(List<String> args) {
@@ -32,6 +34,14 @@ void main(List<String> args) {
     yield const LicenseEntryWithLineBreaks([
       'DawnBringer 16 palette',
     ], dawnBringerPaletteLicense);
+  });
+  LicenseRegistry.addLicense(() async* {
+    yield LicenseEntryWithLineBreaks(
+      const ['Image export codecs and dependencies'],
+      await rootBundle.loadString(
+        'packages/spritedawg_avif_linux/THIRD_PARTY_NOTICES.txt',
+      ),
+    );
   });
   runApp(PocketPixelApp(initialFiles: args));
 }
@@ -594,7 +604,7 @@ class _EditorScreenState extends State<EditorScreen>
       case 'saveAs':
         await fileAction('saveAs');
       case 'exportPng':
-        await fileAction('exportPng');
+        await showExportDialog(context, e);
       case 'grid':
         setState(() => grid = !grid);
       case 'onion':
@@ -612,6 +622,10 @@ class _EditorScreenState extends State<EditorScreen>
         await edit(action);
       case 'metadata':
         await metadata();
+      case 'updates':
+        if (LinuxUpdater.supported && mounted) {
+          await showLinuxUpdater(context);
+        }
       case 'help':
         if (mounted) {
           await showDialog<void>(
@@ -745,10 +759,7 @@ class _EditorScreenState extends State<EditorScreen>
               itemBuilder: (context) => [
                 const PopupMenuItem(value: 'new', child: Text('New canvas')),
                 const PopupMenuItem(value: 'saveAs', child: Text('Save as…')),
-                const PopupMenuItem(
-                  value: 'exportPng',
-                  child: Text('Export current frame as PNG'),
-                ),
+                const PopupMenuItem(value: 'exportPng', child: Text('Export…')),
                 const PopupMenuDivider(),
                 CheckedPopupMenuItem(
                   value: 'grid',
@@ -789,6 +800,11 @@ class _EditorScreenState extends State<EditorScreen>
                   child: Text('User data'),
                 ),
                 const PopupMenuItem(value: 'help', child: Text('Drawing help')),
+                if (LinuxUpdater.supported)
+                  const PopupMenuItem(
+                    value: 'updates',
+                    child: Text('Check for updates…'),
+                  ),
               ],
             ),
           ],

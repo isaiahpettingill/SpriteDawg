@@ -7,6 +7,11 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  image: 4.12.0
+  flutter_avif_platform_interface: 3.1.0
+  flutter_avif_android: 3.1.0
+  spritedawg_avif_linux:
+    path: packages/spritedawg_avif_linux
   file_selector: ^1.0.4
   path_provider: ^2.1.5
 dev_dependencies:

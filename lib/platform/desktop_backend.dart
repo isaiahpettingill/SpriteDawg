@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'dart:isolate';
+
 import 'dart:typed_data';
 
 import 'package:file_selector/file_selector.dart';
@@ -9,6 +11,8 @@ import '../engine/editor_engine.dart';
 import '../engine/editor_sessions.dart';
 import '../engine/document.dart';
 import '../engine/png.dart';
+import '../export/export_snapshot.dart';
+import 'export_files.dart';
 
 /// Desktop filesystem adapter. The editor always retains a recoverable copy
 /// before replacing a project; a cancelled dialog never changes saved state.
@@ -150,6 +154,13 @@ class DesktopBackend {
     await _init();
     final args = arguments ?? <String, dynamic>{};
     switch (method) {
+      case 'saveExport':
+        return ExportFiles().save(args);
+      case 'exportSnapshot':
+        // Isolate message transfer detaches the model; avoid a second deep copy.
+        final snapshot = engine.document;
+        final frame = engine.frame;
+        return Isolate.run(() => exportSnapshot(snapshot, frame, args));
       case 'thumbnails':
       case 'frameImage':
       case 'previewStroke':

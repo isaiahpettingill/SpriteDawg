@@ -1,0 +1,19 @@
+name: spritedawg_avif_linux
+description: Native-architecture Linux AVIF codec for SpriteDawg.
+version: 1.0.0
+publish_to: none
+environment:
+  sdk: '>=3.10.0 <4.0.0'
+  flutter: '>=3.22.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_avif_platform_interface: 3.1.0
+flutter:
+  assets:
+    - THIRD_PARTY_NOTICES.txt
+  plugin:
+    platforms:
+      linux:
+        pluginClass: SpritedawgAvifLinuxPlugin
+        dartPluginClass: SpritedawgAvifLinux
