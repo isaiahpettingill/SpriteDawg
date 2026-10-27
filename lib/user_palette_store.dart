@@ -22,7 +22,7 @@ class UserPaletteStore {
 
   Future<T> _serialized<T>(Future<T> Function() action) {
     final result = _pending.then((_) => action());
-    _pending = result.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+    _pending = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
     return result;
   }
 
@@ -143,8 +143,9 @@ class UserPaletteStore {
         throw const FormatException('A personal palette entry is damaged.');
       }
       final id = record['id'] as String;
-      if (!ids.add(id))
+      if (!ids.add(id)) {
         throw const FormatException('Duplicate palette identity.');
+      }
       final name = record['name'] as String;
       final colors = (record['colors'] as List).cast<int>();
       final names = (record['colorNames'] as List).cast<String>();
