@@ -4,9 +4,46 @@ import kotlin.math.*
 
 /** Native pixel operations. Ordinary ink covers once; spray/airbrush accumulate per dab. */
 internal object NativeStroke {
-    fun apply(d: Document, frame: Int, layer: Int, args: Map<String, Any?>, points: List<Pair<Int,Int>>, size: Int, color: Int) {
+    fun preparePalettePixels(d: Document, frame: Int, layer: Int, args: Map<String, Any?>, points: List<Pair<Int,Int>>, size: Int, color: Int): Map<Int,Int> {
+        val tool = args["tool"] as? String ?: "pencil"
+        val palette = d.frames[frame].palette
+        val selected = if (args.containsKey("paletteIndex")) args.strictInteger("paletteIndex", -1) else null
+        if (selected != null) require(selected in palette.indices) { "Invalid palette index" }
+        val excluded = if (d.depth == 8 && d.layers[layer].flags and 8 == 0) d.transparentIndex else null
+        val dithering = tool == "ditherPaint" || tool == "ditherRetouch"
+        val ramp = if (dithering) listOf(0,0,0,0,0) else paletteShadeRamp(palette, color, selected, excluded)
+        return paletteTexturePixels(tool, points, d.width, d.height, size, ramp,
+            (args["seed"] as? Number)?.toLong() ?: 1L, args["mirrorX"] == true, args["mirrorY"] == true)
+    }
+    fun apply(d: Document, frame: Int, layer: Int, args: Map<String, Any?>, points: List<Pair<Int,Int>>, size: Int, color: Int, preparedPixels: Map<Int,Int>? = null) {
         val tool = args["tool"] as? String ?: "pencil"
         val cel = d.editable(frame,layer)
+        if (tool in paletteTextureTools) {
+            val palette = d.frames[frame].palette
+            val excluded = if (d.depth == 8 && d.layers[layer].flags and 8 == 0) d.transparentIndex else null
+            val dithering = tool == "ditherPaint" || tool == "ditherRetouch"
+            val pixels = preparedPixels ?: preparePalettePixels(d, frame, layer, args, points, size, color)
+            val cache = mutableMapOf<Long, Int>()
+            val strength = args.strictInteger("strength", 50).coerceIn(1, 100)
+            for ((position, entry) in pixels) {
+                val x = position % d.width; val y = position / d.width
+                val index = (y - cel.y) * cel.width + x - cel.x
+                val source = d.display(cel.pixels[index], frame, layer)
+                val paletteEntry = if (dithering) {
+                    val key = ((source.toLong() and 0xffffffffL) shl 4) or ((y and 3)*4+(x and 3)).toLong()
+                    cache.getOrPut(key) {
+                        if (tool == "ditherRetouch") retouchPaletteIndex(palette, source, x, y, excluded)
+                        else ditherPaletteIndex(palette, source, color, x, y, strength, excluded)
+                    }
+                } else entry
+                if (paletteEntry !in palette.indices) continue
+                val ink = if (paletteEntry == excluded) 0 else palette[paletteEntry]
+                if (tool == "ditherRetouch" && ink == source) continue
+                cel.pixels[index] = if (d.depth == 8) paletteEntry
+                    else d.drawingColor(if (dithering) ink else over(source, ink), frame)
+            }
+            return
+        }
         val effect = tool == "blur" || tool == "jumble"
         val source = if (effect || tool == "fill") cel.pixels.copyOf() else cel.pixels
         val paletteIndex = if (args.containsKey("paletteIndex")) args.strictInteger("paletteIndex", -1) else null

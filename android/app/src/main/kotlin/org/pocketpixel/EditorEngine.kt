@@ -54,7 +54,7 @@ class EditorEngine {
     }
     fun stroke(args: Map<String, Any?>) {
         val tool = args["tool"] as? String ?: "pencil"
-        require(tool in listOf("pencil", "eraser", "fill", "gradient", "line", "rectangle", "ellipse", "spray", "airbrush", "blur", "jumble")) { "Unknown drawing tool" }
+        require(tool in listOf("pencil", "eraser", "fill", "gradient", "line", "rectangle", "ellipse", "spray", "airbrush", "blur", "jumble") || tool in paletteTextureTools) { "Unknown drawing tool" }
         val points = (args["points"] as? List<*>)?.map { p ->
             val a = p as List<*>; Pair((a[0] as Number).toInt(), (a[1] as Number).toInt())
         } ?: emptyList()
@@ -67,7 +67,11 @@ class EditorEngine {
         require(document.layers[layer].visible) { "Show this layer before drawing" }
         require(document.layers[layer].flags and 2 != 0) { "This layer is locked" }
         require(tool != "eraser" || document.layers[layer].flags and 8 == 0) { "Convert this background layer to transparent before erasing" }
-        mutate { d -> NativeStroke.apply(d, frame, layer, args, points, size, color) }
+        val palettePixels = if (tool in paletteTextureTools) {
+            if (document.frames[frame].palette.isEmpty()) return
+            NativeStroke.preparePalettePixels(document, frame, layer, args, points, size, color).also { if (it.isEmpty()) return }
+        } else null
+        mutate { d -> NativeStroke.apply(d, frame, layer, args, points, size, color, palettePixels) }
     }
     fun edit(args: Map<String, Any?>) {
         val action = args["action"] as? String ?: error("Missing edit action")
