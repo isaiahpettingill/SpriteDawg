@@ -1,11 +1,11 @@
 // CI uses a disposable Chrome profile. Only picker/download boundaries are
 // injected: drawing, Aseprite import, snapshots and encoders are real browser code.
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
 import 'package:spritedawg/user_palette_store.dart';
-import 'package:spritedawg/platform/palette_storage_web.dart'
+import 'package:spritedawg/platform/palette_storage_io.dart'
+    if (dart.library.js_interop) 'package:spritedawg/platform/palette_storage_web.dart'
     as palette_storage;
 
 import 'package:file_selector/file_selector.dart';
@@ -54,7 +54,12 @@ void main() {
     await settle();
     expect(await editor.call('new', {'width': 16, 'height': 16}), true);
     await settle();
-    await tester.tap(find.byTooltip('Fit canvas'));
+    // Desktop-width layouts keep Fit in the project menu, unlike Android's
+    // compact toolbar. Exercise that real menu rather than assuming an icon.
+    await tester.tap(find.byTooltip('Project and view options'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Fit canvas'));
+    await tester.tap(find.text('Fit canvas'));
     await settle();
     final before = Uint8List.fromList(editor.state['pixels'] as Uint8List);
     await tester.tapAt(tester.getCenter(find.byKey(const Key('pixel-canvas'))));

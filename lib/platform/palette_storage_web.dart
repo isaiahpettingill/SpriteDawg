@@ -9,7 +9,7 @@ Future<File> paletteLibraryFile() async =>
 class File {
   File(this.path);
   final String path;
-  _Directory get parent => _Directory();
+  PaletteStorageDirectory get parent => PaletteStorageDirectory();
   Future<bool> exists() async => web.window.localStorage.getItem(path) != null;
   Future<int> length() async => utf8.encode(await readAsString()).length;
   Future<String> readAsString() async =>
@@ -26,6 +26,6 @@ class File {
   Future<void> delete() async => web.window.localStorage.removeItem(path);
 }
 
-class _Directory {
+class PaletteStorageDirectory {
   Future<void> create({bool recursive = false}) async {}
 }
