@@ -20,9 +20,10 @@ class DefaultUserDataStore {
   }
   final Future<String> Function() read;
   final Future<void> Function(String) write;
-  Future<void> _pending = Future<void>.value();
+  Future<void>? _pending;
   Future<T> _serial<T>(Future<T> Function() action) {
-    final result = _pending.then((_) => action());
+    final previous = _pending;
+    final result = previous == null ? action() : previous.then((_) => action());
     _pending = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
     return result;
   }
