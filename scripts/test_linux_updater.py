@@ -3,6 +3,8 @@ import hashlib
 import io
 import json
 import os
+import shutil
+import subprocess
 from pathlib import Path
 import tarfile
 import tempfile
@@ -76,6 +78,34 @@ class LinuxUpdaterTests(unittest.TestCase):
         self.assertIn('image/x-aseprite;', desktop)
         self.assertIn('Terminal=false', desktop)
         self.assertEqual(len(list((self.home / 'spritedawg/versions').iterdir())), 2)
+
+    @unittest.skipUnless(shutil.which('desktop-file-validate'), 'desktop validator unavailable')
+    def test_desktop_quoting_passes_standard_validator(self):
+        file = Path(self.temp.name) / 'test.desktop'
+        file.write_text(updater.desktop_text(Path('/tmp/spaces $cash %percent/"quote`tick\\slash')))
+        subprocess.run(['desktop-file-validate', str(file)], check=True, capture_output=True)
+
+    def test_packaging_includes_updater_version_and_release_asset(self):
+        repository = SCRIPT.parent.parent
+        root = Path(self.temp.name) / 'package build'
+        for source in ['scripts/package-linux.sh', 'scripts/install-spritedawg.sh',
+                       'linux/packaging/org.pocketpixel.SpriteDawg.desktop',
+                       'linux/packaging/org.pocketpixel.SpriteDawg.xml',
+                       'art/spritedawg.svg', 'LICENSE']:
+            target = root / source
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(repository / source, target)
+        binary = root / 'build/linux/x64/release/bundle/spritedawg'
+        binary.parent.mkdir(parents=True)
+        binary.write_bytes(b'not executed')
+        binary.chmod(0o755)
+        subprocess.run(['bash', 'scripts/package-linux.sh', 'x64', '0.3.99'], cwd=root, check=True)
+        with tarfile.open(root / 'build/spritedawg-linux-x64.tar.gz') as archive:
+            self.assertEqual(archive.extractfile('./release-version.txt').read(), b'v0.3.99\n')
+            self.assertEqual(archive.extractfile('./update-spritedawg.sh').read(), SCRIPT.read_bytes())
+        workflow = (repository / '.github/workflows/android.yml').read_text()
+        self.assertIn('cp scripts/install-spritedawg.sh release-assets/install-spritedawg.sh', workflow)
+        self.assertIn('sha256sum *.apk *.tar.gz *.sh > SHA256SUMS', workflow)
 
     def test_tamper_does_not_change_old_install_or_desktop(self):
         updater.install(INFO, self.home)
