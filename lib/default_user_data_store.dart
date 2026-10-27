@@ -24,7 +24,16 @@ class DefaultUserDataStore {
   Future<T> _serial<T>(Future<T> Function() action) {
     final previous = _pending;
     final result = previous == null ? action() : previous.then((_) => action());
-    _pending = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+    late final Future<void> pending;
+    void settled() {
+      if (identical(_pending, pending)) _pending = null;
+    }
+
+    pending = result.then<void>(
+      (_) => settled(),
+      onError: (Object _, StackTrace _) => settled(),
+    );
+    _pending = pending;
     return result;
   }
 
