@@ -1,5 +1,4 @@
 import '../platform/run_background.dart';
-import 'package:flutter/foundation.dart';
 import 'dart:typed_data';
 
 import 'avif_native.dart' if (dart.library.js_interop) 'avif_web.dart';
@@ -72,7 +71,8 @@ Future<Uint8List> encodeImageExport(
   ImageExportFormat format,
 ) async {
   payload.validate(format);
-  if (kIsWeb && format == ImageExportFormat.avif) {
+  if (const bool.fromEnvironment('dart.library.js_interop') &&
+      format == ImageExportFormat.avif) {
     throw UnsupportedError('AVIF export is available in the installed app.');
   }
   if (format != ImageExportFormat.avif) {
