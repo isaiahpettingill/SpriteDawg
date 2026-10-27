@@ -2,6 +2,13 @@
 
 SpriteDawg is now a Flutter pixel-art editor for Android and Linux, focused on drawing on the go. Free, open source, offline: no accounts, ads, analytics, or Android internet permission.
 
+## Media exports
+
+- Compact export dialog for PNG, animated GIF/APNG/WebP, still QOI/AVIF, and PNG spritesheets with Aseprite-style JSON.
+- Frame/tag selection, playback directions, timing/loops, sheet columns and padding. Export composites visible layers without editing the source.
+- Explicit safe destinations on Android and Linux; paired PNG/JSON files go into a new folder.
+- GIF reports actual color/transparency/timing loss. AVIF is lossy (including alpha), still-only and at least 16×16. Pixel-exact alternatives remain available.
+
 ## Palette controls
 
 - 25 offline built-in palettes: all prior retro presets plus Monokai (Pygments), four Catppuccin flavors, TIC-80/Sweetie16, DawnBringer16 and original Gaem-64, Materials, Characters and Food palettes. AAP-64 is replaced by an independently authored alternative, not copied.
@@ -16,6 +23,8 @@ SpriteDawg is now a Flutter pixel-art editor for Android and Linux, focused on d
 - Naming, reordering, removing, color-mode conversion, and undo/redo live under **Palette options**. Removal and mode conversion retain their confirmation safeguards.
 
 ## Drawing and animation
+
+- Palette-aware Metal, Cluster, Stripes, Sphere and Knife brushes; Dither Paint under Pencil and Dither Retouch under Blur. See `docs/PALETTE_BRUSHES.md` for palette and alpha behavior.
 
 - Long-stroke and effect previews remain visible until the committed canvas image is decoded, including when switching to two-finger navigation. The image handoff retires the matching preview atomically to avoid translucent double-paint flashes.
 

@@ -146,6 +146,35 @@ class Editor extends ChangeNotifier {
     }
   }
 
+  /// One immutable export transaction. No selected frame, dirty flag, history,
+  /// project path or recovery copy is changed, including on cancellation.
+  Future<bool> exportMedia(
+    Map<String, dynamic> selection,
+    Future<Map<String, dynamic>?> Function(Map<String, dynamic>) encode,
+  ) async {
+    if (busy || _disposed) return false;
+    busy = true;
+    error = null;
+    notifyListeners();
+    try {
+      final snapshot = await transport('exportSnapshot', selection);
+      if (snapshot == null || _disposed) return false;
+      final output = await encode(snapshot);
+      if (output == null || _disposed) return false;
+      final result = await transport('saveExport', output);
+      return result?['saved'] == true;
+    } on PlatformException catch (e) {
+      error = e.message ?? e.code;
+      return false;
+    } catch (e) {
+      error = 'Export failed: $e';
+      return false;
+    } finally {
+      busy = false;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
   static bool _sameControls(Map<String, dynamic> a, Map<String, dynamic> b) {
     const pixels = {'pixels', 'previousPixels'};
     final aKeys = a.keys.where((key) => !pixels.contains(key)).toSet();

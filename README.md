@@ -40,7 +40,7 @@ MIT licensed, no ads, accounts, tracking, networking or broad Android storage pe
 - Sprite/layer/cel/tag user-data text; existing binary typed-property payloads remain
   attached to their original objects. Unsupported advanced features are refused,
   rather than silently flattened.
-- Aseprite open/save/save-as; PNG export only flattens the exported image.
+- Aseprite open/save/save-as; offline PNG, GIF, APNG, WebP, QOI and AVIF export, plus PNG spritesheets with JSON. Exports flatten visible layers without changing the project.
 - Atomic app-private recovery after edits. A failed recovery write is shown, not
   treated as success. Recovering opens an **unsaved copy**, never an old save path.
 
@@ -229,3 +229,17 @@ Old version folders are retained so running processes keep their libraries. Upda
 use a staged, verified bundle and atomically switch the `current` launcher target;
 failed activation restores the previous registration. Documents and preferences
 are never removed. The installer also supports `--check` and `--version vX.Y.Z`.
+## Image and spritesheet export
+
+Choose **⋮ → Export…**. GIF, APNG and WebP can export the current frame, all
+frames, or a tag; tag direction and frame timing are retained within format
+limits. PNG/QOI/AVIF export the current frame. GIF warns before reducing colors,
+transparency or timing. AVIF is high-quality lossy (including alpha) and requires
+at least 16×16 pixels; use PNG/APNG, lossless WebP or QOI for pixel-exact artwork.
+
+**Spritesheet + JSON** writes untrimmed PNG cells with Aseprite-style JSON-array
+frame rectangles, durations and tags. Choose columns and padding; the picker
+creates a new folder containing both matching files, never overwriting an old
+pair. Cancel leaves the project untouched. Exports are bounded to 32 MiB of
+selected frame pixels; split large animations into tags if needed.
+See [codec details and verification](docs/IMAGE_EXPORT_CODECS.md).

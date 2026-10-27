@@ -54,10 +54,21 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       - run: flutter pub get
+      - uses: actions/upload-artifact@v4
+        with:
+          name: resolved-dependency-lock
+          path: pubspec.lock
+          retention-days: 7
+          overwrite: true
       - run: python3 scripts/fetch-fixtures.py
       - run: dart format --output=none --set-exit-if-changed lib test
       - run: flutter analyze
       - run: flutter test --reporter expanded
+      - name: Verify exports with independent Pillow decoders
+        run: |
+          python3 -m pip install --disable-pip-version-check Pillow==12.3.0
+          dart tool/image_export_interop.dart
+          python3 scripts/check-image-exports.py build/export-interop
       - name: Cross-check output with independent Aseprite parser
         if: needs.version.outputs.interop == 'true'
         run: |
@@ -146,7 +157,9 @@ jobs:
           arch: x86_64
           profile: pixel_7
           disable-animations: true
-          script: flutter test integration_test/editor_smoke_test.dart -d emulator-5554 --reporter expanded
+          script: |
+            flutter test integration_test/editor_smoke_test.dart -d emulator-5554 --reporter expanded
+            flutter test integration_test/export_codec_test.dart -d emulator-5554 --reporter expanded
   linux:
     needs: [version]
     if: needs.version.outputs.linux == 'true'
@@ -159,12 +172,22 @@ jobs:
           - runner: ubuntu-24.04-arm
             arch: arm64
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - name: Install missing Linux build dependencies (bounded retries)
         timeout-minutes: 15
         run: bash scripts/install-linux-deps.sh
+      - name: Select pinned Rust codec toolchain
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal
+          rustup default 1.90.0
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: avif-cargo-${{ matrix.arch }}-${{ hashFiles('packages/spritedawg_avif_linux/rust/Cargo.lock') }}
       - uses: subosito/flutter-action@v2
         if: matrix.arch == 'x64'
         with:
@@ -178,7 +201,14 @@ jobs:
           echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
           "$RUNNER_TEMP/flutter/bin/flutter" --version
       - run: flutter pub get
-      - run: flutter build linux --release --build-name "${{ needs.version.outputs.version }}" --build-number "${{ needs.version.outputs.build_number }}"
+      - run: flutter build linux --verbose --release --build-name "${{ needs.version.outputs.version }}" --build-number "${{ needs.version.outputs.build_number }}"
+      - name: Verify architecture-native AVIF with independent decoder
+        run: |
+          python3 -m pip install --disable-pip-version-check Pillow==12.3.0
+          codec="$(find build/linux -path '*/bundle/lib/libflutter_avif.so' -print -quit)"
+          test -n "$codec"
+          dart tool/image_export_interop.dart build/export-interop "$(realpath "$codec")"
+          python3 scripts/check-image-exports.py build/export-interop --require-avif
       - run: scripts/package-linux.sh ${{ matrix.arch }} "${{ needs.version.outputs.version }}"
       - uses: actions/upload-artifact@v4
         with:

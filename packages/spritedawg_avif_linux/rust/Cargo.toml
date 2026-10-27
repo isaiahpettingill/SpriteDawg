@@ -1,0 +1,21 @@
+[package]
+name = "flutter_avif"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["staticlib", "cdylib"]
+
+
+[dependencies]
+libdav1d-sys = { version = "0.5", git = "https://github.com/yekeskin/libavif-rs.git", rev = "519cb3ea526d3a7316face89f52bcbb2c432ec9e" }
+libavif-sys = { version = "0.14.3", git = "https://github.com/yekeskin/libavif-rs.git", rev = "519cb3ea526d3a7316face89f52bcbb2c432ec9e", default-features = false, features = [
+    "codec-dav1d",
+    "codec-rav1e",
+] }
+lazy_static = "1.4.0"
+cmake = "=0.1.48"
+proc-macro2 = "=1.0.79"
+protobuf = "=3.7.1"
+allo-isolate = "0.1.26"
+async-std = "1.13.0"

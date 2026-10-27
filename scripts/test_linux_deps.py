@@ -22,6 +22,8 @@ printf '%s\\n' "$*" >> "$STUB_DIR/calls"
 [[ "$n" -gt "$STUB_FAILURES" ]]
 ''',
             }
+            for name in ['clang', 'cmake', 'ninja', 'meson', 'nasm', 'pkg-config']:
+                commands[name] = '#!/bin/bash\nexit 1\n'
             for name, text in commands.items():
                 file = folder / name; file.write_text(text); file.chmod(0o755)
             env = {**os.environ, 'PATH': directory + ':' + os.environ['PATH'],
@@ -40,7 +42,7 @@ printf '%s\\n' "$*" >> "$STUB_DIR/calls"
         self.assertEqual(result.returncode, 0)
         self.assertEqual(len(calls.splitlines()), 3)
         self.assertIn('Acquire::https::Timeout=20', calls)
-        self.assertIn('install -y clang cmake', calls)
+        self.assertIn('install --no-install-recommends -y clang cmake', calls)
 
     def test_repeated_failure_stops(self):
         result, calls = self.run_stubbed(False, 99)
