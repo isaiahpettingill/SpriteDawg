@@ -51,8 +51,9 @@ void main() {
         installedTag: 'v0.3.65',
         command: (args) async {
           calls.add(args);
-          if (args.first == '--check')
+          if (args.first == '--check') {
             return ProcessResult(0, 0, '{"tag":"v0.3.66","arch":"x64"}', '');
+          }
           return installation.future;
         },
       );
