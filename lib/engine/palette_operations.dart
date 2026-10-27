@@ -80,6 +80,23 @@ void applyPaletteAction(
         );
         colors.add(value as int);
       }
+      final presetNames = <int, String>{};
+      if (args.containsKey('names')) {
+        final names = args['names'];
+        require(
+          names is List && names.length == colors.length,
+          'Preset names must match the number of colors',
+        );
+        for (var i = 0; i < colors.length; i++) {
+          final value = (names as List)[i];
+          require(
+            value is String && utf8.encode(value).length <= 65535,
+            'Invalid preset palette name',
+          );
+          final name = value as String;
+          if (name.isNotEmpty) presetNames[i] = name;
+        }
+      }
       require(
         !args.containsKey('remap') || args['remap'] is bool,
         'Remap must be a boolean',
@@ -157,7 +174,7 @@ void applyPaletteAction(
       }
       for (final f in d.frames) {
         f.palette = List.of(colors);
-        f.paletteNames.clear();
+        f.paletteNames = Map.of(presetNames);
         clean(f);
       }
       break;

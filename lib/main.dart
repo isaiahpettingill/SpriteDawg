@@ -20,6 +20,18 @@ void main(List<String> args) {
     yield const LicenseEntryWithLineBreaks([
       'Solarized palette',
     ], solarizedPaletteLicense);
+    yield const LicenseEntryWithLineBreaks([
+      'Catppuccin palettes',
+    ], catppuccinPaletteLicense);
+    yield const LicenseEntryWithLineBreaks([
+      'Monokai (Pygments) palette',
+    ], pygmentsPaletteLicense);
+    yield const LicenseEntryWithLineBreaks([
+      'TIC-80 / Sweetie16 palette',
+    ], tic80PaletteLicense);
+    yield const LicenseEntryWithLineBreaks([
+      'DawnBringer 16 palette',
+    ], dawnBringerPaletteLicense);
   });
   runApp(PocketPixelApp(initialFiles: args));
 }

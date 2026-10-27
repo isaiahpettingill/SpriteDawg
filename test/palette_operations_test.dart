@@ -55,6 +55,176 @@ EditorEngine indexed() {
 }
 
 void main() {
+  test('named RGBA presets retain exact ARGB and names in every frame', () {
+    final e = indexed();
+    e.invoke('edit', {'action': 'convertMode', 'depth': 32});
+    e.replace(e.document.copy());
+    final before = e.encode();
+    final pixels = [for (var f = 0; f < 2; f++) e.document.composite(f)];
+    final colors = [0xffc08040, 0x80c08040, 0x20c08040, 0x00112233];
+    final names = ['Terre brûlée', 'Glaze 50%', 'Glaze 12.5%', ''];
+    final expectedNames = {0: names[0], 1: names[1], 2: names[2]};
+    e.invoke('edit', {
+      'action': 'palettePreset',
+      'colors': colors,
+      'names': names,
+    });
+    final reopened = AsepriteCodec.decode(e.encode());
+    for (var f = 0; f < 2; f++) {
+      expect(e.document.frames[f].palette, colors);
+      expect(e.document.frames[f].paletteNames, expectedNames);
+      expect(reopened.frames[f].palette, colors);
+      expect(reopened.frames[f].paletteNames, expectedNames);
+      expect(reopened.composite(f), pixels[f]);
+    }
+    e.invoke('undo');
+    expect(e.encode(), before);
+    expect(e.state()['canUndo'], false);
+    e.invoke('redo');
+    expect(e.document.frames[1].paletteNames, expectedNames);
+    names[0] = 'Changed input';
+    e.document.frames[0].paletteNames[0] = 'Changed frame';
+    expect(e.document.frames[1].paletteNames[0], 'Terre brûlée');
+  });
+  test(
+    'named indexed presets retain semitransparent frame colors and undo',
+    () {
+      final e = EditorEngine();
+      e.replace(
+        SpriteDocument(
+          5,
+          1,
+          [Layer('Ink'), Layer('Background', flags: 11)],
+          [
+            Frame(
+              palette: [0xff3c2a18, 0x80aabbcc, 0xffaabbcc, 0x20aabbcc, 0],
+              paletteNames: {1: 'old glaze'},
+              cels: [
+                Cel(0, 0, 5, 1, Uint32List.fromList([1, 2, 3, 0, 4])),
+                Cel(0, 0, 5, 1, Uint32List.fromList([1, 2, 3, 0, 4])),
+              ],
+            ),
+            Frame(
+              palette: [0xff3c2a18, 0x20aabbcc, 0x80aabbcc, 0xffaabbcc, 0],
+              paletteNames: {1: 'old light glaze'},
+              cels: [
+                Cel(
+                  0,
+                  0,
+                  0,
+                  0,
+                  Uint32List(0),
+                  link: 0,
+                  data: UserData(text: 'linked-glaze'),
+                ),
+                null,
+              ],
+            ),
+          ],
+          depth: 8,
+        ),
+      );
+      final before = e.encode();
+      final pixels = [for (var f = 0; f < 2; f++) e.document.composite(f)];
+      final colors = [
+        0xffaabbcc,
+        0x80aabbcc,
+        0x20aabbcc,
+        0xff3c2a18,
+        0x00112233,
+      ];
+      final names = [
+        'Solid',
+        'Glaze 50%',
+        'Glaze 12.5%',
+        'Ground',
+        'Hidden RGB',
+      ];
+      final expectedNames = {
+        for (var i = 0; i < names.length; i++) i: names[i],
+      };
+      e.invoke('edit', {
+        'action': 'palettePreset',
+        'colors': colors,
+        'names': names,
+        'remap': true,
+      });
+      expect(e.document.depth, 8);
+      expect(e.document.transparentIndex, 5);
+      expect(e.document.frames[0].cels[0]!.pixels, [1, 0, 2, 5, 5]);
+      expect(e.document.frames[0].cels[1]!.pixels, [1, 0, 2, 3, 5]);
+      expect(e.document.frames[1].cels[0]!.pixels, [2, 1, 0, 5, 5]);
+      expect(e.document.frames[1].cels[0]!.link, isNull);
+      final reopened = AsepriteCodec.decode(e.encode());
+      expect(reopened.frames[1].cels[0]!.data!.text, 'linked-glaze');
+      for (var f = 0; f < 2; f++) {
+        expect(e.document.frames[f].paletteNames, expectedNames);
+        expect(reopened.frames[f].palette, [...colors, 0]);
+        expect(reopened.frames[f].paletteNames, expectedNames);
+        expect(reopened.composite(f), pixels[f]);
+      }
+      e.invoke('undo');
+      expect(e.encode(), before);
+      expect(e.state()['canUndo'], false);
+      e.invoke('redo');
+      expect(e.document.frames[1].paletteNames, expectedNames);
+      expect(e.document.frames[1].cels[0]!.pixels, [2, 1, 0, 5, 5]);
+    },
+  );
+  test('invalid preset names preserve artwork and undo redo history', () {
+    for (final e in [EditorEngine(), indexed()]) {
+      final before = e.encode();
+      final args = {
+        'action': 'palettePreset',
+        'colors': [0x80abcdef, 0xffabcdef],
+        'names': ['Glaze', 'Solid'],
+        'remap': true,
+      };
+      e.invoke('edit', args);
+      e.invoke('undo');
+      e.saved();
+      for (final names in <dynamic>[
+        null,
+        'not a list',
+        [],
+        ['Only one'],
+        ['One', 'Two', 'Extra'],
+        [1, 'Two'],
+        ['One', null],
+        ['a' * 65536, 'Two'],
+        ['é' * 32768, 'Two'],
+      ]) {
+        expect(
+          () => e.invoke('edit', {...args, 'names': names}),
+          throwsFormatException,
+        );
+        expect(e.encode(), before);
+        expect(e.state()['canUndo'], false);
+        expect(e.state()['canRedo'], true);
+        expect(e.dirty, false);
+      }
+      e.invoke('redo');
+      expect(e.document.frames[0].paletteNames, {0: 'Glaze', 1: 'Solid'});
+    }
+  });
+  test('preset names accept the UTF-8 byte limit and empty unnamed slots', () {
+    final name = '€' * 21845; // Exactly 65535 UTF-8 bytes.
+    for (final e in [EditorEngine(), indexed()]) {
+      final before = e.encode();
+      e.invoke('edit', {
+        'action': 'palettePreset',
+        'colors': [0x80446688, 0xff446688],
+        'names': [name, ''],
+        'remap': true,
+      });
+      final reopened = AsepriteCodec.decode(e.encode());
+      for (final frame in reopened.frames) {
+        expect(frame.paletteNames, {0: name});
+      }
+      e.invoke('undo');
+      expect(e.encode(), before);
+    }
+  });
   test(
     'RGBA preset replaces all swatches without changing artwork or links',
     () {

@@ -22,8 +22,16 @@ license is unchanged.
 | Grayscale 16 | 16 | Independently encoded numeric palette |
 | Web Safe | 216 | Independently encoded numeric palette |
 | Solarized | 16 | MIT |
+| Monokai (Pygments) | 11 | BSD-2-Clause variant |
+| Catppuccin Latte / Frappé / Macchiato / Mocha | 26 each | MIT |
+| TIC-80 / Sweetie 16 | 16 | MIT distribution + creator consent |
+| DawnBringer 16 | 16 | Author free-use permission |
+| SpriteDawg Materials | 120 | Original, app MIT license |
+| Gaem-64 | 64 | Original, app MIT license |
+| SpriteDawg Characters | 77 | Original, app MIT license |
+| SpriteDawg Food | 84 | Original, app MIT license |
 
-All values are opaque `0xAARRGGBB` integers. Order and repeated entries are
+Values use straight ARGB; original material, character and food overlays retain explicit alpha. Legacy/system palettes are opaque `0xAARRGGBB` integers. Order and repeated entries are
 intentional. The editor manages transparent-index allocation separately. The
 largest preset has 216 colors, leaving space for an indexed transparency entry.
 These are editing swatches, not emulation of each machine's video output,
@@ -227,3 +235,102 @@ inspected; none provides an additional permissive redistribution grant.
 5. Retain required notices in both source and distributed application materials.
 6. Keep runtime presets offline and immutable; any future fetching is separate
    from this built-in catalog.
+
+## Additional named palettes (2026-10-27)
+
+### Catppuccin: Latte, Frappé, Macchiato, Mocha
+
+All four 26-color flavors retain the official `colors.*.order` sequence and
+labels, from Rosewater through Crust, with alpha 255. Source:
+[`palette.json` at 07d02aa110ef9eb7e7427afca5c73ba9cf7f8ebd](https://github.com/catppuccin/palette/blob/07d02aa110ef9eb7e7427afca5c73ba9cf7f8ebd/palette.json).
+The palette project explicitly distributes its data under
+[MIT](https://github.com/catppuccin/palette/blob/07d02aa110ef9eb7e7427afca5c73ba9cf7f8ebd/LICENSE),
+copyright 2021 Catppuccin. Full notice: `LICENSES/Catppuccin-MIT.txt` and the
+in-app license registry.
+
+### Monokai (Pygments), not Monokai Pro
+
+This is the **Pygments variant**, not an assertion that it is an exact copy of
+Wimer Hazenberg's original TextMate palette. Its 11 distinct colors retain
+first-appearance order in
+[`pygments/styles/monokai.py` at 156d85fdd18d34427fe893527e71da91dcfb0eb5](https://github.com/pygments/pygments/blob/156d85fdd18d34427fe893527e71da91dcfb0eb5/pygments/styles/monokai.py):
+background, highlight, text, error, error background, comment, keyword,
+operator, name, number, string. Pygments describes this implementation as
+mimicking Monokai and explicitly marks the file BSD. Its
+[BSD-2-Clause license](https://github.com/pygments/pygments/blob/156d85fdd18d34427fe893527e71da91dcfb0eb5/LICENSE)
+is retained in `LICENSES/Pygments-BSD-2-Clause.txt` and in-app licenses.
+No Monokai Pro colors/icons/files are copied. Monokai Pro's
+[license](https://monokai.pro/license) does not grant redistribution; the
+Pygments grant must not be represented as a license for Monokai Pro.
+
+### TIC-80 / Sweetie 16
+
+Exact 16-slot order from the explicitly delimited `<PALETTE>` block in
+[TIC-80 `config.js` at b3dbd597eecfe6742f64001c2fe5ba6c1afe55d9](https://github.com/nesbox/TIC-80/blob/b3dbd597eecfe6742f64001c2fe5ba6c1afe55d9/config.js).
+The source also contains sprite blocks with `000:` prefixes; these are not
+palette colors. All 16 values were independently cross-checked against the
+official wiki color table (index 0 `1a1c2c`, index 12 `f4f4f4`).
+Creator: GrafxKid / Jay Em. The official
+[palette documentation](https://github.com/nesbox/TIC-80/wiki/Palette) identifies
+Sweetie 16 as the default, and maintainer nesbox records the creator's consent
+to inclusion in [issue 873](https://github.com/nesbox/TIC-80/issues/873).
+We redistribute the palette data from that MIT-licensed TIC-80 distribution,
+retaining [its MIT notice](https://github.com/nesbox/TIC-80/blob/b3dbd597eecfe6742f64001c2fe5ba6c1afe55d9/LICENSE)
+in `LICENSES/TIC-80-MIT.txt` and in-app licenses. This does not claim that every
+GrafxKid asset or every palette on Lospec is MIT/CC0.
+
+### DawnBringer 16
+
+Exact RGB order from the creator's
+[original 19 August 2011 post](https://pixeljoint.com/forum/forum_posts.asp?TID=12795).
+That post permits use of the palette; the creator's 16 October 2011 reply
+confirms free game use. This is recorded as `LicenseRef-DawnBringer-Free-Use`,
+**not** CC0 or MIT. Verbatim short permission notices and attribution are in
+`LICENSES/DawnBringer-Free-Use.txt`. No forum artwork or mockups are included.
+
+### Requested AAP-64: permission not established
+
+The [Lospec AAP-64 page](https://lospec.com/palette-list/aap-64) identifies
+Adigun A. Polack and lists/downloads 64 colors, but does not state redistribution
+terms. The linked original author post did not provide accessible terms during
+this review. Third-party CC0 artwork made using AAP-64 does not establish a
+license for redistributing the palette. Therefore AAP-64 is not bundled or
+renamed. An independently authored broad game-art alternative can be included
+separately; its name and values must not imply that it is AAP-64.
+
+
+## SpriteDawg original game-art palettes
+
+These palettes were authored for this update, independently of AAP-64 and other
+artist palettes. Their numeric values and labels are included under SpriteDawg's
+MIT license. They are not simulations of a particular game's lighting/material
+renderer; use the ordered ramps for shadows, body colors, and bright highlights.
+
+- **Gaem-64**: sixteen four-color ramps (ink, stone, steel, earth,
+  skin, crimson, ember, gold, lime, leaf, jade, aqua, sky, indigo, orchid, rose).
+  All 64 swatches are distinct and opaque. This is the requested independently
+  authored alternative, not AAP-64 under another name.
+- **SpriteDawg Materials**: fifteen eight-color groups: grass, stone, wood, fire,
+  water; gold, silver, copper, bronze, steel; diamond, ruby, emerald, sapphire,
+  amethyst. Each group has five hue-shifted opaque shades including a sharp
+  highlight, then the midtone at alpha 64,128,192 (approximately 25%, 50%, 75%).
+  Warm gold/copper highlights and cool steel/diamond highlights intentionally
+  differ; gems retain saturated body colors and near-white glints.
+- **SpriteDawg Characters**: five skin-tone ramps and six clothing families,
+  four opaque shades plus three alpha overlays per group (77 swatches).
+- **SpriteDawg Food**: berry, citrus, apple, leafy/root vegetables, bread, meat,
+  chocolate, cream/grape sweets, tea and juice; four opaque shades plus three
+  alpha overlays per group (84 swatches).
+
+Palette previews use checkerboards and named ARGB/opacity tooltips. Alpha bytes
+are stored losslessly; they are not flattened onto the preview checkerboard.
+Indexed application still quantizes the existing image to the closest RGBA
+palette values, so it requires confirmation and can change colors/alpha. A
+separate clear slot is reserved; presets of 256 colors must be reduced before
+indexed application. RGBA application changes only the color table, not pixels.
+
+Personal presets are ordered swatch tables, not complete document color modes.
+Saving preserves exact ARGB and names, not a document's special transparent-index
+policy: that index can display a real color on background layers. Applying an
+indexed preset uses the destination document's transparency and adds its own
+clear slot. No source swatch is silently discarded or rewritten.

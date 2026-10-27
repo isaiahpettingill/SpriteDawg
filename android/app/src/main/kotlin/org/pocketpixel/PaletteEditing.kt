@@ -33,6 +33,15 @@ fun applyPaletteAction(d: Document, args: Map<String, Any?>, frame: Int) {
                 require(color in 0..0xffffffffL) { "Invalid preset RGBA color" }
                 color.toInt()
             }.toMutableList()
+            val presetNames = mutableMapOf<Int, String>()
+            if (args.containsKey("names")) {
+                val names = args["names"] as? List<*>
+                require(names != null && names.size == colors.size) { "Preset names must match the number of colors" }
+                names.forEachIndexed { index, value ->
+                    require(value is String && value.toByteArray(Charsets.UTF_8).size <= 65535) { "Invalid preset palette name" }
+                    if (value.isNotEmpty()) presetNames[index] = value
+                }
+            }
             require(!args.containsKey("remap") || args["remap"] is Boolean) { "Remap must be a boolean" }
             if (d.depth == 8) {
                 require(args["remap"] == true) { "Confirm indexed color remapping before applying a preset" }
@@ -90,6 +99,7 @@ fun applyPaletteAction(d: Document, args: Map<String, Any?>, frame: Int) {
             for (f in d.frames) {
                 f.palette = colors.toIntArray()
                 f.paletteNames.clear()
+                f.paletteNames.putAll(presetNames)
                 clean(f)
             }
         }
