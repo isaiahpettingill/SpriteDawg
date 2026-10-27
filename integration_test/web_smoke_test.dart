@@ -65,9 +65,9 @@ void main() {
     await tester.tapAt(tester.getCenter(find.byKey(const Key('pixel-canvas'))));
     await settle();
     expect(editor.state['pixels'], isNot(orderedEquals(before)));
-    expect(await editor.call('undo'), true);
+    expect(await editor.call('undo'), true, reason: editor.error);
     expect(editor.state['pixels'], orderedEquals(before));
-    expect(await editor.call('redo'), true);
+    expect(await editor.call('redo'), true, reason: editor.error);
 
     // Reopen compressed Aseprite bytes through the actual browser import path.
     final savedPixels = Uint8List.fromList(editor.state['pixels'] as Uint8List);
@@ -75,19 +75,19 @@ void main() {
       backend.sessions.active.engine.document,
     );
     picked = XFile.fromData(project, name: 'browser-roundtrip.aseprite');
-    expect(await editor.call('open'), true);
+    expect(await editor.call('open'), true, reason: editor.error);
     await settle();
     expect(editor.state['pixels'], orderedEquals(savedPixels));
     picked = null;
     final documentId = editor.state['documentId'];
-    expect(await editor.call('open'), true);
+    expect(await editor.call('open'), true, reason: editor.error);
     expect(
       editor.state['documentId'],
       documentId,
       reason: 'Cancel retains work',
     );
 
-    expect(await editor.edit('duplicateFrame'), true);
+    expect(await editor.edit('duplicateFrame'), true, reason: editor.error);
     final snapshot = (await backend.invoke('exportSnapshot', {
       'scope': 'all',
       'animation': true,

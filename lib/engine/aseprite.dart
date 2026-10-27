@@ -454,11 +454,17 @@ class AsepriteCodec {
 
   static Uint8List _inflate(Uint8List payload, int expected) {
     validateZlib(payload, expected);
-    final bytes = ZLibDecoder().decodeBytes(
-      payload,
+    // archive's bounded decodeBytes path does not set the zlib stream's
+    // big-endian checksum order on web. Use the bounded stream API explicitly.
+    final output = OutputMemoryStream();
+    final valid = ZLibDecoder().decodeStream(
+      InputMemoryStream(payload, byteOrder: ByteOrder.bigEndian),
+      output,
       verify: true,
       maxOutputSize: expected,
     );
+    require(valid, 'Invalid zlib checksum or stream');
+    final bytes = output.getBytes();
     require(bytes.length == expected, 'Incorrect zlib cel length');
     return bytes;
   }
