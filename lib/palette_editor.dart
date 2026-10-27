@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'editor.dart';
 import 'color_picker.dart';
+import 'palette_presets.dart';
 
 Future<void> showPaletteEditor(
   BuildContext context, {
@@ -74,6 +75,7 @@ class _PaletteEditorState extends State<PaletteEditor> {
     setState(() {
       message = ok ? null : e.error;
       if (ok) {
+        if (action == 'palettePreset') selected = 0;
         if (action == 'paletteMove') selected = args['to'] as int;
         if (action == 'paletteAdd') selected = e.palette.length - 1;
         if (action == 'paletteRemove') {
@@ -124,6 +126,44 @@ class _PaletteEditorState extends State<PaletteEditor> {
     }
     if (await _edit('paletteAdd', {'color': color, 'name': ''}) && mounted) {
       setState(() => message = 'Current color added');
+    }
+  }
+
+  Future<void> _preset() async {
+    if (e.busy) return;
+    final preset = await showPalettePresets(context);
+    if (preset == null || !mounted) return;
+    final indexed = e.state['depth'] == 8;
+    if (indexed) {
+      final accepted = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Use ${preset.name}?'),
+          content: const Text(
+            'Remap every frame to the nearest preset colors. Fully transparent pixels stay transparent; other colors and alpha may change. You can undo this.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Remap colors'),
+            ),
+          ],
+        ),
+      );
+      if (accepted != true || !mounted) return;
+    }
+    if (await _edit('palettePreset', {
+          'colors': preset.colors,
+          'remap': indexed,
+        }) &&
+        mounted) {
+      setState(
+        () => message = '${preset.name} applied · Undo in palette options',
+      );
     }
   }
 
@@ -385,6 +425,13 @@ class _PaletteEditorState extends State<PaletteEditor> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    OutlinedButton.icon(
+                      key: const Key('open-palette-presets'),
+                      onPressed: e.busy ? null : _preset,
+                      icon: const Icon(Icons.collections_bookmark_outlined),
+                      label: const Text('Preset palettes'),
+                    ),
+                    const SizedBox(height: 8),
                     if (widget.currentColor != null) ...[
                       FilledButton.tonalIcon(
                         key: const Key('add-current-color'),

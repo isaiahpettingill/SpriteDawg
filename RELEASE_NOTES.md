@@ -4,6 +4,10 @@ SpriteDawg is now a Flutter pixel-art editor for Android and Linux, focused on d
 
 ## Palette controls
 
+- Offline preset browser with search, swatch previews and credits: PICO-8, Solarized and twelve classic retro/system palettes. Palette licenses are accessible from the info button.
+- Preset application is one undo step. RGB/grayscale artwork is unchanged; indexed documents require explicit nearest-color remapping with a reserved transparent slot across all frames. Existing palettes can be restored with Undo.
+- The presets are a curated redistributable selection, not every palette bundled by Aseprite or LibreSprite; see `docs/PALETTE_SOURCES.md`.
+
 - Brush color uses an alpha-aware color swatch; the eyedropper icon only samples the canvas.
 - Compact palette dialog with **Add current color** and **Edit selected color**. Existing exact colors are selected without adding duplicate entries; explicit indexed selections retain their index.
 - Naming, reordering, removing, color-mode conversion, and undo/redo live under **Palette options**. Removal and mode conversion retain their confirmation safeguards.

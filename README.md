@@ -70,6 +70,18 @@ bounded per document (the most recent undo is retained even when large). This is
 not a hard process-memory limit. Recovery restores unsaved copies, not original
 save paths; closing the app keeps recovery for every dirty tab.
 
+Open **Palette → Preset palettes** for an offline, searchable library with color
+previews: PICO-8, Solarized and classic retro/system palettes. Selecting a preset
+replaces the document's palette across all frames; it never removes the bundled
+presets or changes other open documents. RGBA/grayscale pixels stay unchanged.
+Indexed sprites require confirmation before mapping every frame to the closest
+preset colors, with a separate transparent slot. Linked cels are materialized when
+needed for per-frame colors; the entire operation is one undo step. Palette
+options → Undo restores the previous custom palette and artwork. Credits are
+shown in the browser; license notices are available through its info button.
+See [palette sources and licensing](docs/PALETTE_SOURCES.md). This is a curated
+redistributable selection, not a claim to include every Aseprite/LibreSprite asset.
+
 Palette management supports exact-index swatch selection (including identical-color
 entries), names, add/edit/reorder and removal with an explicit replacement. A color
 edit affects the current frame. Structural edits remap all frame indices and names;

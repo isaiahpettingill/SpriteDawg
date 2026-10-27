@@ -1,18 +1,27 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'editor.dart';
 import 'pixel_canvas.dart';
 import 'visual_tag_editor.dart';
 import 'palette_editor.dart';
+import 'engine/palette_presets.dart';
 import 'color_picker.dart';
 import 'tool_groups.dart';
 import 'document_tabs.dart';
 import 'responsive_editor_shell.dart';
 
-void main(List<String> args) => runApp(PocketPixelApp(initialFiles: args));
+void main(List<String> args) {
+  LicenseRegistry.addLicense(() async* {
+    yield const LicenseEntryWithLineBreaks([
+      'Solarized palette',
+    ], solarizedPaletteLicense);
+  });
+  runApp(PocketPixelApp(initialFiles: args));
+}
 
 class PocketPixelApp extends StatelessWidget {
   const PocketPixelApp({super.key, this.editor, this.initialFiles = const []});
