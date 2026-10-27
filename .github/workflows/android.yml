@@ -163,7 +163,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install missing Linux build dependencies (bounded retries)
-        timeout-minutes: 7
+        timeout-minutes: 15
         run: bash scripts/install-linux-deps.sh
       - uses: subosito/flutter-action@v2
         if: matrix.arch == 'x64'
@@ -179,7 +179,7 @@ jobs:
           "$RUNNER_TEMP/flutter/bin/flutter" --version
       - run: flutter pub get
       - run: flutter build linux --release --build-name "${{ needs.version.outputs.version }}" --build-number "${{ needs.version.outputs.build_number }}"
-      - run: scripts/package-linux.sh ${{ matrix.arch }}
+      - run: scripts/package-linux.sh ${{ matrix.arch }} "${{ needs.version.outputs.version }}"
       - uses: actions/upload-artifact@v4
         with:
           overwrite: true
@@ -320,9 +320,10 @@ jobs:
             tar -tzf "$source" > /dev/null
             cp "$source" "release-assets/spritedawg-v$RELEASE_VERSION-linux-$arch.tar.gz"
           done
+          cp scripts/install-spritedawg.sh release-assets/install-spritedawg.sh
           cd release-assets
-          test "$(find . -maxdepth 1 -type f | wc -l)" -eq 5
-          sha256sum *.apk *.tar.gz > SHA256SUMS
+          test "$(find . -maxdepth 1 -type f | wc -l)" -eq 6
+          sha256sum *.apk *.tar.gz *.sh > SHA256SUMS
           sha256sum --check SHA256SUMS
       - name: Publish or safely resume this tested main release
         env:

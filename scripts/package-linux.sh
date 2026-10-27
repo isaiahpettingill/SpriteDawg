@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 arch=${1:-x64}
+version=${2:?Pass the tested release version (without v)}
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
 bundle="build/linux/$arch/release/bundle"
 [[ -x "$bundle/spritedawg" ]]
 mkdir -p "$bundle/share/mime/packages" "$bundle/share/applications" "$bundle/share/icons/hicolor/scalable/apps"
@@ -8,6 +10,9 @@ cp linux/packaging/org.pocketpixel.SpriteDawg.desktop "$bundle/share/application
 cp art/spritedawg.svg "$bundle/share/icons/hicolor/scalable/apps/org.pocketpixel.SpriteDawg.svg"
 cp linux/packaging/org.pocketpixel.SpriteDawg.xml "$bundle/share/mime/packages/"
 cp LICENSE "$bundle/LICENSE"
+cp scripts/install-spritedawg.sh "$bundle/update-spritedawg.sh"
+chmod +x "$bundle/update-spritedawg.sh"
+printf 'v%s\n' "$version" > "$bundle/release-version.txt"
 cat > "$bundle/install-desktop.sh" <<'INSTALL'
 #!/usr/bin/env bash
 set -euo pipefail

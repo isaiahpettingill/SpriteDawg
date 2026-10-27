@@ -27,6 +27,7 @@ class PublisherTests(unittest.TestCase):
         self.notes.write_text('Release notes')
         names = [f'spritedawg-{TAG}-android-{a}.apk' for a in ('armeabi-v7a', 'arm64-v8a', 'x86_64')]
         names += [f'spritedawg-{TAG}-linux-{a}.tar.gz' for a in ('x64', 'arm64')]
+        names.append('install-spritedawg.sh')
         for name in names:
             (self.assets / name).write_bytes(name.encode())
         self.write_manifest()
@@ -102,7 +103,7 @@ class PublisherTests(unittest.TestCase):
 
     def test_new_draft_upload_and_publish(self):
         self.assertIn(TAG, self.publish())
-        self.assertEqual(len(self.release['assets']), 6)
+        self.assertEqual(len(self.release['assets']), 7)
         self.assertFalse(self.release['draft'])
         self.assertTrue(any('make_latest=false' in c for c in self.calls))
         self.assertEqual(self.latest['id'], self.release['id'])
@@ -119,7 +120,7 @@ class PublisherTests(unittest.TestCase):
         with patch.object(publisher, 'gh', side_effect=lagging):
             self.publish()
         self.assertFalse(self.release['draft'])
-        self.assertEqual(len(self.release['assets']), 6)
+        self.assertEqual(len(self.release['assets']), 7)
         self.assertEqual(len([c for c in self.calls if 'POST' in c]), 1)
 
     def test_created_draft_response_mismatch_stops_before_upload(self):
@@ -141,7 +142,7 @@ class PublisherTests(unittest.TestCase):
         self.make_release(names=[existing])
         self.publish()
         uploads = [c for c in self.calls if c[:2] == ('release', 'upload')]
-        self.assertEqual(len(uploads), 5)
+        self.assertEqual(len(uploads), 6)
         self.assertNotIn(existing, [Path(c[3]).name for c in uploads])
 
     def test_published_rerun_uses_remote_manifest_and_never_mutates(self):
@@ -237,7 +238,7 @@ class PublisherTests(unittest.TestCase):
         self.assertEqual(len(self.release['assets']), 2)
         self.calls.clear()
         self.publish()
-        self.assertEqual(len([c for c in self.calls if c[:2] == ('release', 'upload')]), 4)
+        self.assertEqual(len([c for c in self.calls if c[:2] == ('release', 'upload')]), 5)
 
     def test_unexpected_remote_asset_fails(self):
         self.make_release(names=self.files)

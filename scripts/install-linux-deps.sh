@@ -15,7 +15,7 @@ if ((${#missing[@]} == 0)); then
 fi
 for attempt in 1 2; do
   if timeout 90s sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o APT::Update::Error-Mode=any update &&
-     timeout 90s sudo apt-get -o DPkg::Lock::Timeout=30 -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y "${missing[@]}"; then
+     timeout 300s sudo apt-get -o DPkg::Lock::Timeout=30 -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y "${missing[@]}"; then
     exit 0
   fi
   if [[ "$attempt" == 1 ]]; then sleep 5; fi

@@ -12,6 +12,7 @@ import 'engine/palette_presets.dart';
 import 'color_picker.dart';
 import 'tool_groups.dart';
 import 'document_tabs.dart';
+import 'linux_updater.dart';
 import 'responsive_editor_shell.dart';
 
 void main(List<String> args) {
@@ -604,6 +605,10 @@ class _EditorScreenState extends State<EditorScreen>
         await edit(action);
       case 'metadata':
         await metadata();
+      case 'updates':
+        if (LinuxUpdater.supported && mounted) {
+          await showLinuxUpdater(context);
+        }
       case 'help':
         if (mounted) {
           await showDialog<void>(
@@ -766,6 +771,11 @@ class _EditorScreenState extends State<EditorScreen>
                   child: Text('User data'),
                 ),
                 const PopupMenuItem(value: 'help', child: Text('Drawing help')),
+                if (LinuxUpdater.supported)
+                  const PopupMenuItem(
+                    value: 'updates',
+                    child: Text('Check for updates…'),
+                  ),
               ],
             ),
           ],
