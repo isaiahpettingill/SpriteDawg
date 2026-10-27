@@ -4,7 +4,10 @@ SpriteDawg is now a Flutter pixel-art editor for Android and Linux, focused on d
 
 ## Palette controls
 
-- Offline preset browser with search, swatch previews and credits: PICO-8, Solarized and twelve classic retro/system palettes. Palette licenses are accessible from the info button.
+- 25 offline built-in palettes: all prior retro presets plus Monokai (Pygments), four Catppuccin flavors, TIC-80/Sweetie16, DawnBringer16 and original Game64, Materials, Characters and Food palettes. AAP-64 is replaced by an independently authored alternative, not copied.
+- Named opaque/translucent ramps, checkerboard previews and exact opacity labels. Materials include gold/silver/copper/bronze/steel and diamond/ruby/emerald/sapphire/amethyst.
+- Save the current palette into My palettes, edit personal presets without altering artwork, or save a customizable copy of a built-in. Local persistence keeps ordered ARGB and names across restarts; duplicate names never silently overwrite.
+- Full third-party license notices are available in the palette browser.
 - Preset application is one undo step. RGB/grayscale artwork is unchanged; indexed documents require explicit nearest-color remapping with a reserved transparent slot across all frames. Existing palettes can be restored with Undo.
 - The presets are a curated redistributable selection, not every palette bundled by Aseprite or LibreSprite; see `docs/PALETTE_SOURCES.md`.
 
