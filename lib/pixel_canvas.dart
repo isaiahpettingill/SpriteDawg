@@ -9,6 +9,7 @@ import 'package:flutter/gestures.dart' show PointerScrollEvent;
 
 import 'editor.dart';
 import 'brush_preview.dart';
+import 'canvas_view_mode.dart';
 
 class PixelCanvas extends StatefulWidget {
   const PixelCanvas({
@@ -29,8 +30,10 @@ class PixelCanvas extends StatefulWidget {
     this.seed = 1,
     this.strength = 50,
     this.previewOptions = const {},
+    this.viewMode = CanvasViewMode.normal,
   });
   final Editor editor;
+  final CanvasViewMode viewMode;
   final String tool;
   final int color, brush, fitToken;
   final bool grid, onion;
@@ -59,6 +62,7 @@ class _PixelCanvasState extends State<PixelCanvas> {
   void initState() {
     super.initState();
     widget.editor.imageChanges.addListener(_imageReady);
+    widget.editor.setSlideViewEnabled(widget.viewMode == CanvasViewMode.slide);
   }
 
   void _imageReady() {
@@ -237,6 +241,7 @@ class _PixelCanvasState extends State<PixelCanvas> {
   @override
   void dispose() {
     widget.editor.imageChanges.removeListener(_imageReady);
+    widget.editor.setSlideViewEnabled(false);
     _stopSpraying();
     _clearPreview();
     _clearCommitting();
@@ -255,9 +260,18 @@ class _PixelCanvasState extends State<PixelCanvas> {
     super.didUpdateWidget(old);
     if (!identical(old.editor, widget.editor)) {
       old.editor.imageChanges.removeListener(_imageReady);
+      old.editor.setSlideViewEnabled(false);
       widget.editor.imageChanges.addListener(_imageReady);
+      widget.editor.setSlideViewEnabled(
+        widget.viewMode == CanvasViewMode.slide,
+      );
     }
-    if (old.fitToken != widget.fitToken) {
+    if (old.viewMode != widget.viewMode) {
+      widget.editor.setSlideViewEnabled(
+        widget.viewMode == CanvasViewMode.slide,
+      );
+    }
+    if (old.fitToken != widget.fitToken || old.viewMode != widget.viewMode) {
       _clearCommitting();
       fitted = false;
       _stopSpraying();
@@ -302,7 +316,15 @@ class _PixelCanvasState extends State<PixelCanvas> {
     if (pending != null && widget.tool != 'eyedropper') _commit(pending);
     setState(() {
       pointers[e.pointer] = e.localPosition;
-      if (pointers.length > 1 || widget.tool == 'pan' || e.buttons == 2) {
+      if (pointers.length > 1 ||
+          widget.tool == 'pan' ||
+          e.buttons == 2 ||
+          (widget.viewMode != CanvasViewMode.normal &&
+              !isEditableCanvasPoint(
+                _pixel(e.localPosition),
+                widget.editor.width,
+                widget.editor.height,
+              ))) {
         _stopSpraying();
         _clearPreview();
         navigating = true;
@@ -336,6 +358,21 @@ class _PixelCanvasState extends State<PixelCanvas> {
         scale = next;
       } else {
         final p = _pixel(e.localPosition);
+        if (widget.viewMode != CanvasViewMode.normal &&
+            !isEditableCanvasPoint(
+              p,
+              widget.editor.width,
+              widget.editor.height,
+            )) {
+          if (stroke.isNotEmpty && widget.tool != 'eyedropper') {
+            _commit(List<Offset>.of(stroke));
+          }
+          _stopSpraying();
+          _clearPreview();
+          stroke.clear();
+          navigating = true;
+          return;
+        }
         if (stroke.isEmpty || (stroke.last - p).distance >= .15) {
           stroke.add(p);
           _schedulePreview();
@@ -388,8 +425,12 @@ class _PixelCanvasState extends State<PixelCanvas> {
         viewport = size;
         scale = math
             .min(
-              (size.width - 40) / widget.editor.width,
-              (size.height - 40) / widget.editor.height,
+              (size.width - 40) /
+                  (widget.editor.width *
+                      (widget.viewMode == CanvasViewMode.normal ? 1 : 3)),
+              (size.height - 40) /
+                  (widget.editor.height *
+                      (widget.viewMode == CanvasViewMode.tiled ? 3 : 1)),
             )
             .clamp(.25, 24.0)
             .toDouble();
@@ -441,6 +482,7 @@ class _PixelCanvasState extends State<PixelCanvas> {
                 widget.strength,
                 _preview,
                 committing: _committing,
+                viewMode: widget.viewMode,
               ),
             ),
           ),
@@ -469,7 +511,11 @@ class _CanvasPainter extends CustomPainter {
     this.strength,
     this.preview, {
     this.committing = const [],
-  }) : super(repaint: editor.imageChanges);
+    this.viewMode = CanvasViewMode.normal,
+  }) : super(
+         repaint: Listenable.merge([editor.imageChanges, editor.viewChanges]),
+       );
+  final CanvasViewMode viewMode;
   final Editor editor;
   final ui.Image? preview;
   final List<_CanvasPainter> committing;
@@ -484,6 +530,57 @@ class _CanvasPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     canvas.drawColor(const Color(0xff10141d), BlendMode.src);
+    ui.Picture? tiledPixels;
+    if (viewMode == CanvasViewMode.tiled) {
+      // Record expensive stroke geometry once, then replay the same picture in
+      // each tile. No duplicated RGBA buffers, image decoding or run generation.
+      final recorder = ui.PictureRecorder();
+      final recording = Canvas(recorder);
+      _paintCurrentPixels(recording);
+      tiledPixels = recorder.endRecording();
+    }
+    for (final offset in canvasContextOffsets(viewMode)) {
+      final image = viewMode == CanvasViewMode.tiled
+          ? editor.image
+          : offset.dx < 0
+          ? (editor.frame > 0 ? editor.previous : null)
+          : editor.next;
+      if (viewMode == CanvasViewMode.slide && image == null) continue;
+      final at =
+          origin +
+          Offset(
+            offset.dx * editor.width * scale,
+            offset.dy * editor.height * scale,
+          );
+      final bounds = Rect.fromLTWH(
+        at.dx,
+        at.dy,
+        editor.width * scale,
+        editor.height * scale,
+      );
+      if (!bounds.overlaps(Offset.zero & size)) continue;
+      canvas.save();
+      canvas.translate(at.dx, at.dy);
+      canvas.scale(scale);
+      final frame = Rect.fromLTWH(
+        0,
+        0,
+        editor.width.toDouble(),
+        editor.height.toDouble(),
+      );
+      canvas.clipRect(frame);
+      _checker(canvas, frame);
+      if (tiledPixels != null) {
+        canvas.drawPicture(tiledPixels);
+      } else if (image != null) {
+        canvas.drawImage(
+          image,
+          Offset.zero,
+          Paint()..filterQuality = FilterQuality.none,
+        );
+      }
+      canvas.restore();
+    }
     canvas.save();
     canvas.translate(origin.dx, origin.dy);
     canvas.scale(scale);
@@ -494,33 +591,8 @@ class _CanvasPainter extends CustomPainter {
       editor.height.toDouble(),
     );
     canvas.clipRect(bounds);
-    canvas.drawRect(bounds, Paint()..color = const Color(0xffc3c6cf));
-    final cell = math.max(4, (8 / scale).ceil());
-    for (
-      int y = math.max(0, (-origin.dy / scale / cell).floor() * cell);
-      y < math.min(editor.height, (size.height - origin.dy) / scale);
-      y += cell
-    ) {
-      for (
-        int x = math.max(0, (-origin.dx / scale / cell).floor() * cell);
-        x < math.min(editor.width, (size.width - origin.dx) / scale);
-        x += cell
-      ) {
-        if ((x ~/ cell + y ~/ cell).isEven) {
-          canvas.drawRect(
-            Rect.fromLTWH(
-              x.toDouble(),
-              y.toDouble(),
-              cell.toDouble(),
-              cell.toDouble(),
-            ),
-            Paint()..color = const Color(0xff9196a3),
-          );
-        }
-      }
-    }
-    final image = editor.image;
-    if (onion && editor.previous != null) {
+    _checker(canvas, bounds);
+    if (onion && viewMode != CanvasViewMode.slide && editor.previous != null) {
       canvas.drawImage(
         editor.previous!,
         Offset.zero,
@@ -529,19 +601,11 @@ class _CanvasPainter extends CustomPainter {
           ..color = const Color(0x55ffffff),
       );
     }
-    canvas.saveLayer(bounds, Paint());
-    if (image != null) {
-      canvas.drawImage(
-        image,
-        Offset.zero,
-        Paint()..filterQuality = FilterQuality.none,
-      );
+    if (tiledPixels != null) {
+      canvas.drawPicture(tiledPixels);
+    } else {
+      _paintCurrentPixels(canvas);
     }
-    for (final visual in committing) {
-      visual.paintStroke(canvas);
-    }
-    paintStroke(canvas);
-    canvas.restore();
     if (mirrorX || mirrorY) {
       final p = Paint()
         ..color = const Color(0x9989a7ff)
@@ -592,6 +656,60 @@ class _CanvasPainter extends CustomPainter {
         ..color = const Color(0xff596277)
         ..style = PaintingStyle.stroke,
     );
+    tiledPixels?.dispose();
+  }
+
+  void _paintCurrentPixels(Canvas canvas) {
+    final bounds = Rect.fromLTWH(
+      0,
+      0,
+      editor.width.toDouble(),
+      editor.height.toDouble(),
+    );
+    canvas.saveLayer(bounds, Paint());
+    final image = editor.image;
+    if (image != null) {
+      canvas.drawImage(
+        image,
+        Offset.zero,
+        Paint()..filterQuality = FilterQuality.none,
+      );
+    }
+    for (final visual in committing) {
+      visual.paintStroke(canvas);
+    }
+    paintStroke(canvas);
+    canvas.restore();
+  }
+
+  void _checker(Canvas canvas, Rect bounds) {
+    canvas.drawRect(bounds, Paint()..color = const Color(0xffc3c6cf));
+    final visible = canvas.getLocalClipBounds().intersect(bounds);
+    final cell = math.max(4, (8 / scale).ceil());
+    final dark = Paint()..color = const Color(0xff9196a3);
+    for (
+      var y = (visible.top / cell).floor() * cell;
+      y < visible.bottom;
+      y += cell
+    ) {
+      for (
+        var x = (visible.left / cell).floor() * cell;
+        x < visible.right;
+        x += cell
+      ) {
+        if ((x ~/ cell + y ~/ cell).isEven) {
+          canvas.drawRect(
+            Rect.fromLTWH(
+              x.toDouble(),
+              y.toDouble(),
+              cell.toDouble(),
+              cell.toDouble(),
+            ),
+            dark,
+          );
+        }
+      }
+    }
   }
 
   void paintStroke(Canvas canvas) {

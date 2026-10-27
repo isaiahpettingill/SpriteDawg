@@ -206,6 +206,17 @@ Publication stages a draft, checks all five platform assets against `SHA256SUMS`
 
 Android registers narrow Aseprite MIME/extension handlers; Linux bundles include MIME registration and a per-user installer. External opens add document tabs instead of replacing unsaved work. See [file association installation and provider limitations](FILE_ASSOCIATIONS.md).
 
+
+### Canvas view modes
+
+The overflow menu's **View · Tiled (3×3)** repeats the current frame seamlessly
+in eight read-only neighbors. **View · Slide** shows the previous and next frame
+beside the active frame instead of onion-skin overlays. Normal is the default;
+these modes do not change exports or document data. Only the outlined central
+canvas is editable; dragging a neighbor pans. Frame ends stay blank (no wrap).
+Fit includes the context cells. Slide lazily caches one additional full-resolution
+next-frame image, discards stale responses, and releases it when disabled.
+
 ### Linux installer and updates
 
 Download `install-spritedawg.sh` from the [latest release](https://github.com/isaiahpettingill/SpriteDawg/releases/latest), review it, then run:

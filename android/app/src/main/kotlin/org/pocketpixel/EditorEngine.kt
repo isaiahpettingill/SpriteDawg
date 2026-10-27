@@ -136,6 +136,16 @@ class EditorEngine {
             data = original.data?.let { it.copy(properties = it.properties?.copyOf()) })
     }
 
+    private fun rgba(p: IntArray): ByteArray = ByteArray(p.size*4).also { bytes -> p.forEachIndexed { i,c -> bytes[i*4]=(c ushr 16).toByte(); bytes[i*4+1]=(c ushr 8).toByte(); bytes[i*4+2]=c.toByte(); bytes[i*4+3]=(c ushr 24).toByte() } }
+
+    /** Full-resolution neighbor preview, without selection/history mutations. */
+    fun frameImage(args: Map<String, Any?>): Map<String, Any?> {
+        val index = args.strictInteger("frame", -1)
+        require(index in document.frames.indices) { "Invalid preview frame" }
+        return mapOf("frame" to index, "width" to document.width, "height" to document.height,
+            "pixels" to rgba(document.composite(index)))
+    }
+
     fun thumbnails(args: Map<String, Any?>): Map<String, Any?> {
         val requested = args["frames"] as? List<*> ?: error("Provide a list of frame indices")
         require(requested.size <= 32) { "Request at most 32 thumbnails at a time" }
@@ -177,7 +187,6 @@ class EditorEngine {
 
     fun state(recoveryAvailable: Boolean): Map<String, Any?> {
         val d=document
-        fun rgba(p: IntArray): ByteArray = ByteArray(p.size*4).also { bytes -> p.forEachIndexed { i,c -> bytes[i*4]=(c ushr 16).toByte(); bytes[i*4+1]=(c ushr 8).toByte(); bytes[i*4+2]=c.toByte(); bytes[i*4+3]=(c ushr 24).toByte() } }
         return mapOf("width" to d.width,"height" to d.height,"frame" to frame,"layer" to layer,"depth" to d.depth,"dirty" to dirty,"canUndo" to history.canUndo,"canRedo" to history.canRedo,"recoveryAvailable" to recoveryAvailable,
             "pixels" to rgba(d.composite(frame)),"previousPixels" to if(frame>0) rgba(d.composite(frame-1)) else null,
             "palette" to (if(d.frames[frame].palette.isNotEmpty()) d.frames[frame].palette.toList() else d.palette).map { it.toLong() and 0xffffffffL },
