@@ -43,6 +43,30 @@ void main() {
       await t.pumpWidget(const SizedBox());
     },
   );
+  testWidgets('Palette textures and dithers use remembered compact groups', (
+    t,
+  ) async {
+    final editor = Editor(transport: (_, _) async => fixture.state());
+    await t.pumpWidget(PocketPixelApp(editor: editor));
+    await t.pumpAndSettle();
+    for (final choice in [
+      ('texture', 'Knife', 'knife'),
+      ('ink', 'Dither Paint', 'ditherPaint'),
+      ('effect', 'Dither Retouch', 'ditherRetouch'),
+    ]) {
+      await t.longPress(find.byKey(Key('tool-group-${choice.$1}')));
+      await t.pumpAndSettle();
+      await t.tap(find.text(choice.$2));
+      await t.pumpAndSettle();
+      expect(t.widget<PixelCanvas>(find.byType(PixelCanvas)).tool, choice.$3);
+      await t.tap(find.byKey(const Key('tool-group-eraser')));
+      await t.pump();
+      await t.tap(find.byKey(Key('tool-group-${choice.$1}')));
+      await t.pump();
+      expect(t.widget<PixelCanvas>(find.byType(PixelCanvas)).tool, choice.$3);
+    }
+    await t.pumpWidget(const SizedBox());
+  });
   testWidgets(
     'Gradient is a fill subtool and exposes two-color drag instructions',
     (t) async {
@@ -127,7 +151,7 @@ void main() {
   });
   for (final width in [320.0, 360.0, 768.0, 1280.0]) {
     testWidgets(
-      'All seven group controls reachable without toolbar scroll at $width',
+      'All group controls reachable without toolbar scroll at $width',
       (t) async {
         t.view.physicalSize = Size(width, 800);
         t.view.devicePixelRatio = 1;

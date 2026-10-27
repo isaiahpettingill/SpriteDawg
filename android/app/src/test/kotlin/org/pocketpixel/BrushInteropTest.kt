@@ -25,4 +25,29 @@ class BrushInteropTest {
     run("ellipse",false,mapOf("tool" to "ellipse","points" to listOf(listOf(18,22),listOf(3,5)),"filled" to true,"color" to 0x80c86432L,"mirrorX" to true))
 }
 
+@Test fun paletteTexturesMatchDartExactRgba() {
+    val path = System.getenv("SPRITEDAWG_BRUSH_INTEROP_DIR")
+    assumeTrue("Set SPRITEDAWG_BRUSH_INTEROP_DIR to the Dart brush fixture directory", path != null)
+    val out = File(path!!)
+    val gold = intArrayOf(0,0xff241c0b.toInt(),0xff654b16.toInt(),0xffae852a.toInt(),0xffe0bd55.toInt(),0xffffefae.toInt(),0xff1255ff.toInt())
+    val alpha = intArrayOf(0,0x80241c0b.toInt(),0x80654b16.toInt(),0x80ae852a.toInt(),0x80e0bd55.toInt(),0x80ffefae.toInt(),0xff1255ff.toInt())
+    for (tool in paletteTextureTools) for (mode in listOf("", "indexed-", "alpha-")) {
+        val d = Document.create(32,32)
+        d.depth = if (mode == "indexed-") 8 else 32
+        d.frames[0].palette = (if (mode == "alpha-") alpha else gold).copyOf()
+        val c = d.editable(0,0)
+        if (mode == "indexed-") c.pixels.fill(2)
+        else if (mode == "alpha-") c.pixels.fill(0x80a5802c.toInt())
+        else if (tool == "ditherRetouch") c.pixels.fill(0xffa5802c.toInt())
+        else for(y in 0..31) for(x in 0..31) c.pixels[y*32+x] = (((x*17+y*13)%256) shl 24) or (((x*7)%256) shl 16) or (((y*9)%256) shl 8) or (((x+y)*5)%256)
+        val e = EditorEngine(); e.replace(d)
+        e.stroke(mapOf("tool" to tool, "points" to listOf(listOf(4,5),listOf(18,19),listOf(20,19)),
+            "size" to 9, "seed" to 42, "strength" to 50,
+            "color" to if (mode == "alpha-") 0x80ae852aL else 0xffae852aL,
+            "paletteIndex" to 3, "mirrorX" to true, "mirrorY" to true))
+        val name = "texture-$mode$tool"
+        assertArrayEquals(name, File(out,"$name.rgba").readBytes(), e.state(false)["pixels"] as ByteArray)
+    }
+}
+
 }
