@@ -10,6 +10,34 @@ PalettePreset _preset(String id) =>
     palettePresets.singleWhere((preset) => preset.id == id);
 
 void main() {
+  test('Aseprite GPL export exactly matches Gaem-64 order and labels', () {
+    final lines = File('art/palettes/Gaem-64.gpl').readAsLinesSync();
+    expect(lines.first, 'GIMP Palette');
+    expect(lines, contains('Name: Gaem-64'));
+    expect(lines, contains('Columns: 8'));
+    final values = <int>[];
+    final names = <String>[];
+    final row = RegExp(r'^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.+)$');
+    for (final line in lines.skip(1)) {
+      if (line.startsWith('#') ||
+          line.startsWith('Name:') ||
+          line.startsWith('Columns:') ||
+          line.trim().isEmpty)
+        continue;
+      final match = row.firstMatch(line);
+      expect(match, isNotNull, reason: line);
+      final channels = [
+        for (var i = 1; i <= 3; i++) int.parse(match!.group(i)!),
+      ];
+      expect(channels.every((c) => c >= 0 && c <= 255), isTrue);
+      values.add(_rgb(channels[0], channels[1], channels[2]));
+      names.add(match!.group(4)!);
+    }
+    final preset = _preset('spritedawg-game-64');
+    expect(preset.name, 'Gaem-64');
+    expect(values, preset.colors);
+    expect(names, preset.colorNames);
+  });
   test(
     'Original material ramps retain opaque highlights and alpha overlays',
     () {

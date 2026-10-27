@@ -83,7 +83,9 @@ options → Undo restores the previous custom palette and artwork. Credits are
 shown in the browser; license notices are available through its info button.
 See [palette sources and licensing](docs/PALETTE_SOURCES.md). This is a curated
 redistributable selection, not a claim to include every Aseprite/LibreSprite asset.
-AAP-64 is not bundled; SpriteDawg Game64 is an independently authored alternative.
+AAP-64 is not bundled; Gaem-64 is an independently authored alternative.
+Its [GIMP palette file](art/palettes/Gaem-64.gpl) can be loaded in Aseprite;
+the 64 RGB values and labels match the built-in preset exactly.
 
 Use **Save as preset** to keep the current ordered ARGB swatches and names in
 **My palettes** across documents and restarts. Personal presets can be edited,

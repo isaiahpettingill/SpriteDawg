@@ -1,0 +1,69 @@
+GIMP Palette
+Name: Gaem-64
+Columns: 8
+# Original SpriteDawg game-art palette. MIT license; see https://github.com/isaiahpettingill/SpriteDawg/blob/main/LICENSE
+# Not AAP-64. Ordered as sixteen four-color ramps.
+ 17  19  34	Ink shadow
+ 52  54  74	Ink midtone
+119 120 137	Ink light
+218 220 228	Ink highlight
+ 37  43  50	Stone shadow
+ 81  92 101	Stone midtone
+143 155 157	Stone light
+210 217 207	Stone highlight
+ 22  41  58	Steel shadow
+ 53  83 109	Steel midtone
+115 149 173	Steel light
+207 235 242	Steel highlight
+ 48  35  37	Earth shadow
+100  67  55	Earth midtone
+160 113  76	Earth light
+216 171 112	Earth highlight
+ 66  42  54	Skin shadow
+139  80  80	Skin midtone
+201 138 112	Skin light
+244 203 156	Skin highlight
+ 61  28  53	Crimson shadow
+132  44  71	Crimson midtone
+198  73  86	Crimson light
+243 144 136	Crimson highlight
+ 75  37  40	Ember shadow
+165  68  48	Ember midtone
+236 123  61	Ember light
+255 196 119	Ember highlight
+ 71  55  40	Gold shadow
+156 117  47	Gold midtone
+228 182  66	Gold light
+255 240 163	Gold highlight
+ 48  59  36	Lime shadow
+107 124  49	Lime midtone
+169 190  78	Lime light
+230 237 155	Lime highlight
+ 24  58  42	Leaf shadow
+ 52 115  68	Leaf midtone
+110 172  87	Leaf light
+189 225 140	Leaf highlight
+ 21  56  47	Jade shadow
+ 44 112  90	Jade midtone
+ 83 171 133	Jade light
+173 227 190	Jade highlight
+ 25  59  70	Aqua shadow
+ 40 110 122	Aqua midtone
+ 84 175 183	Aqua light
+182 237 232	Aqua highlight
+ 28  48  79	Sky shadow
+ 50  93 145	Sky midtone
+ 89 156 203	Sky light
+185 222 238	Sky highlight
+ 38  38  72	Indigo shadow
+ 74  67 133	Indigo midtone
+124 117 188	Indigo light
+195 189 233	Indigo highlight
+ 57  36  67	Orchid shadow
+117  68 117	Orchid midtone
+177 123 176	Orchid light
+229 191 224	Orchid highlight
+ 67  36  60	Rose shadow
+139  69 109	Rose midtone
+205 122 160	Rose light
+242 192 203	Rose highlight

@@ -27,7 +27,7 @@ license is unchanged.
 | TIC-80 / Sweetie 16 | 16 | MIT distribution + creator consent |
 | DawnBringer 16 | 16 | Author free-use permission |
 | SpriteDawg Materials | 120 | Original, app MIT license |
-| SpriteDawg Game 64 | 64 | Original, app MIT license |
+| Gaem-64 | 64 | Original, app MIT license |
 | SpriteDawg Characters | 77 | Original, app MIT license |
 | SpriteDawg Food | 84 | Original, app MIT license |
 
@@ -306,7 +306,7 @@ artist palettes. Their numeric values and labels are included under SpriteDawg's
 MIT license. They are not simulations of a particular game's lighting/material
 renderer; use the ordered ramps for shadows, body colors, and bright highlights.
 
-- **SpriteDawg Game 64**: sixteen four-color ramps (ink, stone, steel, earth,
+- **Gaem-64**: sixteen four-color ramps (ink, stone, steel, earth,
   skin, crimson, ember, gold, lime, leaf, jade, aqua, sky, indigo, orchid, rose).
   All 64 swatches are distinct and opaque. This is the requested independently
   authored alternative, not AAP-64 under another name.

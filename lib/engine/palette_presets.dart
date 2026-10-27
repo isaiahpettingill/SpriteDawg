@@ -1206,7 +1206,7 @@ const List<PalettePreset> palettePresets = [
   ),
   PalettePreset._(
     id: 'spritedawg-game-64',
-    name: 'SpriteDawg Game 64',
+    name: 'Gaem-64',
     description:
         'Original 64-color game-art ramps: terrain, skin, cloth, foliage, sky and effects. Not AAP-64.',
     credit: 'SpriteDawg original palette · MIT',
