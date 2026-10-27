@@ -1,7 +1,6 @@
 import 'dart:convert';
-import 'dart:io';
-
-import 'package:path_provider/path_provider.dart';
+import 'platform/palette_storage_io.dart'
+    if (dart.library.js_interop) 'platform/palette_storage_web.dart';
 
 import 'engine/palette_presets.dart';
 
@@ -11,10 +10,7 @@ import 'engine/palette_presets.dart';
 class UserPaletteStore {
   UserPaletteStore(this.resolveFile);
 
-  static final shared = UserPaletteStore(() async {
-    final directory = await getApplicationSupportDirectory();
-    return File('${directory.path}/palette-library.json');
-  });
+  static final shared = UserPaletteStore(paletteLibraryFile);
 
   final Future<File> Function() resolveFile;
   Future<void> _pending = Future<void>.value();

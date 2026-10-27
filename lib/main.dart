@@ -14,7 +14,8 @@ import 'engine/palette_presets.dart';
 import 'color_picker.dart';
 import 'tool_groups.dart';
 import 'document_tabs.dart';
-import 'linux_updater.dart';
+import 'linux_updater.dart'
+    if (dart.library.js_interop) 'platform/linux_updater_web.dart';
 import 'responsive_editor_shell.dart';
 
 void main(List<String> args) {

@@ -4,7 +4,7 @@
 library;
 
 import 'dart:convert';
-import 'dart:io';
+import 'package:archive/archive.dart';
 import 'dart:typed_data';
 
 import 'document.dart';
@@ -454,21 +454,19 @@ class AsepriteCodec {
 
   static Uint8List _inflate(Uint8List payload, int expected) {
     validateZlib(payload, expected);
-    final out = BytesBuilder(copy: false);
-    var count = 0;
-    final sink = _LimitedSink(expected, (b) {
-      count += b.length;
-      out.add(b);
-    });
-    final decoder = ZLibDecoder().startChunkedConversion(sink);
-    for (var offset = 0; offset < payload.length; offset += 1024) {
-      decoder.add(
-        payload.sublist(offset, (offset + 1024).clamp(0, payload.length)),
-      );
-    }
-    decoder.close();
-    require(count == expected, 'Incorrect zlib cel length');
-    return out.toBytes();
+    // archive's bounded decodeBytes path does not set the zlib stream's
+    // big-endian checksum order on web. Use the bounded stream API explicitly.
+    final output = OutputMemoryStream();
+    final valid = ZLibDecoder().decodeStream(
+      InputMemoryStream(payload, byteOrder: ByteOrder.bigEndian),
+      output,
+      verify: true,
+      maxOutputSize: expected,
+    );
+    require(valid, 'Invalid zlib checksum or stream');
+    final bytes = output.getBytes();
+    require(bytes.length == expected, 'Incorrect zlib cel length');
+    return bytes;
   }
 
   static Uint8List _chunk(int type, void Function(_Writer) write) {
@@ -636,7 +634,7 @@ class AsepriteCodec {
                 }
               }
               final data = raw.result();
-              w.bytes(compressed ? ZLibEncoder().convert(data) : data);
+              w.bytes(compressed ? ZLibEncoder().encode(data) : data);
             }
           }),
         );
@@ -683,20 +681,4 @@ class AsepriteCodec {
     require(bytes.length <= maxFile, 'Saved document exceeds 64 MiB');
     return bytes;
   }
-}
-
-class _LimitedSink implements Sink<List<int>> {
-  final int limit;
-  final void Function(List<int>) output;
-  int count = 0;
-  _LimitedSink(this.limit, this.output);
-  @override
-  void add(List<int> data) {
-    count += data.length;
-    require(count <= limit, 'Inflated cel exceeds declared size');
-    output(data);
-  }
-
-  @override
-  void close() {}
 }
