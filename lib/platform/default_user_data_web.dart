@@ -7,7 +7,7 @@ extension type _Storage(JSObject _) implements JSObject {
   external void setItem(JSString key, JSString value);
 }
 const _key = 'spritedawg.default-user-data.v1';
-Future<String> readDefaultUserData() async =>
-    _storage.getItem(_key.toJS)?.toDart ?? '';
-Future<void> writeDefaultUserData(String text) async =>
-    _storage.setItem(_key.toJS, text.toJS);
+Future<String> readDefaultUserData({String key = _key}) async =>
+    _storage.getItem(key.toJS)?.toDart ?? '';
+Future<void> writeDefaultUserData(String text, {String key = _key}) async =>
+    _storage.setItem(key.toJS, text.toJS);

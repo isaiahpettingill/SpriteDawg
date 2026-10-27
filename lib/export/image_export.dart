@@ -1,9 +1,7 @@
-import 'dart:async';
-import 'dart:isolate';
+import '../platform/run_background.dart';
 import 'dart:typed_data';
 
-import 'package:flutter_avif_platform_interface/flutter_avif_platform_interface.dart'
-    as avif;
+import 'avif_native.dart' if (dart.library.js_interop) 'avif_web.dart';
 import 'package:image/image.dart' as img;
 import 'vendor/imcodec_qoi_encoder.dart' as qoi;
 
@@ -11,7 +9,6 @@ import 'vendor/imcodec_qoi_encoder.dart' as qoi;
 enum ImageExportFormat { gif, apng, webp, qoi, avif }
 
 const maxExportRgbaBytes = 64 * 1024 * 1024;
-bool _avifInFlight = false;
 
 class ImageExportPayload {
   const ImageExportPayload({
@@ -74,56 +71,14 @@ Future<Uint8List> encodeImageExport(
   ImageExportFormat format,
 ) async {
   payload.validate(format);
+  if (const bool.fromEnvironment('dart.library.js_interop') &&
+      format == ImageExportFormat.avif) {
+    throw UnsupportedError('AVIF export is available in the installed app.');
+  }
   if (format != ImageExportFormat.avif) {
-    return Isolate.run(() => encodeImageExportSync(payload, format));
+    return runBackground(() => encodeImageExportSync(payload, format));
   }
-  if (_avifInFlight) {
-    throw StateError(
-      'An AVIF export is still running. Use another format or restart the app if the previous export timed out.',
-    );
-  }
-  _avifInFlight = true;
-  // Bypass the convenience PNG decoder: it uses premultiplied rawRgba.
-  // The native encoder takes straight RGBA. Zero quantizers select its highest
-  // quality, but rav1e can still alter RGB AND alpha (including transparent
-  // pixels). AVIF must not be advertised as lossless.
-  final pending = Future<Uint8List>.sync(
-    () => avif.FlutterAvifPlatform.api.encodeAvif(
-      width: payload.width,
-      height: payload.height,
-      speed: 6,
-      maxThreads: 2,
-      timescale: 1,
-      minQuantizer: 0,
-      maxQuantizer: 0,
-      minQuantizerAlpha: 0,
-      maxQuantizerAlpha: 0,
-      imageSequence: [
-        avif.EncodeFrame(
-          data: payload.rgbaFrames.single,
-          durationInTimescale: 1,
-        ),
-      ],
-      exifData: Uint8List(0),
-    ),
-  );
-  // Release only when the underlying native work actually finishes, NOT when
-  // timeout stops awaiting it. A stuck Android worker cannot be piled up.
-  unawaited(
-    pending.then<void>(
-      (_) {
-        _avifInFlight = false;
-      },
-      onError: (Object error, StackTrace stack) {
-        _avifInFlight = false;
-      },
-    ),
-  );
-  final output = await pending.timeout(const Duration(seconds: 60));
-  if (output.isEmpty) {
-    throw const FormatException('AVIF encoder returned no image.');
-  }
-  return output;
+  return encodeNativeAvif(payload);
 }
 
 /// Pure Dart entry point, suitable for isolates and deterministic codec tests.

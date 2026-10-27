@@ -1,5 +1,6 @@
 import 'default_user_data_store.dart';
-import 'platform/desktop_backend.dart';
+import 'platform/desktop_backend.dart'
+    if (dart.library.js_interop) 'platform/web_backend.dart';
 import 'rgba_image.dart';
 import 'frame_thumbnails.dart';
 
@@ -34,10 +35,11 @@ class Editor extends ChangeNotifier {
                : DefaultUserDataStore.memory()),
        transport =
            transport ??
-           (defaultTargetPlatform == TargetPlatform.linux
+           (kIsWeb || defaultTargetPlatform == TargetPlatform.linux
                ? DesktopBackend().invoke
                : _native);
   final DefaultUserDataStore defaultsStore;
+
   final EditorTransport transport;
   final EditorImageDecoder decodeImage;
   static Future<Map<String, dynamic>?> _native(

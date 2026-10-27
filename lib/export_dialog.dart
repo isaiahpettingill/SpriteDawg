@@ -1,5 +1,5 @@
-import 'dart:isolate';
-import 'dart:typed_data';
+import 'platform/run_background.dart';
+import 'package:flutter/foundation.dart';
 
 import 'package:flutter/material.dart';
 
@@ -13,7 +13,7 @@ Future<void> showExportDialog(BuildContext context, Editor editor) async {
     context: context,
     builder: (_) => _ExportDialog(
       tags: editor.maps('tags'),
-      avifAvailable: editor.width >= 16 && editor.height >= 16,
+      avifAvailable: !kIsWeb && editor.width >= 16 && editor.height >= 16,
     ),
   );
   if (options == null || !context.mounted) return;
@@ -23,7 +23,7 @@ Future<void> showExportDialog(BuildContext context, Editor editor) async {
       final frames = (snapshot['frames'] as List).cast<Uint8List>();
       final gifColorLoss =
           options.format == 'gif' &&
-          await Isolate.run(() => _gifLosesColors(frames));
+          await runBackground(() => _gifLosesColors(frames));
       final gifTimingLoss =
           options.format == 'gif' &&
           (snapshot['durations'] as List).cast<int>().any(
@@ -58,7 +58,7 @@ Future<void> showExportDialog(BuildContext context, Editor editor) async {
       }
       Map<String, Uint8List> files;
       if (options.format == 'sheet') {
-        files = await Isolate.run(
+        files = await runBackground(
           () => encodeSpritesheet(
             snapshot,
             name: options.name,
@@ -67,7 +67,7 @@ Future<void> showExportDialog(BuildContext context, Editor editor) async {
           ),
         );
       } else if (options.format == 'png') {
-        final bytes = await Isolate.run(
+        final bytes = await runBackground(
           () => encodeRgbaPng(
             frames.single,
             width: snapshot['width'] as int,
@@ -99,7 +99,9 @@ Future<void> showExportDialog(BuildContext context, Editor editor) async {
         content: Text(
           saved
               ? (options.format == 'sheet'
-                    ? 'Spritesheet and JSON exported to a new folder'
+                    ? (kIsWeb
+                          ? 'Spritesheet and JSON download started (ZIP)'
+                          : 'Spritesheet and JSON exported to a new folder')
                     : 'Exported')
               : editor.error!,
         ),
@@ -205,7 +207,7 @@ class _ExportDialogState extends State<_ExportDialog> {
               title: const Text('Export formats'),
               content: const SingleChildScrollView(
                 child: Text(
-                  'PNG, QOI and AVIF export the current frame. GIF, APNG and WebP can animate frames or a tag.\n\nGIF has a 256-color limit, binary transparency and 10 ms timing. APNG and lossless WebP preserve full alpha. AVIF is lossy, including small transparency changes, and requires at least 16×16 pixels.\n\nSpritesheets use untrimmed PNG cells and Aseprite-style JSON. A new folder keeps the pair together. Tag direction is applied to animations and recorded in sheet metadata. Loop count 0 means forever.',
+                  'PNG, QOI and AVIF export the current frame. GIF, APNG and WebP can animate frames or a tag.\n\nGIF has a 256-color limit, binary transparency and 10 ms timing. APNG and lossless WebP preserve full alpha. AVIF is lossy, including small transparency changes, and requires at least 16×16 pixels.\n\nSpritesheets use untrimmed PNG cells and Aseprite-style JSON. A new folder (ZIP download in the browser) keeps the pair together. Tag direction is applied to animations and recorded in sheet metadata. Loop count 0 means forever.',
                 ),
               ),
               actions: [
@@ -241,7 +243,11 @@ class _ExportDialogState extends State<_ExportDialog> {
                   value: 'avif',
                   enabled: widget.avifAvailable,
                   child: Text(
-                    widget.avifAvailable ? 'AVIF (lossy)' : 'AVIF (16×16 min)',
+                    kIsWeb
+                        ? 'AVIF (installed app)'
+                        : widget.avifAvailable
+                        ? 'AVIF (lossy)'
+                        : 'AVIF (16×16 min)',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),

@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'package:archive/archive.dart';
 import 'dart:typed_data';
 
 import 'document.dart' show maxPixels;
@@ -50,7 +50,7 @@ Uint8List encodeRgbaPng(
   }
 
   chunk('IHDR', header.buffer.asUint8List());
-  chunk('IDAT', ZLibEncoder(level: 6).convert(rows));
+  chunk('IDAT', ZLibEncoder().encode(rows, level: 6));
   chunk('IEND', const []);
   return output.takeBytes();
 }

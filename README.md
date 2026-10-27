@@ -261,3 +261,23 @@ See [codec details and verification](docs/IMAGE_EXPORT_CODECS.md).
 not rename the document or change imported/recovered sprites. Use **User data →
 Apply defaults to project** to apply it to an existing sprite; replacing text
 requires confirmation and can be undone. Other user-data fields are preserved.
+
+### Browser edition
+
+The GitHub Pages build runs the editor locally in your browser. **Open** reads a
+selected `.aseprite` file; it does not upload artwork. **Save** downloads a copy
+rather than overwriting the original. Keep the download before closing the tab:
+open documents are held in memory, and the unsaved indicator remains because the
+browser cannot confirm that you kept the file. Personal palette presets persist
+in this browser's site storage; clearing site data removes them.
+
+PNG, GIF, APNG, lossless WebP and QOI exports are supported. Spritesheet PNG + JSON
+download together as a ZIP. AVIF and the Linux updater require the installed app.
+Large encodes can briefly block the browser UI; native builds retain background
+workers. No accounts, analytics or artwork upload endpoints are used. Pages hosts
+the app assets only; all editor processing stays in the browser.
+
+The `SpriteDawg Web` workflow validates real Chrome drawing/import/export flows,
+builds self-hosted Flutter assets under `/SpriteDawg/`, and publishes only trusted
+main-branch builds. Repository **Settings → Pages → Source: GitHub Actions** must
+be enabled by a repository administrator before the first deployment.

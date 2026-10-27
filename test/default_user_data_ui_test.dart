@@ -28,9 +28,12 @@ void main() {
         ),
       );
       await t.tap(find.text('Defaults'));
+      await t.pump();
       await t.pump(const Duration(milliseconds: 300));
       await t.tap(find.text('Cancel'));
-      await t.pumpAndSettle();
+      // Do not settle an intentionally unresolved loading animation.
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 300));
       loaded.complete('late');
       await t.pumpAndSettle();
       expect(t.takeException(), isNull);

@@ -1,0 +1,67 @@
+name: SpriteDawg Web
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: spritedawg-web-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+env:
+  CI: 'true'
+  FLUTTER_SUPPRESS_ANALYTICS: 'true'
+  DASH__SUPPRESS_ANALYTICS: 'true'
+  FLUTTER_VERSION: '3.47.8'
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get
+      - name: Browser drawing and codec smoke test
+        run: |
+          set -euo pipefail
+          chromedriver --version
+          chromedriver --port=4444 > "$RUNNER_TEMP/chromedriver.log" 2>&1 &
+          driver_pid=$!
+          trap 'kill "$driver_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl -fsS http://localhost:4444/status >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://localhost:4444/status >/dev/null
+          flutter drive --driver=test_driver/web_integration.dart --target=integration_test/web_smoke_test.dart -d web-server
+      - name: Build self-hosted browser assets
+        run: |
+          set -euo pipefail
+          repository_name="${GITHUB_REPOSITORY#*/}"
+          flutter build web --release --no-web-resources-cdn --base-href "/$repository_name/"
+          test -s build/web/main.dart.js
+          test -s build/web/flutter_bootstrap.js
+          touch build/web/.nojekyll
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
