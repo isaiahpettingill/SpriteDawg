@@ -22,8 +22,9 @@ void main() {
       if (line.startsWith('#') ||
           line.startsWith('Name:') ||
           line.startsWith('Columns:') ||
-          line.trim().isEmpty)
+          line.trim().isEmpty) {
         continue;
+      }
       final match = row.firstMatch(line);
       expect(match, isNotNull, reason: line);
       final channels = [
