@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:spritedawg/default_user_data_dialog.dart';
@@ -6,6 +7,36 @@ import 'package:spritedawg/editor.dart';
 import 'editor_test.dart' as fixture;
 
 void main() {
+  testWidgets(
+    'dismissing during a delayed defaults read never touches disposed controls',
+    (t) async {
+      final loaded = Completer<String>();
+      final store = DefaultUserDataStore(
+        read: () => loaded.future,
+        write: (_) async {},
+      );
+      await t.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (c) => Scaffold(
+              body: TextButton(
+                onPressed: () => showDefaultUserDataDialog(c, store),
+                child: const Text('Defaults'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await t.tap(find.text('Defaults'));
+      await t.pump(const Duration(milliseconds: 300));
+      await t.tap(find.text('Cancel'));
+      await t.pumpAndSettle();
+      loaded.complete('late');
+      await t.pumpAndSettle();
+      expect(t.takeException(), isNull);
+      expect(find.byKey(const Key('default-user-data-text')), findsNothing);
+    },
+  );
   testWidgets('defaults save raw text, cancel does not change saved defaults', (
     t,
   ) async {

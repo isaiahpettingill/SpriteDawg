@@ -25,8 +25,11 @@ class _DefaultsDialogState extends State<_DefaultsDialog> {
 
   Future<void> load() async {
     try {
-      text.text = await widget.store.load();
+      final value = await widget.store.load();
+      if (!mounted) return;
+      text.text = value;
     } catch (_) {
+      if (!mounted) return;
       unreadable = true;
       error = 'Saved defaults could not be read.';
     }
