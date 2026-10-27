@@ -86,6 +86,6 @@ void main() {
     await tester.tap(find.text('Discard and close'));
     await tester.pumpAndSettle();
     expect(calls, ['closeDocument']);
-    expect(args.single, {'id': 1, 'discard': true});
+    expect(args.single, {'id': 1, 'discard': true, 'defaultUserData': ''});
   });
 }

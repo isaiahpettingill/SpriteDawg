@@ -37,6 +37,37 @@ void main() {
     '${base.path}/support/recovery-${backend.sessions.activeId}.aseprite',
   );
   test(
+    'new and fresh placeholders get defaults but late init never stamps imports',
+    () async {
+      const text = 'credits="A"\nlicense="CC0"\n';
+      await backend.invoke('init', {'defaultUserData': text});
+      expect(backend.engine.document.data!.text, text);
+      await backend.invoke('new', {
+        'width': 8,
+        'height': 8,
+        'defaultUserData': text,
+      });
+      expect(backend.engine.document.data!.text, text);
+      final imported = File('${base.path}/blank.aseprite');
+      await imported.writeAsBytes(
+        AsepriteCodec.encode(SpriteDocument.create()),
+      );
+      openPath = imported.path;
+      await backend.invoke('open', null);
+      await backend.invoke('init', {'defaultUserData': text});
+      expect(backend.engine.document.data, isNull);
+      final id = backend.sessions.activeId;
+      await backend.invoke('new', {'defaultUserData': text});
+      await backend.invoke('closeDocument', {
+        'id': backend.sessions.activeId,
+        'discard': true,
+        'defaultUserData': text,
+      });
+      expect(backend.sessions.activeId, id);
+      expect(backend.engine.document.data, isNull);
+    },
+  );
+  test(
     'cancel open/save/saveAs/export leaves state, history, and recovery intact',
     () async {
       await draw();

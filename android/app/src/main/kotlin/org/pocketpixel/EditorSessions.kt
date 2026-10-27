@@ -38,6 +38,15 @@ class EditorSessions(private val residentBudget:Long=64L*1024*1024) {
         documents.add(session);activeId=session.id
         return session
     }
+    fun initializePlaceholder(text: String, allow: Boolean = true) {
+        defaultUserData(mapOf("defaultUserData" to text))
+        val session = active
+        if (!allow || text.isEmpty() || !session.placeholder || session.engine.dirty ||
+            session.engine.document.data != null) return
+        val candidate = session.engine.document.copyDeep().also { it.data = UserData(text = text) }
+        checkBudget(candidate, session.id)
+        session.engine.replace(candidate)
+    }
     fun select(id: Int) { require(documents.any { it.id==id }) { "Document is no longer open" };activeId=id }
     fun close(id: Int,discard: Boolean=false) {
         val index=documents.indexOfFirst { it.id==id }

@@ -1,6 +1,11 @@
 // CI uses a disposable Chrome profile. Only picker/download boundaries are
 // injected: drawing, Aseprite import, snapshots and encoders are real browser code.
 import 'dart:convert';
+import 'package:spritedawg/default_user_data_store.dart';
+import 'package:spritedawg/platform/default_user_data_web.dart'
+    as defaults_storage;
+import 'package:web/web.dart' as web;
+import 'package:spritedawg/engine/document.dart';
 
 import 'package:archive/archive.dart';
 import 'package:spritedawg/user_palette_store.dart';
@@ -23,6 +28,67 @@ import 'package:spritedawg/platform/web_backend.dart';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets('browser defaults persist and apply only to fresh documents', (
+    tester,
+  ) async {
+    const raw = ' credits="Browser artist"\nlicense="CC0"\ntitle="Optional"\n';
+    final key =
+        'spritedawg-ci-defaults-${DateTime.now().microsecondsSinceEpoch}';
+    final store = DefaultUserDataStore(
+      read: () => defaults_storage.readDefaultUserData(key: key),
+      write: (text) => defaults_storage.writeDefaultUserData(text, key: key),
+    );
+    await store.save(raw);
+    final restart = DefaultUserDataStore(read: store.read, write: store.write);
+    expect(await restart.load(), raw);
+    XFile? picked;
+    final backend = DesktopBackend(
+      openFile: () async => picked,
+      download: (_, _) async {},
+    );
+    final editor = Editor(transport: backend.invoke, defaultsStore: restart);
+    expect(await editor.call('init'), true, reason: editor.error);
+    expect(backend.engine.document.data!.text, raw);
+    expect(await editor.call('new', {'width': 8, 'height': 8}), true);
+    expect(AsepriteCodec.decode(backend.engine.encode()).data!.text, raw);
+    final blank = AsepriteCodec.encode(SpriteDocument.create());
+    picked = XFile.fromData(blank, name: 'imported.aseprite');
+    expect(await editor.call('open'), true);
+    expect(await editor.call('init'), true);
+    expect(backend.engine.document.data, isNull);
+    final imported = backend.sessions.activeId;
+    expect(await editor.call('new'), true);
+    expect(
+      await editor.call('closeDocument', {
+        'id': backend.sessions.activeId,
+        'discard': true,
+      }),
+      true,
+    );
+    expect(backend.sessions.activeId, imported);
+    expect(backend.engine.document.data, isNull);
+    while (backend.sessions.documents.length > 1) {
+      expect(
+        await editor.call('closeDocument', {
+          'id': backend.sessions.activeId,
+          'discard': true,
+        }),
+        true,
+      );
+    }
+    expect(
+      await editor.call('closeDocument', {
+        'id': backend.sessions.activeId,
+        'discard': true,
+      }),
+      true,
+    );
+    expect(backend.engine.document.data!.text, raw);
+    expect(backend.engine.dirty, false);
+    web.window.localStorage.removeItem(key);
+    editor.dispose();
+  });
 
   testWidgets('browser draws, imports Aseprite and encodes real exports', (
     tester,

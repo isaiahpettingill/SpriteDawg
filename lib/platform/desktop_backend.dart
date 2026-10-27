@@ -10,6 +10,7 @@ import '../engine/aseprite.dart';
 import '../engine/editor_engine.dart';
 import '../engine/editor_sessions.dart';
 import '../engine/document.dart';
+import '../engine/default_user_data.dart';
 import '../engine/png.dart';
 import '../export/export_snapshot.dart';
 import 'export_files.dart';
@@ -153,7 +154,12 @@ class DesktopBackend {
   ) async {
     await _init();
     final args = arguments ?? <String, dynamic>{};
+    final defaultText = const {'init', 'new', 'closeDocument'}.contains(method)
+        ? defaultUserData(args)
+        : '';
     switch (method) {
+      case 'init':
+        sessions.initializePlaceholder(defaultText);
       case 'saveExport':
         return ExportFiles().save(args);
       case 'exportSnapshot':
@@ -315,6 +321,7 @@ class DesktopBackend {
         final file = File('${_base!.path}/recovery-$id.aseprite');
         if (await file.exists()) await file.delete();
         sessions.close(id, discard: args['discard'] == true);
+        sessions.initializePlaceholder(defaultText);
       case 'clearTagClipboard':
         sessions.clearClipboard();
       case 'copyTag':
@@ -328,9 +335,10 @@ class DesktopBackend {
         await _persist();
       case 'new':
         sessions.add(
-          SpriteDocument.create(
+          newSprite(
             (args['width'] as num?)?.toInt() ?? 32,
             (args['height'] as num?)?.toInt() ?? 32,
+            defaultText,
           ),
           unsaved: true,
         );

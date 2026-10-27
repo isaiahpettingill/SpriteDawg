@@ -1,4 +1,5 @@
 import 'document.dart';
+import 'default_user_data.dart';
 import 'aseprite.dart';
 import 'editor_engine.dart';
 import 'tag_transfer.dart';
@@ -109,6 +110,22 @@ class EditorSessions {
     documents.add(session);
     activeId = session.id;
     return session;
+  }
+
+  void initializePlaceholder(String text) {
+    defaultUserData({'defaultUserData': text});
+    final session = active;
+    if (text.isEmpty ||
+        !session.placeholder ||
+        session.engine.dirty ||
+        session.engine.recoveryAvailable ||
+        session.engine.document.data != null) {
+      return;
+    }
+    final candidate = session.engine.document.copy()
+      ..data = UserData(text: text);
+    _checkBudget(candidate: candidate, replacing: session.id);
+    session.engine.replace(candidate);
   }
 
   void select(int id) {

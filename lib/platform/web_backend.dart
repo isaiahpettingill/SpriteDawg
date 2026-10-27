@@ -7,7 +7,7 @@ import 'package:file_selector/file_selector.dart' as picker;
 import 'package:web/web.dart' as web;
 
 import '../engine/aseprite.dart';
-import '../engine/document.dart';
+import '../engine/default_user_data.dart';
 import '../engine/editor_engine.dart';
 import '../engine/editor_sessions.dart';
 import '../engine/png.dart';
@@ -64,7 +64,12 @@ class DesktopBackend {
     String method,
     Map<String, dynamic> args,
   ) async {
+    final defaultText = const {'init', 'new', 'closeDocument'}.contains(method)
+        ? defaultUserData(args)
+        : '';
     switch (method) {
+      case 'init':
+        sessions.initializePlaceholder(defaultText);
       case 'open':
         if (sessions.documents.length >= 8) {
           throw StateError(
@@ -136,6 +141,7 @@ class DesktopBackend {
           (args['id'] as num).toInt(),
           discard: args['discard'] == true,
         );
+        sessions.initializePlaceholder(defaultText);
       case 'copyTag':
         sessions.copyTag((args['index'] as num).toInt());
       case 'clearTagClipboard':
@@ -148,9 +154,10 @@ class DesktopBackend {
         }
       case 'new':
         sessions.add(
-          SpriteDocument.create(
+          newSprite(
             (args['width'] as num?)?.toInt() ?? 32,
             (args['height'] as num?)?.toInt() ?? 32,
+            defaultText,
           ),
           unsaved: true,
         );

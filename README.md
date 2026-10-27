@@ -255,6 +255,13 @@ pair. Cancel leaves the project untouched. Exports are bounded to 32 MiB of
 selected frame pixels; split large animations into tags if needed.
 See [codec details and verification](docs/IMAGE_EXPORT_CODECS.md).
 
+**Default user data** in the main menu saves a raw text template for new sprites
+(including fresh startup/last-tab canvases). Text such as `credits="..."`,
+`license="..."` or an explicitly chosen `title="..."` is kept verbatim. It does
+not rename the document or change imported/recovered sprites. Use **User data →
+Apply defaults to project** to apply it to an existing sprite; replacing text
+requires confirmation and can be undone. Other user-data fields are preserved.
+
 ### Browser edition
 
 The GitHub Pages build runs the editor locally in your browser. **Open** reads a
