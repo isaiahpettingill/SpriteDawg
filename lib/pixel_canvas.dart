@@ -132,6 +132,13 @@ class _PixelCanvasState extends State<PixelCanvas> {
     'blur',
     'jumble',
     'gradient',
+    'metal',
+    'cluster',
+    'stripes',
+    'sphere',
+    'knife',
+    'ditherPaint',
+    'ditherRetouch',
   }.contains(widget.tool);
   void _clearPreview() {
     _previewEpoch++;
@@ -613,7 +620,19 @@ class _CanvasPainter extends CustomPainter {
         for (final endpoint in [points.first, points.last]) {
           canvas.drawCircle(endpoint, 3 / scale, guide);
         }
-      } else if (const {'fill', 'blur', 'jumble', 'airbrush'}.contains(tool)) {
+      } else if (const {
+        'fill',
+        'blur',
+        'jumble',
+        'airbrush',
+        'metal',
+        'cluster',
+        'stripes',
+        'sphere',
+        'knife',
+        'ditherPaint',
+        'ditherRetouch',
+      }.contains(tool)) {
         final point = tool == 'fill' ? points.first : points.last;
         final p = Paint()
           ..color = Colors.white

@@ -15,9 +15,17 @@ void main(List<String> arguments) {
     bool pattern,
     Map<String, dynamic> args, {
     bool barrier = false,
+    List<int>? palette,
+    bool indexed = false,
+    int? background,
   }) {
     final e = EditorEngine();
     e.invoke('new', {'width': 32, 'height': 32});
+    if (palette != null) e.document.frames[0].palette = palette;
+    if (indexed) {
+      e.document.depth = 8;
+      e.document.transparentIndex = 0;
+    }
     final c = e.document.editable(0, 0);
     if (pattern) {
       for (var y = 0; y < 32; y++) {
@@ -30,6 +38,7 @@ void main(List<String> arguments) {
         }
       }
     }
+    if (background != null) c.pixels.fillRange(0, 1024, background);
     if (barrier) {
       for (var y = 0; y < 32; y++) {
         c.pixels[y * 32 + 16] = 0xff00ff00;
@@ -133,4 +142,68 @@ void main(List<String> arguments) {
     'color': 0x80c86432,
     'mirrorX': true,
   });
+  const palette = [
+    0,
+    0xff241c0b,
+    0xff654b16,
+    0xffae852a,
+    0xffe0bd55,
+    0xffffefae,
+    0xff1255ff,
+  ];
+  for (final tool in [
+    'metal',
+    'cluster',
+    'stripes',
+    'sphere',
+    'knife',
+    'ditherPaint',
+    'ditherRetouch',
+  ]) {
+    final args = <String, dynamic>{
+      'tool': tool,
+      'points': [
+        [4, 5],
+        [18, 19],
+        [20, 19],
+      ],
+      'size': 9,
+      'seed': 42,
+      'strength': 50,
+      'color': 0xffae852a,
+      'paletteIndex': 3,
+      'mirrorX': true,
+      'mirrorY': true,
+    };
+    run(
+      'texture-$tool',
+      true,
+      args,
+      palette: palette,
+      background: tool == 'ditherRetouch' ? 0xffa5802c : null,
+    );
+    run(
+      'texture-indexed-$tool',
+      false,
+      args,
+      palette: palette,
+      indexed: true,
+      background: 2,
+    );
+    run(
+      'texture-alpha-$tool',
+      false,
+      {...args, 'color': 0x80ae852a},
+      palette: [
+        0,
+        0x80241c0b,
+        0x80654b16,
+        0x80ae852a,
+        0x80e0bd55,
+        0x80ffefae,
+        0xff1255ff,
+      ],
+      background: 0x80a5802c,
+    );
+  }
 }

@@ -14,6 +14,14 @@ const drawingToolGroups = <String, List<DrawingSubtool>>{
     DrawingSubtool('pencil', 'Pencil', Icons.edit),
     DrawingSubtool('spray', 'Spray', Icons.grain),
     DrawingSubtool('airbrush', 'Airbrush', Icons.blur_circular),
+    DrawingSubtool('ditherPaint', 'Dither Paint', Icons.gradient),
+  ],
+  'texture': [
+    DrawingSubtool('metal', 'Metal', Icons.brightness_medium),
+    DrawingSubtool('cluster', 'Cluster', Icons.grain),
+    DrawingSubtool('stripes', 'Stripes', Icons.texture),
+    DrawingSubtool('sphere', 'Sphere', Icons.circle),
+    DrawingSubtool('knife', 'Knife', Icons.architecture),
   ],
   'eraser': [DrawingSubtool('eraser', 'Eraser', Icons.auto_fix_normal)],
   'fill': [
@@ -31,6 +39,7 @@ const drawingToolGroups = <String, List<DrawingSubtool>>{
   'effect': [
     DrawingSubtool('blur', 'Blur', Icons.blur_on),
     DrawingSubtool('jumble', 'Jumble', Icons.shuffle),
+    DrawingSubtool('ditherRetouch', 'Dither Retouch', Icons.grid_4x4),
   ],
   'pan': [DrawingSubtool('pan', 'Pan', Icons.pan_tool_alt)],
 };
