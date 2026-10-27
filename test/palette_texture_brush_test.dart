@@ -1,3 +1,6 @@
+import 'dart:typed_data';
+
+import 'package:spritedawg/engine/document.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:spritedawg/engine/editor_engine.dart';
 import 'package:spritedawg/engine/palette_texture_brush.dart';
@@ -36,6 +39,47 @@ void stroke(
       ],
 });
 void main() {
+  test('no-op retouch preserves redo, clean state and linked cels', () {
+    for (final original in [0xff888888, 0x80777777, 0]) {
+      final e = setup();
+      e.document.editable(0, 0).pixels.fillRange(0, 1024, original);
+      e.document.frames.add(
+        Frame(
+          palette: List.of(shades),
+          cels: [Cel(0, 0, 0, 0, Uint32List(0), link: 0)],
+        ),
+      );
+      e.frame = 1;
+      stroke(e, 'pencil');
+      e.invoke('undo');
+      e.saved();
+      final before = e.encode();
+      stroke(e, 'ditherRetouch');
+      expect(e.encode(), before);
+      expect(e.document.frames[1].cels[0]!.link, 0);
+      expect(e.dirty, false);
+      expect(e.state()['canRedo'], true);
+    }
+  });
+  test('indexed transparent texture anchor never substitutes opaque ink', () {
+    final e = setup(indexed: true);
+    e.document.frames[0].palette[0] = 0xff888888;
+    final before = e.encode();
+    e.saved();
+    e.stroke({
+      'tool': 'metal',
+      'color': 0xff888888,
+      'paletteIndex': 0,
+      'size': 12,
+      'points': [
+        [8, 8],
+        [24, 24],
+      ],
+    });
+    expect(e.encode(), before);
+    expect(e.dirty, false);
+    expect(e.state()['canUndo'], false);
+  });
   test('Oklab reference black white and red conversion', () {
     expect(PaletteLab(0xff000000).l, closeTo(0, 1e-8));
     expect(PaletteLab(0xffffffff).l, closeTo(1, 1e-7));

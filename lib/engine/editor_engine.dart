@@ -321,42 +321,60 @@ class EditorEngine {
         mirrorY: mirrorY,
       );
       if (pixels.isEmpty) return;
+      final d = document, source = document.resolved(frame, layer);
+      final changes = <int, int>{};
+      final cache = <(int, int), int>{};
+      for (final entry in pixels.entries) {
+        final x = entry.key % d.width, y = entry.key ~/ d.width;
+        final sx = x - (source?.x ?? 0), sy = y - (source?.y ?? 0);
+        final originalValue =
+            source != null &&
+                sx >= 0 &&
+                sy >= 0 &&
+                sx < source.width &&
+                sy < source.height
+            ? source.pixels[sy * source.width + sx]
+            : d.depth == 8
+            ? d.transparentIndex
+            : 0;
+        final original = d.display(originalValue, frame, layer);
+        var index = entry.value;
+        if (dither) {
+          index = cache.putIfAbsent(
+            (original, (y & 3) * 4 + (x & 3)),
+            () => tool == 'ditherRetouch'
+                ? retouchPaletteIndex(
+                    palette,
+                    original,
+                    x,
+                    y,
+                    transparentIndex: transparent,
+                  )
+                : ditherPaletteIndex(
+                    palette,
+                    original,
+                    color,
+                    x,
+                    y,
+                    strength,
+                    transparentIndex: transparent,
+                  ),
+          );
+          if (index < 0) continue;
+        }
+        final ink = index == transparent ? 0 : palette[index];
+        if (tool == 'ditherRetouch' && ink == original) continue;
+        final value = d.depth == 8
+            ? index
+            : d.drawingColor(dither ? ink : over(original, ink), frame);
+        if (value != originalValue) changes[entry.key] = value;
+      }
+      if (changes.isEmpty) return;
       _mutate((d) {
         final c = d.editable(frame, layer);
-        final cache = <(int, int), int>{};
-        for (final entry in pixels.entries) {
+        for (final entry in changes.entries) {
           final x = entry.key % d.width, y = entry.key ~/ d.width;
-          final i = (y - c.y) * c.width + x - c.x;
-          final original = d.display(c.pixels[i], frame, layer);
-          var index = entry.value;
-          if (dither) {
-            index = cache.putIfAbsent(
-              (original, (y & 3) * 4 + (x & 3)),
-              () => tool == 'ditherRetouch'
-                  ? retouchPaletteIndex(
-                      palette,
-                      original,
-                      x,
-                      y,
-                      transparentIndex: transparent,
-                    )
-                  : ditherPaletteIndex(
-                      palette,
-                      original,
-                      color,
-                      x,
-                      y,
-                      strength,
-                      transparentIndex: transparent,
-                    ),
-            );
-            if (index < 0) continue;
-          }
-          final ink = index == transparent ? 0 : palette[index];
-          if (tool == 'ditherRetouch' && ink == original) continue;
-          c.pixels[i] = d.depth == 8
-              ? index
-              : d.drawingColor(dither ? ink : over(original, ink), frame);
+          c.pixels[(y - c.y) * c.width + x - c.x] = entry.value;
         }
       });
       return;

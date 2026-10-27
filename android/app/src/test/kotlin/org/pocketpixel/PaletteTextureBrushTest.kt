@@ -17,6 +17,37 @@ class PaletteTextureBrushTest {
         "size" to 9, "color" to 0xffae852aL, "paletteIndex" to 3, "seed" to 17
     ) + extra
 
+    @Test fun noOpRetouchPreservesRedoDirtyAndLinkedCel() {
+        for (source in listOf(palette[3], 0x80123456.toInt(), 0)) {
+            val e = canvas()
+            e.document.editable(0,0).pixels.fill(source)
+            e.document.addFrame(0, false)
+            e.document.frames[1].cels[0] = Cel(0,0,0,0,intArrayOf(),link=0)
+            e.select(mapOf("frame" to 1))
+            e.stroke(args("pencil"))
+            e.undo(); e.saved()
+            assertEquals(true, e.state(false)["canRedo"])
+            val before = Aseprite.write(e.document)
+            e.stroke(args("ditherRetouch"))
+            assertArrayEquals(before, Aseprite.write(e.document))
+            assertFalse(e.dirty)
+            assertEquals(true, e.state(false)["canRedo"])
+            assertEquals(0, e.document.frames[1].cels[0]!!.link)
+        }
+    }
+
+    @Test fun indexedTransparentTextureSelectionIsNoOp() {
+        for (tool in tools) {
+            val e = canvas(8)
+            e.document.frames[0].palette[0] = 0xffff00ff.toInt()
+            val before = Aseprite.write(e.document)
+            e.stroke(args(tool, mapOf("paletteIndex" to 0, "color" to 0xffff00ffL)))
+            assertArrayEquals(before, Aseprite.write(e.document))
+            assertFalse(e.dirty)
+            assertEquals(false,e.state(false)["canUndo"])
+        }
+    }
+
     @Test fun emptyTextureDoesNotCreateUndo() {
         for (tool in tools) {
             val e = canvas()

@@ -49,7 +49,10 @@ List<int> paletteShadeRamp(
   int? selectedIndex,
   int? transparentIndex,
 }) {
-  if (palette.isEmpty) return [];
+  if (palette.isEmpty ||
+      selectedIndex != null && selectedIndex == transparentIndex) {
+    return [];
+  }
   final labs = palette.map(PaletteLab.new).toList();
   final chosen = PaletteLab(color);
   final usable = [
@@ -67,8 +70,9 @@ List<int> paletteShadeRamp(
   for (final i in usable) {
     if (distance(labs[i], chosen) < distance(labs[anchor], chosen)) anchor = i;
   }
-  if (selectedIndex != null && usable.contains(selectedIndex))
+  if (selectedIndex != null && usable.contains(selectedIndex)) {
     anchor = selectedIndex;
+  }
   final base = labs[anchor];
   final candidates = usable.where((i) {
     final p = labs[i];
@@ -81,8 +85,9 @@ List<int> paletteShadeRamp(
     for (final i in candidates) {
       final p = labs[i];
       if (offset < 0 && p.l > base.l + .000001 ||
-          offset > 0 && p.l < base.l - .000001)
+          offset > 0 && p.l < base.l - .000001) {
         continue;
+      }
       final score =
           sq(p.l - (base.l + offset).clamp(0.0, 1.0)) +
           2.0 * (sq(p.a - base.a) + sq(p.b - base.b)) +
@@ -157,8 +162,9 @@ Map<int, int> paletteTexturePixels({
   void emit(int x, int y, int shade) {
     for (final xx in {x, if (mirrorX) width - 1 - x}) {
       for (final yy in {y, if (mirrorY) height - 1 - y}) {
-        if (xx >= 0 && yy >= 0 && xx < width && yy < height)
+        if (xx >= 0 && yy >= 0 && xx < width && yy < height) {
           out[yy * width + xx] = ramp[shade.clamp(0, 4)];
+        }
       }
     }
   }
@@ -166,8 +172,9 @@ Map<int, int> paletteTexturePixels({
   final clusterCache = <int, int>{};
   void stamp(int x, int y, double tx, double ty) {
     final left = x - size ~/ 2, top = y - size ~/ 2;
-    if (left >= width || top >= height || left + size <= 0 || top + size <= 0)
+    if (left >= width || top >= height || left + size <= 0 || top + size <= 0) {
       return;
+    }
     final cell = math.max(2.0, size / 3);
     for (var oy = 0; oy < size; oy++) {
       for (var ox = 0; ox < size; ox++) {
@@ -312,8 +319,9 @@ int ditherPaletteIndex(
       final e = values[j] - delta[j] * t;
       perpendicular += e * e;
     }
-    if (t >= -.02 && t <= 1.02 && perpendicular <= .012)
+    if (t >= -.02 && t <= 1.02 && perpendicular <= .012) {
       candidates.add((i, t.clamp(0.0, 1.0)));
+    }
   }
   if (candidates.isEmpty || length < 1e-12) return nearest;
   candidates.sort(
