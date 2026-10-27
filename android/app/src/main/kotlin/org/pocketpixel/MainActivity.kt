@@ -140,6 +140,7 @@ class MainActivity : FlutterActivity() {
                 "init", "state" -> Unit
                 "openExternal" -> openExternal()
                 "thumbnails" -> return@execute editor.thumbnails(args)
+                "frameImage" -> return@execute editor.frameImage(args)
                 "previewStroke" -> return@execute editor.previewStroke(args)
                 "new" -> { sessions.add(Document.create(args.number("width",32),args.number("height",32)),unsaved=true); changed() }
                 "selectDocument" -> sessions.select(args.number("id",-1))

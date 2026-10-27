@@ -151,6 +151,7 @@ class DesktopBackend {
     final args = arguments ?? <String, dynamic>{};
     switch (method) {
       case 'thumbnails':
+      case 'frameImage':
       case 'previewStroke':
         return engine.invoke(method, args);
       case 'open':

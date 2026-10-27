@@ -40,6 +40,8 @@ class EditorEngine {
     switch (method) {
       case 'thumbnails':
         return thumbnails(args);
+      case 'frameImage':
+        return frameImage(args);
       case 'previewStroke':
         return previewStroke(args);
       case 'init':
@@ -105,6 +107,21 @@ class EditorEngine {
       'width': document.width,
       'height': document.height,
       'pixels': rgbaBytes(candidate.document.composite(frame)),
+    };
+  }
+
+  /// Full-resolution read-only neighbor preview; never selects or edits a frame.
+  Map<String, dynamic> frameImage(Map<String, dynamic> args) {
+    final index = args['frame'];
+    require(
+      index is int && index >= 0 && index < document.frames.length,
+      'Invalid preview frame',
+    );
+    return {
+      'frame': index,
+      'width': document.width,
+      'height': document.height,
+      'pixels': rgbaBytes(document.composite(index as int)),
     };
   }
 
