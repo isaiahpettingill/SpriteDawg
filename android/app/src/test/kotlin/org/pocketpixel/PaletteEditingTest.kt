@@ -3,6 +3,100 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PaletteEditingTest {
+ @Test fun namedRgbaPresetsKeepExactArgbAndNamesAcrossFrames() {
+  val e = indexed()
+  e.edit(mapOf("action" to "convertMode", "depth" to 32))
+  e.replace(e.document.copyDeep())
+  val before = Aseprite.write(e.document)
+  val pixels = (0..1).map { e.document.composite(it) }
+  val colors = listOf(0xffc08040L, 0x80c08040L, 0x20c08040L, 0x00112233L)
+  val names = mutableListOf("Terre brûlée", "Glaze 50%", "Glaze 12.5%", "")
+  val expectedNames = mapOf(0 to names[0], 1 to names[1], 2 to names[2])
+  e.edit(mapOf("action" to "palettePreset", "colors" to colors, "names" to names))
+  val reopened = Aseprite.read(Aseprite.write(e.document))
+  for (f in 0..1) {
+   assertArrayEquals(colors.map { it.toInt() }.toIntArray(), e.document.frames[f].palette)
+   assertEquals(expectedNames, e.document.frames[f].paletteNames)
+   assertArrayEquals(colors.map { it.toInt() }.toIntArray(), reopened.frames[f].palette)
+   assertEquals(expectedNames, reopened.frames[f].paletteNames)
+   assertArrayEquals(pixels[f], reopened.composite(f))
+  }
+  e.undo()
+  assertArrayEquals(before, Aseprite.write(e.document))
+  assertEquals(false, e.state(false)["canUndo"])
+  e.redo()
+  assertEquals(expectedNames, e.document.frames[1].paletteNames)
+  names[0] = "Changed input"
+  e.document.frames[0].paletteNames[0] = "Changed frame"
+  assertEquals("Terre brûlée", e.document.frames[1].paletteNames[0])
+ }
+ @Test fun namedIndexedPresetsKeepSemitransparentFrameColorsAndUndo() {
+  val e = EditorEngine()
+  e.replace(Document(5, 1, mutableListOf(Layer("Ink"), Layer("Background", flags = 11)), mutableListOf(
+   Frame(palette = intArrayOf(0xff3c2a18.toInt(), 0x80aabbcc.toInt(), 0xffaabbcc.toInt(), 0x20aabbcc, 0),
+    paletteNames = mutableMapOf(1 to "old glaze"), cels = mutableListOf(
+     Cel(0, 0, 5, 1, intArrayOf(1, 2, 3, 0, 4)), Cel(0, 0, 5, 1, intArrayOf(1, 2, 3, 0, 4)))),
+   Frame(palette = intArrayOf(0xff3c2a18.toInt(), 0x20aabbcc, 0x80aabbcc.toInt(), 0xffaabbcc.toInt(), 0),
+    paletteNames = mutableMapOf(1 to "old light glaze"), cels = mutableListOf(
+     Cel(0, 0, 0, 0, intArrayOf(), link = 0, data = UserData(text = "linked-glaze")), null))
+  ), depth = 8))
+  val before = Aseprite.write(e.document)
+  val pixels = (0..1).map { e.document.composite(it) }
+  val colors = listOf(0xffaabbccL, 0x80aabbccL, 0x20aabbccL, 0xff3c2a18L, 0x00112233L)
+  val names = listOf("Solid", "Glaze 50%", "Glaze 12.5%", "Ground", "Hidden RGB")
+  val expectedNames = names.mapIndexed { i, name -> i to name }.toMap()
+  e.edit(mapOf("action" to "palettePreset", "colors" to colors, "names" to names, "remap" to true))
+  assertEquals(8, e.document.depth)
+  assertEquals(5, e.document.transparentIndex)
+  assertArrayEquals(intArrayOf(1, 0, 2, 5, 5), e.document.frames[0].cels[0]!!.pixels)
+  assertArrayEquals(intArrayOf(1, 0, 2, 3, 5), e.document.frames[0].cels[1]!!.pixels)
+  assertArrayEquals(intArrayOf(2, 1, 0, 5, 5), e.document.frames[1].cels[0]!!.pixels)
+  assertNull(e.document.frames[1].cels[0]!!.link)
+  val reopened = Aseprite.read(Aseprite.write(e.document))
+  assertEquals("linked-glaze", reopened.frames[1].cels[0]!!.data!!.text)
+  for (f in 0..1) {
+   assertEquals(expectedNames, e.document.frames[f].paletteNames)
+   assertArrayEquals((colors + 0L).map { it.toInt() }.toIntArray(), reopened.frames[f].palette)
+   assertEquals(expectedNames, reopened.frames[f].paletteNames)
+   assertArrayEquals(pixels[f], reopened.composite(f))
+  }
+  e.undo()
+  assertArrayEquals(before, Aseprite.write(e.document))
+  assertEquals(false, e.state(false)["canUndo"])
+  e.redo()
+  assertEquals(expectedNames, e.document.frames[1].paletteNames)
+  assertArrayEquals(intArrayOf(2, 1, 0, 5, 5), e.document.frames[1].cels[0]!!.pixels)
+ }
+ @Test fun invalidPresetNamesPreserveArtworkAndUndoRedoHistory() {
+  for (e in listOf(EditorEngine(), indexed())) {
+   val before = Aseprite.write(e.document)
+   val args = mapOf("action" to "palettePreset", "colors" to listOf(0x80abcdefL, 0xffabcdefL), "names" to listOf("Glaze", "Solid"), "remap" to true)
+   e.edit(args)
+   e.undo()
+   e.saved()
+   for (names in listOf(null, "not a list", emptyList<String>(), listOf("Only one"), listOf("One", "Two", "Extra"),
+    listOf(1, "Two"), listOf("One", null), listOf("a".repeat(65536), "Two"), listOf("é".repeat(32768), "Two"))) {
+    try { e.edit(args + ("names" to names)); fail("must reject") } catch (_: IllegalArgumentException) {}
+    assertArrayEquals(before, Aseprite.write(e.document))
+    assertEquals(false, e.state(false)["canUndo"])
+    assertEquals(true, e.state(false)["canRedo"])
+    assertFalse(e.dirty)
+   }
+   e.redo()
+   assertEquals(mapOf(0 to "Glaze", 1 to "Solid"), e.document.frames[0].paletteNames)
+  }
+ }
+ @Test fun presetNamesAcceptUtf8ByteLimitAndEmptyUnnamedSlots() {
+  val name = "€".repeat(21845) // Exactly 65535 UTF-8 bytes.
+  for (e in listOf(EditorEngine(), indexed())) {
+   val before = Aseprite.write(e.document)
+   e.edit(mapOf("action" to "palettePreset", "colors" to listOf(0x80446688L, 0xff446688L), "names" to listOf(name, ""), "remap" to true))
+   val reopened = Aseprite.read(Aseprite.write(e.document))
+   for (frame in reopened.frames) assertEquals(mapOf(0 to name), frame.paletteNames)
+   e.undo()
+   assertArrayEquals(before, Aseprite.write(e.document))
+  }
+ }
  @Test fun rgbaPresetChangesSwatchesButNotArtworkOrLinks() {
   val e = indexed()
   e.edit(mapOf("action" to "convertMode", "depth" to 32))

@@ -71,7 +71,9 @@ not a hard process-memory limit. Recovery restores unsaved copies, not original
 save paths; closing the app keeps recovery for every dirty tab.
 
 Open **Palette → Preset palettes** for an offline, searchable library with color
-previews: PICO-8, Solarized and classic retro/system palettes. Selecting a preset
+previews: retro/system palettes, Monokai (Pygments), all Catppuccin flavors,
+TIC-80/Sweetie16, DawnBringer16, and original game-art/material/character/food
+ramps. Translucent swatches show checkerboards and exact opacity labels. Selecting a preset
 replaces the document's palette across all frames; it never removes the bundled
 presets or changes other open documents. RGBA/grayscale pixels stay unchanged.
 Indexed sprites require confirmation before mapping every frame to the closest
@@ -81,6 +83,17 @@ options → Undo restores the previous custom palette and artwork. Credits are
 shown in the browser; license notices are available through its info button.
 See [palette sources and licensing](docs/PALETTE_SOURCES.md). This is a curated
 redistributable selection, not a claim to include every Aseprite/LibreSprite asset.
+AAP-64 is not bundled; Gaem-64 is an independently authored alternative.
+Its [GIMP palette file](art/palettes/Gaem-64.gpl) can be loaded in Aseprite;
+the 64 RGB values and labels match the built-in preset exactly.
+
+Use **Save as preset** to keep the current ordered ARGB swatches and names in
+**My palettes** across documents and restarts. Personal presets can be edited,
+renamed or deleted from their menu; built-ins offer **Save a copy** instead.
+Editing a preset is staged until Save and never changes artwork until you apply
+it. Saving a same-name palette creates a unique name rather than overwriting.
+The library is local app data (no network); uninstalling/clearing app data removes
+it, so keep important palettes in backed-up documents too.
 
 Palette management supports exact-index swatch selection (including identical-color
 entries), names, add/edit/reorder and removal with an explicit replacement. A color

@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:spritedawg/editor.dart';
+import 'package:spritedawg/color_picker.dart';
 import 'package:spritedawg/palette_editor.dart';
 import 'package:spritedawg/palette_presets.dart';
 import 'package:spritedawg/engine/palette_presets.dart';
+import 'palette_store_fake.dart';
 
 void main() {
-  test('Presets have stable identities, opaque colors and attribution', () {
+  late MemoryPaletteStore store;
+  setUp(() => store = MemoryPaletteStore());
+  test('Presets have stable identities, ARGB colors and attribution', () {
     expect(palettePresets.length, greaterThanOrEqualTo(6));
     expect(
       palettePresets.map((p) => p.id).toSet().length,
@@ -17,9 +21,135 @@ void main() {
       expect(p.credit, isNotEmpty);
       expect(p.description, isNotEmpty);
       expect(p.colors.length, inInclusiveRange(1, 255));
-      expect(p.colors.every((c) => c >= 0xff000000 && c <= 0xffffffff), isTrue);
+      expect(p.colors.every((c) => c >= 0 && c <= 0xffffffff), isTrue);
     }
   });
+
+  test('Swatch labels retain exact alpha alongside rounded opacity', () {
+    expect(
+      paletteSwatchLabel(0x8044aa88, 'Grass glaze'),
+      'Grass glaze · ARGB #8044AA88 · 50% opacity',
+    );
+    expect(paletteSwatchLabel(0, 'Clear'), contains('0% opacity'));
+    expect(paletteSwatchLabel(0xff000000, 'Black'), contains('100% opacity'));
+  });
+
+  testWidgets('Material previews expose checkerboards, names and exact alpha', (
+    tester,
+  ) async {
+    final preset = palettePresets.singleWhere(
+      (p) => p.id == 'spritedawg-materials',
+    );
+    final alphaIndex = preset.colors.indexWhere((c) => c >> 24 < 255);
+    expect(alphaIndex, greaterThanOrEqualTo(0));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: PalettePresetPicker(store: store)),
+      ),
+    );
+    await tester.enterText(
+      find.byKey(const Key('palette-preset-search')),
+      preset.name,
+    );
+    await tester.pumpAndSettle();
+    final swatch = find.byKey(Key('preset-${preset.id}-swatch-$alphaIndex'));
+    expect(
+      tester.widget<BrushColorSwatch>(swatch).color,
+      preset.colors[alphaIndex],
+    );
+    final paints = tester.widgetList<CustomPaint>(
+      find.descendant(of: swatch, matching: find.byType(CustomPaint)),
+    );
+    expect(paints.any((p) => p.painter is ColorCheckerPainter), isTrue);
+    final boxes = tester.widgetList<ColoredBox>(
+      find.descendant(of: swatch, matching: find.byType(ColoredBox)),
+    );
+    expect(boxes.single.color, Color(preset.colors[alphaIndex]));
+    final label = paletteSwatchLabel(
+      preset.colors[alphaIndex],
+      preset.colorNames[alphaIndex],
+    );
+    expect(find.byTooltip(label), findsOneWidget);
+    expect(
+      tester
+          .widgetList<Semantics>(find.byType(Semantics))
+          .any((s) => s.properties.label == label),
+      isTrue,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final depth in [32, 8]) {
+    testWidgets(
+      'Materials preserve alpha and names when applied at depth $depth',
+      (tester) async {
+        final preset = palettePresets.singleWhere(
+          (p) => p.id == 'spritedawg-materials',
+        );
+        final calls = <Map<String, dynamic>>[];
+        final state = <String, dynamic>{
+          'palette': [0xff123456],
+          'depth': depth,
+        };
+        final e = Editor(
+          transport: (method, args) async {
+            if (method == 'edit') {
+              calls.add(args!);
+              state['palette'] = args['colors'];
+              state['paletteNames'] = args['names'];
+            }
+            return state;
+          },
+        )..state = state;
+        addTearDown(e.dispose);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: PaletteEditor(
+                presetStore: store,
+                editor: e,
+                onSelect: (_, _) {},
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.byKey(const Key('open-palette-presets')));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.byKey(const Key('palette-preset-search')),
+          preset.name,
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('${preset.name} · ${preset.colors.length}'));
+        await tester.pumpAndSettle();
+        if (depth == 8) {
+          expect(calls, isEmpty);
+          expect(
+            find.textContaining('colors and alpha may change'),
+            findsOneWidget,
+          );
+          await tester.tap(find.text('Remap colors'));
+          await tester.pumpAndSettle();
+        }
+        expect(calls, hasLength(1));
+        expect(calls.single['colors'], preset.colors);
+        expect(calls.single['names'], preset.colorNames);
+        expect(calls.single['remap'], depth == 8);
+        expect(e.palette.any((c) => c >> 24 < 255), isTrue);
+        final alphaIndex = preset.colors.indexWhere((c) => c >> 24 < 255);
+        expect(
+          find.byTooltip(
+            paletteSwatchLabel(
+              preset.colors[alphaIndex],
+              'Swatch ${alphaIndex + 1} · ${preset.colorNames[alphaIndex]}',
+            ),
+          ),
+          findsOneWidget,
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
 
   for (final size in [
     const Size(320, 568),
@@ -42,7 +172,7 @@ void main() {
               ).copyWith(textScaler: TextScaler.linear(scale)),
               child: child!,
             ),
-            home: const Scaffold(body: PalettePresetPicker()),
+            home: Scaffold(body: PalettePresetPicker(store: store)),
           ),
         );
         await tester.pumpAndSettle();
@@ -86,7 +216,7 @@ void main() {
               body: Builder(
                 builder: (context) => TextButton(
                   onPressed: () async {
-                    selected = await showPalettePresets(context);
+                    selected = await showPalettePresets(context, store: store);
                   },
                   child: const Text('Open presets'),
                 ),
@@ -151,7 +281,11 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: PaletteEditor(editor: e, onSelect: (_, _) {}),
+          body: PaletteEditor(
+            presetStore: store,
+            editor: e,
+            onSelect: (_, _) {},
+          ),
         ),
       ),
     );
@@ -184,7 +318,11 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: PaletteEditor(editor: e, onSelect: (_, _) {}),
+            body: PaletteEditor(
+              presetStore: store,
+              editor: e,
+              onSelect: (_, _) {},
+            ),
           ),
         ),
       );
@@ -238,7 +376,11 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: PaletteEditor(editor: e, onSelect: (_, i) => selected = i),
+            body: PaletteEditor(
+              presetStore: store,
+              editor: e,
+              onSelect: (_, i) => selected = i,
+            ),
           ),
         ),
       );

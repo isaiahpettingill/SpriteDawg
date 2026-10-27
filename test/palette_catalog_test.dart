@@ -10,6 +10,128 @@ PalettePreset _preset(String id) =>
     palettePresets.singleWhere((preset) => preset.id == id);
 
 void main() {
+  test('Aseprite GPL export exactly matches Gaem-64 order and labels', () {
+    final lines = File('art/palettes/Gaem-64.gpl').readAsLinesSync();
+    expect(lines.first, 'GIMP Palette');
+    expect(lines, contains('Name: Gaem-64'));
+    expect(lines, contains('Columns: 8'));
+    final values = <int>[];
+    final names = <String>[];
+    final row = RegExp(r'^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.+)$');
+    for (final line in lines.skip(1)) {
+      if (line.startsWith('#') ||
+          line.startsWith('Name:') ||
+          line.startsWith('Columns:') ||
+          line.trim().isEmpty) {
+        continue;
+      }
+      final match = row.firstMatch(line);
+      expect(match, isNotNull, reason: line);
+      final channels = [
+        for (var i = 1; i <= 3; i++) int.parse(match!.group(i)!),
+      ];
+      expect(channels.every((c) => c >= 0 && c <= 255), isTrue);
+      values.add(_rgb(channels[0], channels[1], channels[2]));
+      names.add(match!.group(4)!);
+    }
+    final preset = _preset('spritedawg-game-64');
+    expect(preset.name, 'Gaem-64');
+    expect(values, preset.colors);
+    expect(names, preset.colorNames);
+  });
+  test(
+    'Original material ramps retain opaque highlights and alpha overlays',
+    () {
+      final p = _preset('spritedawg-materials');
+      for (final material in [
+        'Grass',
+        'Stone',
+        'Wood',
+        'Fire',
+        'Water',
+        'Gold',
+        'Silver',
+        'Copper',
+        'Bronze',
+        'Steel',
+        'Diamond',
+        'Ruby',
+        'Emerald',
+        'Sapphire',
+        'Amethyst',
+      ]) {
+        final start = p.colorNames.indexOf('$material deep shadow');
+        expect(start, greaterThanOrEqualTo(0));
+        expect(
+          p.colors.sublist(start, start + 5).every((c) => c >> 24 == 255),
+          isTrue,
+        );
+        expect(p.colors.sublist(start + 5, start + 8).map((c) => c >> 24), [
+          64,
+          128,
+          192,
+        ]);
+        expect(p.colors[start + 2] & 0xffffff, p.colors[start + 6] & 0xffffff);
+      }
+      expect(p.colors[p.colorNames.indexOf('Gold glint')], 0xfffff4ba);
+      expect(p.colors[p.colorNames.indexOf('Diamond glint')], 0xffffffff);
+    },
+  );
+  test(
+    'Original character and food palettes retain searchable coherent ramps',
+    () {
+      final characters = _preset('spritedawg-characters');
+      final food = _preset('spritedawg-food');
+      for (final family in [
+        'Skin deep',
+        'Skin brown',
+        'Skin olive',
+        'Skin rose',
+        'Skin light',
+        'Cloth red',
+        'Cloth blue',
+        'Cloth green',
+        'Cloth violet',
+        'Cloth gold',
+        'Cloth neutral',
+      ]) {
+        expect(characters.colorNames, contains('$family overlay 50%'));
+      }
+      for (final family in [
+        'Berry',
+        'Citrus',
+        'Apple',
+        'Leafy vegetables',
+        'Root vegetables',
+        'Bread',
+        'Meat',
+        'Chocolate',
+        'Cream sweets',
+        'Grape sweets',
+        'Drink tea',
+        'Drink juice',
+      ]) {
+        expect(food.colorNames, contains('$family overlay 50%'));
+      }
+      for (final p in [characters, food]) {
+        for (var i = 0; i < p.colors.length; i += 7) {
+          expect(
+            p.colors.sublist(i, i + 4).every((c) => c >> 24 == 255),
+            isTrue,
+          );
+          expect(p.colors.sublist(i + 4, i + 7).map((c) => c >> 24), [
+            64,
+            128,
+            192,
+          ]);
+        }
+      }
+      final game = _preset('spritedawg-game-64');
+      expect(game.colors.toSet().length, 64);
+      expect(game.colors.every((c) => c >> 24 == 255), isTrue);
+      expect(game.description, contains('Not AAP-64'));
+    },
+  );
   test(
     'Catalog identities, sizes, credits and permission sources are stable',
     () {
@@ -28,6 +150,17 @@ void main() {
         'grayscale-16': 16,
         'web-safe': 216,
         'solarized': 16,
+        'monokai-pygments': 11,
+        'catppuccin-latte': 26,
+        'catppuccin-frappe': 26,
+        'catppuccin-macchiato': 26,
+        'catppuccin-mocha': 26,
+        'tic-80-sweetie-16': 16,
+        'dawnbringer-16': 16,
+        'spritedawg-materials': 120,
+        'spritedawg-game-64': 64,
+        'spritedawg-characters': 77,
+        'spritedawg-food': 84,
       };
       expect(palettePresets.map((p) => p.id).toList(), counts.keys.toList());
       for (final preset in palettePresets) {
@@ -44,9 +177,12 @@ void main() {
         );
         expect(preset.license.trim(), isNotEmpty);
         expect(
-          preset.colors.every(
-            (color) => color >= 0xff000000 && color <= 0xffffffff,
-          ),
+          preset.colorNames.isEmpty ||
+              preset.colorNames.length == preset.colors.length,
+          isTrue,
+        );
+        expect(
+          preset.colors.every((color) => color >= 0 && color <= 0xffffffff),
           isTrue,
           reason: preset.id,
         );
@@ -204,6 +340,7 @@ void main() {
     );
     for (final preset in palettePresets) {
       expect(() => preset.colors.add(0xff123456), throwsUnsupportedError);
+      expect(() => preset.colorNames.add('Changed'), throwsUnsupportedError);
       expect(() => preset.colors[0] = 0xff123456, throwsUnsupportedError);
     }
   });
@@ -218,5 +355,213 @@ void main() {
     expect(cc0, contains('CC0 1.0 Universal'));
     expect(cc0, contains('3. Public License Fallback.'));
     expect(cc0, contains('4. Limitations and Disclaimers.'));
+  });
+
+  test('monokai-pygments preserves documented source order', () {
+    expect(_preset('monokai-pygments').colors, const [
+      0xff272822,
+      0xff49483e,
+      0xfff8f8f2,
+      0xffed007e,
+      0xff1e0010,
+      0xff959077,
+      0xff66d9ef,
+      0xffff4689,
+      0xffa6e22e,
+      0xffae81ff,
+      0xffe6db74,
+    ]);
+  });
+
+  test('catppuccin-latte preserves documented source order', () {
+    expect(_preset('catppuccin-latte').colors, const [
+      0xffdc8a78,
+      0xffdd7878,
+      0xffea76cb,
+      0xff8839ef,
+      0xffd20f39,
+      0xffe64553,
+      0xfffe640b,
+      0xffdf8e1d,
+      0xff40a02b,
+      0xff179299,
+      0xff04a5e5,
+      0xff209fb5,
+      0xff1e66f5,
+      0xff7287fd,
+      0xff4c4f69,
+      0xff5c5f77,
+      0xff6c6f85,
+      0xff7c7f93,
+      0xff8c8fa1,
+      0xff9ca0b0,
+      0xffacb0be,
+      0xffbcc0cc,
+      0xffccd0da,
+      0xffeff1f5,
+      0xffe6e9ef,
+      0xffdce0e8,
+    ]);
+  });
+
+  test('catppuccin-frappe preserves documented source order', () {
+    expect(_preset('catppuccin-frappe').colors, const [
+      0xfff2d5cf,
+      0xffeebebe,
+      0xfff4b8e4,
+      0xffca9ee6,
+      0xffe78284,
+      0xffea999c,
+      0xffef9f76,
+      0xffe5c890,
+      0xffa6d189,
+      0xff81c8be,
+      0xff99d1db,
+      0xff85c1dc,
+      0xff8caaee,
+      0xffbabbf1,
+      0xffc6d0f5,
+      0xffb5bfe2,
+      0xffa5adce,
+      0xff949cbb,
+      0xff838ba7,
+      0xff737994,
+      0xff626880,
+      0xff51576d,
+      0xff414559,
+      0xff303446,
+      0xff292c3c,
+      0xff232634,
+    ]);
+  });
+
+  test('catppuccin-macchiato preserves documented source order', () {
+    expect(_preset('catppuccin-macchiato').colors, const [
+      0xfff4dbd6,
+      0xfff0c6c6,
+      0xfff5bde6,
+      0xffc6a0f6,
+      0xffed8796,
+      0xffee99a0,
+      0xfff5a97f,
+      0xffeed49f,
+      0xffa6da95,
+      0xff8bd5ca,
+      0xff91d7e3,
+      0xff7dc4e4,
+      0xff8aadf4,
+      0xffb7bdf8,
+      0xffcad3f5,
+      0xffb8c0e0,
+      0xffa5adcb,
+      0xff939ab7,
+      0xff8087a2,
+      0xff6e738d,
+      0xff5b6078,
+      0xff494d64,
+      0xff363a4f,
+      0xff24273a,
+      0xff1e2030,
+      0xff181926,
+    ]);
+  });
+
+  test('catppuccin-mocha preserves documented source order', () {
+    expect(_preset('catppuccin-mocha').colors, const [
+      0xfff5e0dc,
+      0xfff2cdcd,
+      0xfff5c2e7,
+      0xffcba6f7,
+      0xfff38ba8,
+      0xffeba0ac,
+      0xfffab387,
+      0xfff9e2af,
+      0xffa6e3a1,
+      0xff94e2d5,
+      0xff89dceb,
+      0xff74c7ec,
+      0xff89b4fa,
+      0xffb4befe,
+      0xffcdd6f4,
+      0xffbac2de,
+      0xffa6adc8,
+      0xff9399b2,
+      0xff7f849c,
+      0xff6c7086,
+      0xff585b70,
+      0xff45475a,
+      0xff313244,
+      0xff1e1e2e,
+      0xff181825,
+      0xff11111b,
+    ]);
+  });
+
+  // Independently transcribed from the official TIC-80 wiki color table.
+  // Do not extract the first 000: block: config.js starts with sprite data.
+  test('tic-80-sweetie-16 preserves documented source order', () {
+    expect(_preset('tic-80-sweetie-16').colors, const [
+      0xff1a1c2c,
+      0xff5d275d,
+      0xffb13e53,
+      0xffef7d57,
+      0xffffcd75,
+      0xffa7f070,
+      0xff38b764,
+      0xff257179,
+      0xff29366f,
+      0xff3b5dc9,
+      0xff41a6f6,
+      0xff73eff7,
+      0xfff4f4f4,
+      0xff94b0c2,
+      0xff566c86,
+      0xff333c57,
+    ]);
+  });
+
+  test('dawnbringer-16 preserves documented source order', () {
+    expect(_preset('dawnbringer-16').colors, const [
+      0xff140c1c,
+      0xff442434,
+      0xff30346d,
+      0xff4e4a4e,
+      0xff854c30,
+      0xff346524,
+      0xffd04648,
+      0xff757161,
+      0xff597dce,
+      0xffd27d2c,
+      0xff8595a1,
+      0xff6daa2c,
+      0xffd2aa99,
+      0xff6dc2ca,
+      0xffdad45e,
+      0xffdeeed6,
+    ]);
+  });
+
+  test('Named palette license notices match their distributed copies', () {
+    expect(
+      catppuccinPaletteLicense,
+      File('LICENSES/Catppuccin-MIT.txt').readAsStringSync(),
+    );
+    expect(
+      pygmentsPaletteLicense,
+      File('LICENSES/Pygments-BSD-2-Clause.txt').readAsStringSync(),
+    );
+    expect(
+      tic80PaletteLicense,
+      File('LICENSES/TIC-80-MIT.txt').readAsStringSync(),
+    );
+    expect(
+      dawnBringerPaletteLicense,
+      File('LICENSES/DawnBringer-Free-Use.txt').readAsStringSync(),
+    );
+    expect(_preset('monokai-pygments').name, contains('Pygments'));
+    expect(_preset('monokai-pygments').description, contains('not Pro'));
+    expect(_preset('tic-80-sweetie-16').credit, contains('GrafxKid'));
+    expect(_preset('catppuccin-mocha').colorNames.first, 'Rosewater');
+    expect(_preset('catppuccin-mocha').colorNames.last, 'Crust');
   });
 }
