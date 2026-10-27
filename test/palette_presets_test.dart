@@ -64,6 +64,75 @@ void main() {
     }
   }
 
+  for (final scale in [1.0, 2.0]) {
+    testWidgets(
+      'Landscape keyboard keeps preset search usable at scale $scale',
+      (tester) async {
+        tester.view.physicalSize = const Size(568, 320);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.view.resetViewInsets);
+        PalettePreset? selected;
+        await tester.pumpWidget(
+          MaterialApp(
+            builder: (context, child) => MediaQuery(
+              data: MediaQuery.of(
+                context,
+              ).copyWith(textScaler: TextScaler.linear(scale)),
+              child: child!,
+            ),
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => TextButton(
+                  onPressed: () async {
+                    selected = await showPalettePresets(context);
+                  },
+                  child: const Text('Open presets'),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('Open presets'));
+        await tester.pumpAndSettle();
+        final field = find.byKey(const Key('palette-preset-search'));
+        await tester.showKeyboard(field);
+        final editable = find.descendant(
+          of: field,
+          matching: find.byType(EditableText),
+        );
+        final focus = tester.widget<EditableText>(editable).focusNode;
+        tester.view.viewInsets = const FakeViewPadding(bottom: 200);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(focus.hasFocus, isTrue);
+
+        // Send input through the existing keyboard connection, rather than
+        // enterText(), which would refocus the field and hide focus regressions.
+        for (final query in ['pico', 'no such palette', 'pico']) {
+          tester.testTextInput.enterText(query);
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+          expect(tester.widget<EditableText>(editable).focusNode, same(focus));
+          expect(focus.hasFocus, isTrue);
+          expect(
+            find.text(query == 'pico' ? 'PICO-8 · 16' : 'No matching palettes'),
+            findsOneWidget,
+          );
+        }
+        final result = find.text('PICO-8 · 16');
+        await tester.ensureVisible(result);
+        await tester.pumpAndSettle();
+        await tester.tap(result);
+        await tester.pumpAndSettle();
+        expect(selected?.id, 'pico-8');
+        expect(find.byType(PalettePresetPicker), findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   testWidgets('Browsing and closing presets never edits custom palette', (
     tester,
   ) async {
