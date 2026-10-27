@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'aseprite.dart';
 import 'document.dart';
+import 'default_user_data.dart';
 import 'palette_operations.dart';
 import 'palette_texture_brush.dart';
 
@@ -49,7 +50,11 @@ class EditorEngine {
         break;
       case 'new':
         replace(
-          SpriteDocument.create(_n(args, 'width', 32), _n(args, 'height', 32)),
+          newSprite(
+            _n(args, 'width', 32),
+            _n(args, 'height', 32),
+            defaultUserData(args),
+          ),
         );
         break;
       case 'select':

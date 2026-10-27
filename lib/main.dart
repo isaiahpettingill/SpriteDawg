@@ -1,3 +1,4 @@
+import 'default_user_data_dialog.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -622,6 +623,8 @@ class _EditorScreenState extends State<EditorScreen>
         await edit(action);
       case 'metadata':
         await metadata();
+      case 'defaultUserData':
+        await showDefaultUserDataDialog(context, e.defaultsStore);
       case 'updates':
         if (LinuxUpdater.supported && mounted) {
           await showLinuxUpdater(context);
@@ -647,17 +650,64 @@ class _EditorScreenState extends State<EditorScreen>
     }
   }
 
+  Future<void> applyDefaultUserData() async {
+    final documentId = e.state['documentId'];
+    final previous = (e.state['userData'] as Map?)?['sprite'] as String? ?? '';
+    try {
+      final text = await e.defaultsStore.load();
+      if (!mounted) return;
+      if (text == previous) return;
+      if (text.isEmpty || previous.isNotEmpty) {
+        final replace = await showDialog<bool>(
+          context: context,
+          builder: (c) => AlertDialog(
+            title: Text(
+              text.isEmpty
+                  ? 'Clear project user data?'
+                  : 'Replace project user data?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(c, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(c, true),
+                child: Text(text.isEmpty ? 'Clear' : 'Replace'),
+              ),
+            ],
+          ),
+        );
+        if (replace != true || !mounted) return;
+      }
+      if (documentId != e.state['documentId'] ||
+          previous !=
+              ((e.state['userData'] as Map?)?['sprite'] as String? ?? '')) {
+        throw StateError('Project changed. Try applying defaults again.');
+      }
+      await edit('userData', {'target': 'sprite', 'text': text});
+    } catch (failure) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$failure')));
+      }
+    }
+  }
+
   Future<void> metadata() async {
     final target = await showDialog<String>(
       context: context,
       builder: (context) => SimpleDialog(
         title: const Text('User data'),
-        children: ['sprite', 'layer', 'cel']
+        children: ['sprite', 'layer', 'cel', 'applyDefaults']
             .map(
               (s) => SimpleDialogOption(
                 onPressed: () => Navigator.pop(context, s),
                 child: Text(
-                  s == 'sprite'
+                  s == 'applyDefaults'
+                      ? 'Apply defaults to project'
+                      : s == 'sprite'
                       ? 'Project'
                       : s == 'layer'
                       ? 'Active layer'
@@ -669,6 +719,10 @@ class _EditorScreenState extends State<EditorScreen>
       ),
     );
     if (target == null) return;
+    if (target == 'applyDefaults') {
+      await applyDefaultUserData();
+      return;
+    }
     final data = e.state['userData'] as Map?;
     final value = await input(
       '$target user data',
@@ -798,6 +852,10 @@ class _EditorScreenState extends State<EditorScreen>
                 const PopupMenuItem(
                   value: 'metadata',
                   child: Text('User data'),
+                ),
+                const PopupMenuItem(
+                  value: 'defaultUserData',
+                  child: Text('Default user data'),
                 ),
                 const PopupMenuItem(value: 'help', child: Text('Drawing help')),
                 if (LinuxUpdater.supported)

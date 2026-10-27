@@ -1,3 +1,4 @@
+import 'default_user_data_store.dart';
 import 'platform/desktop_backend.dart';
 import 'rgba_image.dart';
 import 'frame_thumbnails.dart';
@@ -22,12 +23,21 @@ typedef EditorImageDecoder =
     });
 
 class Editor extends ChangeNotifier {
-  Editor({EditorTransport? transport, this.decodeImage = decodeStraightRgba})
-    : transport =
-          transport ??
-          (defaultTargetPlatform == TargetPlatform.linux
-              ? DesktopBackend().invoke
-              : _native);
+  Editor({
+    EditorTransport? transport,
+    DefaultUserDataStore? defaultsStore,
+    this.decodeImage = decodeStraightRgba,
+  }) : defaultsStore =
+           defaultsStore ??
+           (transport == null
+               ? DefaultUserDataStore.shared
+               : DefaultUserDataStore.memory()),
+       transport =
+           transport ??
+           (defaultTargetPlatform == TargetPlatform.linux
+               ? DesktopBackend().invoke
+               : _native);
+  final DefaultUserDataStore defaultsStore;
   final EditorTransport transport;
   final EditorImageDecoder decodeImage;
   static Future<Map<String, dynamic>?> _native(
@@ -164,6 +174,14 @@ class Editor extends ChangeNotifier {
     error = null;
     if (!drawing) notifyListeners();
     try {
+      if (const {'init', 'new', 'closeDocument'}.contains(method)) {
+        try {
+          args = {...?args, 'defaultUserData': await defaultsStore.load()};
+        } catch (failure) {
+          if (method == 'new') rethrow;
+          error = 'Default user data could not be loaded: $failure';
+        }
+      }
       final result = await transport(method, args);
       if (_disposed) return false;
       if (result != null) {

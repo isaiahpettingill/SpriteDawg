@@ -142,16 +142,18 @@ class MainActivity : FlutterActivity() {
         if (exportFiles.busy) { result.error("busy", "Finish the export first", null); return }
         if (call.method in listOf("open","saveAs","exportPng")) { launchPicker(call.method,result); return }
         execute(result) {
+            val defaultText = if(call.method in listOf("init","new","closeDocument")) defaultUserData(args) else ""
             when(call.method) {
-                "init", "state" -> Unit
+                "init" -> sessions.initializePlaceholder(defaultText, allow = !startupRecovery)
+                "state" -> Unit
                 "openExternal" -> openExternal()
                 "exportSnapshot" -> return@execute exportSnapshot(editor.document, editor.frame, args)
                 "thumbnails" -> return@execute editor.thumbnails(args)
                 "frameImage" -> return@execute editor.frameImage(args)
                 "previewStroke" -> return@execute editor.previewStroke(args)
-                "new" -> { sessions.add(Document.create(args.number("width",32),args.number("height",32)),unsaved=true); changed() }
+                "new" -> { sessions.add(newSprite(args.number("width",32),args.number("height",32),defaultText),unsaved=true); changed() }
                 "selectDocument" -> sessions.select(args.number("id",-1))
-                "closeDocument" -> {val id=args.number("id",-1);sessions.close(id,args["discard"]==true);AtomicFile(File(filesDir,"recovery-$id.aseprite")).delete()}
+                "closeDocument" -> {val id=args.number("id",-1);sessions.close(id,args["discard"]==true);sessions.initializePlaceholder(defaultText, allow = !startupRecovery);AtomicFile(File(filesDir,"recovery-$id.aseprite")).delete()}
                 "clearTagClipboard" -> sessions.clearClipboard()
                 "copyTag" -> sessions.copyTag(args.number("index",-1))
                 "pasteTag" -> {if(args["asNew"]==true)sessions.pasteTagAsNew() else sessions.pasteTag((args["after"] as? Number)?.toInt());changed()}
