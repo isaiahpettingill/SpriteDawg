@@ -65,8 +65,17 @@ jobs:
         run: |
           if ! dart format --output=none --set-exit-if-changed lib test; then
             dart format lib test
+            git diff --binary -- lib test > "$RUNNER_TEMP/dart-format.patch"
             git diff --exit-code -- lib test
           fi
+      - name: Preserve formatter corrections on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dart-format-corrections
+          path: ${{ runner.temp }}/dart-format.patch
+          if-no-files-found: ignore
+          retention-days: 3
       - run: flutter analyze
       - run: flutter test --reporter expanded
       - name: Render deterministic Bark brush preview

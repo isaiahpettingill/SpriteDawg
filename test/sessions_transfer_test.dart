@@ -168,20 +168,23 @@ void main() {
       expect(b.engine.state()['canUndo'], true);
       savePath = '${dir.path}/saved.aseprite';
       await b.invoke('save', null);
+      await b.invoke('flushDrafts', null);
       expect(
-        await File('${dir.path}/recovery-$first.aseprite').exists(),
+        await File('${dir.path}/draft-$first.sdd').exists(),
         false,
       );
       expect(
-        await File('${dir.path}/recovery-$second.aseprite').exists(),
+        await File('${dir.path}/draft-$second.sdd').exists(),
         true,
       );
+      await b.dispose();
       final reopened = backend();
       expect((await reopened.invoke('init', null))!['recoveryAvailable'], true);
       await reopened.invoke('recover', null);
       expect(reopened.engine.document.width, 3);
       expect(reopened.engine.document.composite(0)[0], 0xff0000ff);
       expect(reopened.engine.dirty, true);
+      await reopened.dispose();
     },
   );
   test(

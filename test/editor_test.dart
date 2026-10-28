@@ -282,16 +282,16 @@ void main() {
     final editor = Editor(
       transport: (method, args) async {
         calls.add(method);
-        return {...state(), 'recoveryAvailable': method == 'init'};
+        return {...state(), 'recoveryAvailable': method == 'init', 'drafts': [{'id': 7, 'title': 'Hero draft', 'updatedAt': 0, 'width': 16, 'height': 16, 'frames': 1}]};
       },
     );
     await tester.pumpWidget(PocketPixelApp(editor: editor));
     await tester.pumpAndSettle();
-    expect(find.text('Recover your drawing?'), findsOneWidget);
-    expect(calls, ['init']);
-    await tester.tap(find.text('Recover'));
+    expect(find.text('Internal drafts'), findsOneWidget);
+    expect(calls, ['init', 'flushDrafts', 'listDrafts']);
+    await tester.tap(find.text('Hero draft'));
     await tester.pumpAndSettle();
-    expect(calls, ['init', 'recover']);
+    expect(calls, ['init', 'flushDrafts', 'listDrafts', 'recover']);
   });
   testWidgets('Recovery failure stays visible with save-copy action', (
     tester,

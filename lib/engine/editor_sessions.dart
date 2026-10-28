@@ -10,7 +10,7 @@ class EditorSession {
   final EditorEngine engine = EditorEngine();
   String title;
   bool placeholder = true;
-  String? path, recoveryError;
+  String? path, source, recoveryError;
 }
 
 /// Document ownership is independent from viewport selection. Switching never
@@ -195,7 +195,8 @@ class EditorSessions {
     for (final item in items) {
       final index = staged.indexWhere((s) => s.id == item.key);
       final previous = index < 0 ? null : staged[index];
-      final id = previous?.id ?? next++;
+      final id = previous?.id ?? item.key ?? next++;
+      if (id >= next) next = id + 1;
       final session = EditorSession(
         id,
         title: previous?.title ?? 'Recovered $id',

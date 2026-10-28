@@ -3,6 +3,8 @@ package org.pocketpixel
 class EditorSession(val id: Int, var title: String = "Untitled $id") {
     val engine = EditorEngine()
     var path: String? = null
+    // Informational provenance only; never restored as a save permission.
+    var sourceUri: String? = null
     var recoveryError: String? = null
     var placeholder = true
     var revision = 0L
@@ -71,7 +73,8 @@ class EditorSessions(private val residentBudget:Long=64L*1024*1024) {
         val restored=items.map { (oldId,doc)->
             val index=staged.indexOfFirst {it.id==oldId}
             val previous=if(index<0)null else staged[index]
-            val id=previous?.id ?: next++
+            val id=previous?.id ?: oldId?.takeIf { it > 0 } ?: next++
+            next=maxOf(next,id+1)
             val session=EditorSession(id,previous?.title ?: "Recovered $id")
             session.placeholder=false;session.engine.replace(doc,true);configure(session)
             if(index<0)staged.add(session)else staged[index]=session

@@ -20,31 +20,37 @@ class DocumentTabs extends StatelessWidget {
         .firstOrNull;
     if (refreshed == null) return;
     final dirty = refreshed['dirty'] == true;
+    String? choice;
     if (dirty) {
-      final discard = await showDialog<bool>(
+      choice = await showDialog<String>(
         context: context,
         builder: (context) => AlertDialog(
           title: Text('Close ${doc['title'] ?? 'document'}?'),
           content: const Text(
-            'This document has unsaved changes. Cancel to save it first, or explicitly discard its changes and recovery.',
+            'Keep an internal draft to continue later, or permanently discard the unsaved changes. Original files are not changed.',
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context, false),
+              onPressed: () => Navigator.pop(context, 'cancel'),
               child: const Text('Cancel'),
             ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'keep'),
+              child: const Text('Keep draft and close'),
+            ),
             FilledButton(
-              onPressed: () => Navigator.pop(context, true),
+              onPressed: () => Navigator.pop(context, 'discard'),
               child: const Text('Discard and close'),
             ),
           ],
         ),
       );
-      if (discard != true) return;
+      if (choice != 'discard' && choice != 'keep') return;
     }
     final ok = await editor.call('closeDocument', {
       'id': doc['id'],
-      if (dirty) 'discard': true,
+      if (choice == 'discard') 'discard': true,
+      if (choice == 'keep') 'keepDraft': true,
     });
     if (!ok && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(

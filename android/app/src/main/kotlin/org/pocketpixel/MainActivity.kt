@@ -4,22 +4,28 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
-import android.util.AtomicFile
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
-import java.io.File
-import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledThreadPoolExecutor
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 
 /** SAF and the tested Aseprite implementation are the only Android-specific parts. */
 class MainActivity : FlutterActivity() {
     private val sessions = EditorSessions()
     private val editor get() = sessions.active.engine
-    private val worker = Executors.newSingleThreadExecutor()
+    private val worker = ScheduledThreadPoolExecutor(1).apply {
+        removeOnCancelPolicy = true
+        setExecuteExistingDelayedTasksAfterShutdownPolicy(false)
+    }
     private val main = Handler(Looper.getMainLooper())
     private val exportFiles by lazy { ExportFiles(this, worker, main) }
-    private val recovery get() = AtomicFile(File(filesDir,"recovery-${sessions.activeId}.aseprite"))
+    private val drafts by lazy { DraftStore(filesDir) }
+    private val pendingDrafts = DraftPending()
+    private var draftTask: ScheduledFuture<*>? = null
+    private var draftsInitialized = false
     private var currentUri: Uri?
         get() = sessions.active.path?.let(Uri::parse)
         set(value) { sessions.active.path=value?.toString() }
@@ -31,9 +37,6 @@ class MainActivity : FlutterActivity() {
     private var revision: Long
         get() = sessions.active.revision
         set(value) { sessions.active.revision=value }
-    private var recoveryError: String?
-        get() = sessions.active.recoveryError
-        set(value) { sessions.active.recoveryError=value }
     private var pendingDocument = 0
     private val externalUris = java.util.concurrent.ConcurrentLinkedQueue<Uri>()
     private var externalChannel: MethodChannel? = null
@@ -72,7 +75,8 @@ class MainActivity : FlutterActivity() {
             val opened=sessions.add(loaded, uri.lastPathSegment?.substringAfterLast('/') ?: "Opened document")
             // VIEW commonly grants read-only access. Saving always asks for a destination.
             opened.path=null
-            revision++
+            opened.sourceUri=uri.toString()
+            changed()
         } catch(e: Exception) { externalOpenError="Could not open project: ${e.message}" }
     }
 
@@ -80,57 +84,117 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         externalChannel=MethodChannel(flutterEngine.dartExecutor.binaryMessenger,"pocketpixel/external")
         enqueueExternal(intent)
-        val files=recoveryFiles()
-        files.forEach { f -> Regex("recovery-([0-9]+)\\.aseprite").matchEntire(f.name)?.groupValues?.get(1)?.toIntOrNull()?.let { sessions.nextId=maxOf(sessions.nextId,it+1) } }
-        if(files.isNotEmpty()) {sessions.documents.clear();val blank=EditorSession(sessions.nextId++);sessions.configure(blank);sessions.documents.add(blank);sessions.activeId=blank.id;startupRecovery=true}
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger,"pocketpixel/editor").setMethodCallHandler(::handle)
     }
-    private fun recoveryFiles() = recoveryBaseFiles(filesDir)
-    private fun state() = sessions.state(startupRecovery || recovery.baseFile.exists() || File(recovery.baseFile.path+".bak").exists()) + mapOf("externalPending" to externalUris.isNotEmpty(), "externalOpenError" to (externalQueueError ?: externalOpenError))
-    private fun recoverDocuments() {
-        val files=recoveryFiles()
-        val existing=sessions.documents.map { it.id }.toSet()
-        fun id(f: File)=Regex("recovery-([0-9]+)\\.aseprite").matchEntire(f.name)?.groupValues?.get(1)?.toIntOrNull()
-        val needed=files.count { id(it) !in existing }
-        val placeholder=if(sessions.documents.size==1 && sessions.active.placeholder && !editor.dirty)1 else 0
-        require(sessions.documents.size+needed-placeholder<=8) { "Close documents before recovering more (8 maximum)." }
-        require(files.sumOf { maxOf(it.length(),File(it.path+".bak").length()) }<=Aseprite.MAX_FILE) { "Combined recovery exceeds the 64 MiB safety budget. Original recovery files were retained." }
-        var decodedPixels=0L
-        val decoded=files.map { f ->
-            // AtomicFile promotes a valid legacy backup before reading; reading
-            // the base directly could decode a partially replaced file.
-            val doc=Aseprite.read(AtomicFile(f).readFully())
-            decodedPixels+=doc.frames.sumOf { frame -> frame.cels.sumOf { it?.pixels?.size?.toLong() ?: 0L } }
-            require(decodedPixels<=16L*1024*1024) { "Combined recovery exceeds the decoded-pixel budget. Original recovery files were retained." }
-            f to doc
+    private fun initializeDrafts() {
+        if (draftsInitialized) return
+        val saved=drafts.summaries()
+        saved.forEach { item -> sessions.nextId=maxOf(sessions.nextId,(item["id"] as Int)+1) }
+        if(saved.isNotEmpty()) {
+            sessions.documents.clear()
+            val blank=EditorSession(sessions.nextId++)
+            sessions.configure(blank);sessions.documents.add(blank);sessions.activeId=blank.id
         }
-        sessions.validateRecoveryCandidates(decoded.map {it.second},files.mapNotNull(::id).toSet())
-        val restored=sessions.restoreDecoded(decoded.map {(file,doc)->id(file) to doc})
-        val selectedAfterRestore=sessions.activeId
-        restored.forEachIndexed { index,session ->
-            sessions.select(session.id);changed()
-            val file=files[index]
-            if(recoveryError==null && file.absolutePath!=recovery.baseFile.absolutePath)AtomicFile(file).delete()
+        startupRecovery=saved.isNotEmpty()
+        draftsInitialized=true
+    }
+    private fun closedDrafts(): List<Map<String,Any?>> {
+        val open=sessions.documents.map {it.id}.toSet()
+        return drafts.summaries().filter { it["id"] !in open }
+    }
+    private fun state(): Map<String,Any?> {
+        val available=closedDrafts()
+        val saved=drafts.summaries().associateBy {it["id"] as Int}
+        return sessions.state(available.isNotEmpty()) + mapOf(
+            "drafts" to available,
+            "documents" to sessions.documents.map { session -> mapOf(
+                "id" to session.id, "title" to session.title,
+                "dirty" to session.engine.dirty, "active" to (session.id==sessions.activeId),
+                "recoveryError" to session.recoveryError,
+                "draftPending" to pendingDrafts.contains(session.id),
+                "draftSavedAt" to saved[session.id]?.get("updatedAt"),
+            ) },
+            "externalPending" to externalUris.isNotEmpty(),
+            "externalOpenError" to (externalQueueError ?: externalOpenError),
+        )
+    }
+    private fun recoverDocuments(id: Int?) {
+        val candidates=closedDrafts().filter { id==null || it["id"]==id }
+        require(id==null || candidates.isNotEmpty()) { "Draft is already open or no longer available" }
+        candidates.forEach { item ->
+            val savedId=item["id"] as Int
+            try {
+                val draft=drafts.read(savedId)
+                val restored=sessions.restoreDecoded(listOf(savedId to draft.document)).single()
+                restored.title=draft.title
+                restored.sourceUri=draft.sourceUri
+                restored.path=null // Source metadata is never a restored write grant.
+                sessions.select(restored.id)
+                if(savedId!=restored.id) {
+                    // The decoded document is already open. If migration fails,
+                    // report that in state rather than failing after replacing
+                    // the visible session; the legacy copy remains untouched.
+                    if(persist(restored)) try { drafts.delete(savedId) }
+                    catch(e: Exception) { restored.recoveryError="Recovered draft is safe, but its old copy could not be removed: ${e.message}" }
+                }
+                if(draft.fallback && restored.recoveryError==null) restored.recoveryError="The latest draft was damaged; the previous good snapshot was recovered. Save a copy now."
+            } catch(e: Exception) {
+                if(id!=null)throw e
+                // Recover healthy entries independently. Corrupt/over-budget copies
+                // stay in the picker; one bad document never consumes the others.
+            }
         }
-        sessions.select(selectedAfterRestore)
-        startupRecovery=false
+        startupRecovery=closedDrafts().isNotEmpty()
     }
     private fun execute(result: MethodChannel.Result, block: () -> Any?) {
         worker.execute {
-            try { val value=block(); if(value !== DeferredResult) main.post { result.success(value) } }
+            try { initializeDrafts(); val value=block(); if(value !== DeferredResult) main.post { result.success(value) } }
             catch(e: Exception) { main.post { result.error("editor_error", e.message ?: e.javaClass.simpleName, null) } }
         }
     }
-    private fun persist() {
-        val bytes=Aseprite.write(editor.document)
-        val stream=recovery.startWrite()
-        try { stream.write(bytes); recovery.finishWrite(stream); recoveryError=null }
-        catch(e: Exception) { recovery.failWrite(stream); throw e }
+    private fun persist(session: EditorSession = sessions.active): Boolean {
+        return try {
+            drafts.write(session.id,session.title,session.sourceUri ?: session.path,session.engine.document)
+            session.recoveryError=null
+            true
+        } catch(e: Exception) {
+            session.recoveryError="Draft could not be written: ${e.message}. Save a copy now."
+            false
+        }
     }
-    private fun changed() {
-        revision++
-        // Keep edits in memory if storage fills; make recovery failure visible in state.
-        try { persist() } catch(e: Exception) { recoveryError="Recovery could not be written: ${e.message}. Save a copy now." }
+    private fun flushDrafts() {
+        draftTask?.cancel(false);draftTask=null
+        pendingDrafts.flush { id ->
+            val session=sessions.documents.firstOrNull {it.id==id}
+            session==null || persist(session)
+        }
+    }
+    private fun scheduleDraft() {
+        val now=android.os.SystemClock.elapsedRealtime()
+        pendingDrafts.mark(sessions.activeId,now)
+        draftTask?.cancel(false)
+        draftTask=worker.schedule({flushDrafts()},pendingDrafts.delay(now),TimeUnit.MILLISECONDS)
+    }
+    private fun changed() { revision++;scheduleDraft() }
+    private fun clearDraft(session: EditorSession = sessions.active) {
+        // Cancellation is ordered with all snapshots on this same worker.
+        pendingDrafts.forget(session.id)
+        try { drafts.delete(session.id);session.recoveryError=null }
+        catch(e: Exception) { session.recoveryError="Saved project is safe, but its old draft could not be removed: ${e.message}" }
+    }
+    private fun closeDocument(id: Int, discard: Boolean, keepDraft: Boolean, defaultText: String) {
+        val session=sessions.documents.firstOrNull {it.id==id} ?: error("Document is no longer open")
+        require(!session.engine.dirty || discard || keepDraft) { "Save, keep a draft, or explicitly discard this document." }
+        if(keepDraft) {
+            require(persist(session)) { session.recoveryError ?: "Draft could not be written" }
+        } else {
+            // Do not close if explicit removal fails: it would promise a discard
+            // while leaving a recoverable copy behind.
+            drafts.delete(id)
+        }
+        pendingDrafts.forget(id)
+        sessions.close(id,discard || keepDraft)
+        sessions.initializePlaceholder(defaultText,allow=closedDrafts().isEmpty())
     }
     @Suppress("UNCHECKED_CAST")
     private fun handle(call: MethodCall, result: MethodChannel.Result) {
@@ -145,7 +209,8 @@ class MainActivity : FlutterActivity() {
             val defaultText = if(call.method in listOf("init","new","closeDocument")) defaultUserData(args) else ""
             when(call.method) {
                 "init" -> sessions.initializePlaceholder(defaultText, allow = !startupRecovery)
-                "state" -> Unit
+                "state", "listDrafts" -> Unit
+                "flushDrafts" -> flushDrafts()
                 "openExternal" -> openExternal()
                 "exportSnapshot" -> return@execute exportSnapshot(editor.document, editor.frame, args)
                 "thumbnails" -> return@execute editor.thumbnails(args)
@@ -153,7 +218,7 @@ class MainActivity : FlutterActivity() {
                 "previewStroke" -> return@execute editor.previewStroke(args)
                 "new" -> { sessions.add(newSprite(args.number("width",32),args.number("height",32),defaultText),unsaved=true); changed() }
                 "selectDocument" -> sessions.select(args.number("id",-1))
-                "closeDocument" -> {val id=args.number("id",-1);sessions.close(id,args["discard"]==true);sessions.initializePlaceholder(defaultText, allow = !startupRecovery);AtomicFile(File(filesDir,"recovery-$id.aseprite")).delete()}
+                "closeDocument" -> closeDocument(args.number("id",-1),args["discard"]==true,args["keepDraft"]==true,defaultText)
                 "clearTagClipboard" -> sessions.clearClipboard()
                 "copyTag" -> sessions.copyTag(args.number("index",-1))
                 "pasteTag" -> {if(args["asNew"]==true)sessions.pasteTagAsNew() else sessions.pasteTag((args["after"] as? Number)?.toInt());changed()}
@@ -162,11 +227,13 @@ class MainActivity : FlutterActivity() {
                 "edit" -> { editor.edit(args); changed() }
                 "undo" -> { editor.undo(); changed() }
                 "redo" -> { editor.redo(); changed() }
-                "recover" -> recoverDocuments()
+                "recover" -> recoverDocuments((args["id"] as? Number)?.toInt())
                 "discardRecovery" -> {
-                    val protectedNames=sessions.documents.filter {it.id!=sessions.activeId}.map {"recovery-${it.id}.aseprite"}.toSet()
-                    recoveryFiles().filter {it.name !in protectedNames}.forEach {AtomicFile(it).delete()}
-                    startupRecovery=false;recoveryError=null
+                    val id=(args["id"] as? Number)?.toInt()
+                    val targets=closedDrafts().filter {id==null || it["id"]==id}
+                    require(id==null || targets.isNotEmpty()) { "Draft is already open or no longer available" }
+                    targets.forEach {drafts.delete(it["id"] as Int)}
+                    startupRecovery=closedDrafts().isNotEmpty()
                 }
                 "save" -> {
                     val uri=currentUri
@@ -182,9 +249,9 @@ class MainActivity : FlutterActivity() {
     private fun writeDocument(uri: Uri) {
         val bytes=Aseprite.write(editor.document)
         Aseprite.read(bytes) // Validate before opening any destination for truncation.
-        persist()
+        persist() // Best effort; a full draft store must not prevent manual Save.
         contentResolver.openOutputStream(uri,"wt")?.use { it.write(bytes); it.flush() } ?: error("The document provider refused this file. Use Save As.")
-        editor.saved(); currentUri=uri; sessions.active.title=uri.lastPathSegment?.substringAfterLast('/') ?: sessions.active.title; recovery.delete(); recoveryError=null
+        editor.saved(); currentUri=uri; sessions.active.sourceUri=uri.toString(); sessions.active.title=uri.lastPathSegment?.substringAfterLast('/') ?: sessions.active.title; clearDraft()
     }
     private fun launchPicker(kind: String,result: MethodChannel.Result) {
         if(pending!=null) { result.error("busy","Finish the open file picker first",null); return }
@@ -224,19 +291,31 @@ class MainActivity : FlutterActivity() {
                 if(kind=="open") {
                     val loaded=contentResolver.openInputStream(uri)?.use { stream ->
                         val out=java.io.ByteArrayOutputStream(); val buffer=ByteArray(65536)
-                        while(true) { val n=stream.read(buffer); if(n<0) break; require(out.size()+n<=128*1024*1024) { "File exceeds the 128 MiB safety limit" }; out.write(buffer,0,n) }
+                        while(true) { val n=stream.read(buffer); if(n<0) break; require(out.size()+n<=Aseprite.MAX_FILE) { "File exceeds the 64 MiB safety limit" }; out.write(buffer,0,n) }
                         Aseprite.read(out.toByteArray())
                     } ?: error("The document provider could not read this file")
                     val opened=sessions.add(loaded, uri.lastPathSegment?.substringAfterLast('/') ?: "Opened document")
-                    opened.path=uri.toString();revision++
+                    opened.path=uri.toString();opened.sourceUri=uri.toString();changed()
                 } else {
                     requireNotNull(bytes)
                     contentResolver.openOutputStream(uri,"wt")?.use { it.write(bytes); it.flush() } ?: error("The document provider refused this file")
-                    if(kind=="saveAs") { currentUri=uri;sessions.active.title=uri.lastPathSegment?.substringAfterLast('/') ?: sessions.active.title; if(revision==snapshotRevision) { editor.saved(); recovery.delete(); recoveryError=null } }
+                    if(kind=="saveAs") { currentUri=uri;sessions.active.sourceUri=uri.toString();sessions.active.title=uri.lastPathSegment?.substringAfterLast('/') ?: sessions.active.title; if(revision==snapshotRevision) { editor.saved(); clearDraft() } }
                 }
             }
             state()
         }
     }
-    override fun onDestroy() { worker.shutdown(); super.onDestroy() }
+    override fun onPause() {
+        if(!worker.isShutdown)worker.execute { if(draftsInitialized)flushDrafts() }
+        super.onPause()
+    }
+    override fun onStop() {
+        if(!worker.isShutdown)worker.execute { if(draftsInitialized)flushDrafts() }
+        super.onStop()
+    }
+    override fun onDestroy() {
+        if(!worker.isShutdown)worker.execute { if(draftsInitialized)flushDrafts() }
+        worker.shutdown()
+        super.onDestroy()
+    }
 }
