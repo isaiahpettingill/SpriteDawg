@@ -209,8 +209,7 @@ Map<int, int> paletteTexturePixels({
     if (side > 0 && distance < .34) return 4;
     if (side > 0 && distance < .49) return 3;
     final crack = v / 3 + (hash(nearest, 911) % 100) / 100;
-    if (crack - crack.floor() < .09 &&
-        hash(nearest, crack.floor()) % 4 == 0) {
+    if (crack - crack.floor() < .09 && hash(nearest, crack.floor()) % 4 == 0) {
       return 1;
     }
     return 2;
