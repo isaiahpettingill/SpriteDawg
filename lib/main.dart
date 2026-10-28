@@ -505,12 +505,22 @@ class _EditorScreenState extends State<EditorScreen>
   }
 
   int playbackDirection = 1, completedLoops = 0;
+  bool _startingPlayback = false;
   Future<void> play() async {
     if (playing) {
       stop();
       return;
     }
-    if (e.maps('frames').length < 2) return;
+    if (_startingPlayback || e.busy || e.maps('frames').length < 2) return;
+    _startingPlayback = true;
+    final startingPanel = panel;
+    bool ready;
+    try {
+      ready = await (_tagEditorKey.currentState?.savePending() ?? Future.value(true));
+    } finally {
+      _startingPlayback = false;
+    }
+    if (!ready || !mounted || panel != startingPanel) return;
     setState(() => playing = true);
     final tags = e.maps('tags');
     final tag = selectedTag >= 0 && selectedTag < tags.length
@@ -874,12 +884,14 @@ class _EditorScreenState extends State<EditorScreen>
               if (recoveryIssue != null) recoveryBanner(),
               Expanded(
                 child: ResponsiveEditorShell(
-                  documentTabs: DocumentTabs(
-                    editor: e,
-                    onNew: () => newProject(),
-                    onOpen: () => open(),
-                    beforeSwitch: beforeDocumentSwitch,
-                  ),
+                  documentTabs: panel == 'tags' && MediaQuery.viewInsetsOf(context).bottom > 0
+                      ? null
+                      : DocumentTabs(
+                          editor: e,
+                          onNew: () => newProject(),
+                          onOpen: () => open(),
+                          beforeSwitch: beforeDocumentSwitch,
+                        ),
                   canvas: Column(
                     children: [
                       strokeOptions(),
@@ -889,7 +901,7 @@ class _EditorScreenState extends State<EditorScreen>
                   tools: toolRail(),
                   layers: layerPanel(),
                   timeline: wideTimeline(),
-                  timelineHeight: panel == 'tags' ? 260 : 168,
+                  timelineHeight: panel == 'tags' ? 288 : 168,
                   mobileBody: Column(
                     children: [
                       SizedBox(
@@ -949,25 +961,29 @@ class _EditorScreenState extends State<EditorScreen>
                           ),
                         ),
                       Expanded(
-                        child: compactTags ? tagPanel() : drawingCanvas(),
-                      ),
-                      if (panel != null && !compactTags)
-                        SizedBox(
-                          height: panel == 'frames'
-                              ? 120
-                              : panel == 'tags'
-                              ? 280
-                              : compactHeight
-                              ? (MediaQuery.sizeOf(context).height - 210)
-                                    .clamp(130.0, 180.0)
-                                    .toDouble()
-                              : 180,
-                          child: panel == 'layers'
-                              ? layerPanel()
+                        child: LayoutBuilder(builder: (context, box) {
+                          final tagHeight = (box.maxHeight * .78).clamp(0.0, 248.0);
+                          final panelHeight = panel == 'tags'
+                              ? tagHeight
                               : panel == 'frames'
-                              ? framePanel()
-                              : tagPanel(),
-                        ),
+                              ? 120.0
+                              : panel == 'layers'
+                              ? (box.maxHeight * .6).clamp(0.0, 180.0)
+                              : 0.0;
+                          return Column(children: [
+                            Expanded(child: drawingCanvas()),
+                            SizedBox(
+                              height: panelHeight,
+                              child: Stack(children: [
+                                if (panel == 'layers') layerPanel(),
+                                if (panel == 'frames') framePanel(),
+                                // Retain unfinished names while changing panels.
+                                Offstage(offstage: panel != 'tags', child: tagPanel()),
+                              ]),
+                            ),
+                          ]);
+                        }),
+                      ),
                       if (!hideDrawingStrips && !tightHeight)
                         SizedBox(
                           height: 50,
@@ -1147,6 +1163,9 @@ class _EditorScreenState extends State<EditorScreen>
                 control: true,
               ): () {
                 if (!e.busy) open();
+              },
+              const SingleActivator(LogicalKeyboardKey.f2): () {
+                if (panel == 'tags') _tagEditorKey.currentState?.rename();
               },
               const SingleActivator(LogicalKeyboardKey.keyB): () =>
                   chooseTool('pencil'),
@@ -1542,11 +1561,11 @@ class _EditorScreenState extends State<EditorScreen>
         child: Row(
           children: [
             TextButton(
-              onPressed: () => setState(() => panel = 'frames'),
+              onPressed: () => changePanel('frames'),
               child: const Text('Frames'),
             ),
             TextButton(
-              onPressed: () => setState(() => panel = 'tags'),
+              onPressed: () => changePanel('tags'),
               child: const Text('Tags'),
             ),
             const Spacer(),
@@ -1562,17 +1581,23 @@ class _EditorScreenState extends State<EditorScreen>
           ],
         ),
       ),
-      Expanded(child: panel == 'tags' ? tagPanel() : framePanel()),
+      Expanded(child: Stack(children: [
+        if (panel != 'tags') framePanel(),
+        Offstage(offstage: panel != 'tags', child: tagPanel()),
+      ])),
     ],
   );
 
+  void changePanel(String? value) {
+    stop();
+    _tagEditorKey.currentState?.pauseEditing();
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() { panel = value; editingText = false; });
+  }
+
   Widget panelButton(String key, IconData icon, String label) => Expanded(
     child: TextButton(
-      onPressed: () {
-        stop();
-        FocusManager.instance.primaryFocus?.unfocus();
-        setState(() => panel = panel == key ? null : key);
-      },
+      onPressed: () => changePanel(panel == key ? null : key),
       style: TextButton.styleFrom(
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
         minimumSize: const Size(0, 48),
@@ -1766,11 +1791,10 @@ class _EditorScreenState extends State<EditorScreen>
     key: _tagEditorKey,
     editor: e,
     selectedTag: selectedTag,
-    playing: playing,
     onSelected: (index) => setState(() => selectedTag = index),
     onEdit: edit,
     onStop: stop,
-    onPlay: () => play(),
+    active: panel == 'tags',
     onEditingChanged: (value) {
       if (mounted) setState(() => editingText = value);
     },

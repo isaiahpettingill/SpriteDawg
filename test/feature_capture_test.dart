@@ -12,6 +12,7 @@ import 'package:spritedawg/main.dart';
 
 void main() {
   for (final entry in {
+    'phone320': const Size(320, 568),
     'phone': const Size(390, 844),
     'tablet': const Size(900, 1100),
     'desktop': const Size(1440, 900),
@@ -124,7 +125,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
       expect(
-        tester.getRect(find.byKey(const Key('browse-tag'))).bottom,
+        tester.getRect(find.byKey(const Key('tag-start-handle'))).bottom,
         lessThanOrEqualTo(
           tester.getRect(find.byKey(const Key('tag-frame-strip'))).top + 1,
         ),
@@ -142,6 +143,26 @@ void main() {
           ).writeAsBytes(bytes!.buffer.asUint8List());
           image.dispose();
         });
+      }
+      if (entry.value.width < 700) {
+        await tester.tap(find.byKey(const Key('tag-options')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Rename tag'));
+        await tester.pumpAndSettle();
+        tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+        addTearDown(tester.view.resetViewInsets);
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('save-tag')).hitTestable(), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        if (const bool.fromEnvironment('CAPTURE_UI')) {
+          await tester.runAsync(() async {
+            final boundary = key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+            final image = await boundary.toImage(pixelRatio: 1);
+            final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+            await File('build/ui/${entry.key}-tags-keyboard.png').writeAsBytes(bytes!.buffer.asUint8List());
+            image.dispose();
+          });
+        }
       }
       await tester.pumpWidget(const SizedBox.shrink());
     });

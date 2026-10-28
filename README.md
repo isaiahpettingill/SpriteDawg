@@ -53,9 +53,15 @@ MIT licensed, no ads, accounts, tracking, networking or broad Android storage pe
   **Frame options → Duration…**, or long-press/right-click a frame; timing stays
   out of the strip so there is more room for drawing.
 - Visual tag editing keeps frame thumbnails visible with the selected range and
-  current frame marked. Rename, adjust endpoints or duplicate quickly; browse tile
-  variants without starting playback, or explicitly preview an animation. Tags
-  remain generic, contiguous Aseprite ranges, not new incompatible tag types.
+  current frame marked. Compact chips show names and frame ranges; frame taps
+  always preview. Drag either bracket handle to resize a range (one undo on
+  release), or Shift-click a frame on desktop. Add starts at the current frame;
+  name it and choose Done, or Cancel. Rename from the tag's ⋮ menu, long-press its
+  selected chip, or press F2. Unfinished names survive panel changes, and the
+  artwork stays visible while typing. The single Play button saves the pending
+  tag before playback; tile browsing never starts playback automatically.
+  Direction/repeat, user data, **Duplicate tag label**, and **Copy frames + tag**
+  live in ⋮. Tags remain generic contiguous Aseprite ranges, not new file types.
 - Sprite/layer/cel/tag user-data text; existing binary typed-property payloads remain
   attached to their original objects. Unsupported advanced features are refused,
   rather than silently flattened.

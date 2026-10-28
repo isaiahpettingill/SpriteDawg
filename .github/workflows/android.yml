@@ -109,6 +109,18 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           overwrite: true
+      - name: Capture visual tag workspaces
+        run: |
+          font="$(fc-match -f '%{file}' sans)"
+          test -f "$font"
+          flutter test test/feature_capture_test.dart --dart-define=CAPTURE_UI=true --dart-define="CAPTURE_FONT=$font"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: visual-tag-ui
+          path: build/ui/*-tags*.png
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
       - name: Verify exports with independent Pillow decoders
         run: |
           python3 -m pip install --disable-pip-version-check Pillow==12.3.0
