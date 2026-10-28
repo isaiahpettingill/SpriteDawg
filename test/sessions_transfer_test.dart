@@ -250,7 +250,10 @@ void main() {
       );
       expect(b.engine.encode(), before);
       expect((await b.invoke('listDrafts', null))!['drafts'], hasLength(9));
-      expect(await dir.list().where((f) => f.path.endsWith('.aseprite')).length, 9);
+      expect(
+        await dir.list().where((f) => f.path.endsWith('.aseprite')).length,
+        9,
+      );
       await b.dispose();
     },
   );

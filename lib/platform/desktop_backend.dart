@@ -76,7 +76,6 @@ class DesktopBackend {
   }
 
   Directory? _base;
-  String? get _recoveryError => sessions.active.recoveryError;
   set _recoveryError(String? value) {
     sessions.active.recoveryError = value;
   }

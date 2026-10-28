@@ -113,7 +113,9 @@ class FileDraftStorage implements SizedDraftStorage {
   Future<List<Uint8List>> read(int id) async {
     await _open();
     final result = <Uint8List>[];
-    final current = _current(id), previous = _previous(id), legacy = _legacy(id);
+    final current = _current(id),
+        previous = _previous(id),
+        legacy = _legacy(id);
     final hasModern = await current.exists() || await previous.exists();
     for (final file in hasModern ? [current, previous, legacy] : [legacy]) {
       if (!await file.exists()) {

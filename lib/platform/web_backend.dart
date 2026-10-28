@@ -194,7 +194,8 @@ class DesktopBackend {
       await _queue;
       await _flush();
     } catch (error) {
-      _storageIssue = 'Browser drafts could not be flushed while closing: $error';
+      _storageIssue =
+          'Browser drafts could not be flushed while closing: $error';
     } finally {
       // Keep the close warning until accepted work has had its final flush.
       web.window.removeEventListener('beforeunload', _beforeUnload);
@@ -205,7 +206,8 @@ class DesktopBackend {
         try {
           await storage.close();
         } catch (error) {
-          _storageIssue = 'Browser draft storage could not close safely: $error';
+          _storageIssue =
+              'Browser draft storage could not close safely: $error';
         }
       }
     }

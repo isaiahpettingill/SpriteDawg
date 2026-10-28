@@ -141,9 +141,9 @@ void main() {
     'bulk recovery reports partial capacity refusal without stale backend state',
     () async {
       for (var id = 2; id < 11; id++) {
-        await File('${directory.path}/recovery-$id.aseprite').writeAsBytes(
-          AsepriteCodec.encode(SpriteDocument.create(2, 2)),
-        );
+        await File(
+          '${directory.path}/recovery-$id.aseprite',
+        ).writeAsBytes(AsepriteCodec.encode(SpriteDocument.create(2, 2)));
       }
       final b = create();
       await b.invoke('init', null);
