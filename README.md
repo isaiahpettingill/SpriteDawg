@@ -60,8 +60,14 @@ MIT licensed, no ads, accounts, tracking, networking or broad Android storage pe
   attached to their original objects. Unsupported advanced features are refused,
   rather than silently flattened.
 - Aseprite open/save/save-as; offline PNG, GIF, APNG, WebP, QOI and AVIF export, plus PNG spritesheets with JSON. Exports flatten visible layers without changing the project.
-- Atomic app-private recovery after edits. A failed recovery write is shown, not
-  treated as success. Recovering opens an **unsaved copy**, never an old save path.
+- Debounced **internal drafts** for new, imported and edited documents. Android
+  uses app-private files, Linux application support, and the browser IndexedDB—not
+  cache or temporary storage. **Internal drafts…** lists named, dated copies;
+  **Keep draft and close** leaves one available without keeping its tab open.
+  Recovery always opens an **unsaved copy**, never an old writable save path.
+  A damaged latest snapshot falls back to its previous validated generation, and
+  a damaged draft does not prevent opening its neighbors. Storage failures are
+  shown with a Save a copy action; they never count as successful autosaves.
 
 Android uses the system document picker. Linux uses native GTK file dialogs.
 Linux also supports pointer-wheel zoom, right-drag pan, Ctrl-Z/Y, Ctrl-Shift-Z,
@@ -87,7 +93,18 @@ Open documents plus copied sections share a conservative 64 MiB estimated data
 budget; operations exceeding it are refused without replacing work. History is
 bounded per document (the most recent undo is retained even when large). This is
 not a hard process-memory limit. Recovery restores unsaved copies, not original
-save paths; closing the app keeps recovery for every dirty tab.
+save paths; closing the app keeps drafts for every open drawing. Edits coalesce after about
+half a second (at most two seconds of continuous edits); background/exit events
+request an immediate flush. A force-kill before a write finishes can still lose
+those newest edits. Keep important artwork in separately saved files too.
+Drafts are never expired automatically: a 64-draft / 256 MiB peak-storage limit
+refuses new writes visibly instead of evicting user work. Save or explicitly
+discard older drafts to free space. Uninstalling/clearing app data removes them;
+browser private mode, site-data clearing, storage eviction, or a changed site
+origin can also remove browser drafts. Browser downloads retain the internal
+copy because the app cannot confirm the download was kept. Only one app process
+or browser tab may write a draft store at a time; another receives a storage
+warning rather than being allowed to overwrite the first one's drafts.
 
 Open **Palette → Preset palettes** for an offline, searchable library with color
 previews: retro/system palettes, Monokai (Pygments), all Catppuccin flavors,

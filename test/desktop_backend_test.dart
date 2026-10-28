@@ -22,6 +22,7 @@ void main() {
     await backend.invoke('init', null);
   });
   tearDown(() async {
+    await backend.dispose();
     await base.delete(recursive: true);
   });
   Future<void> draw() => backend
@@ -32,10 +33,10 @@ void main() {
         ],
         'color': 0xffff0000,
       })
+      .then((_) => backend.invoke('flushDrafts', null))
       .then((_) {});
-  File recovery() => File(
-    '${base.path}/support/recovery-${backend.sessions.activeId}.aseprite',
-  );
+  File recovery() =>
+      File('${base.path}/support/draft-${backend.sessions.activeId}.sdd');
   test(
     'new and fresh placeholders get defaults but late init never stamps imports',
     () async {
@@ -126,7 +127,9 @@ void main() {
     expect(backend.engine.dirty, true);
     expect(backend.engine.encode(), before);
     expect(
-      AsepriteCodec.decode(await recovery().readAsBytes()).composite(0)[66],
+      (await backend.drafts.load(
+        backend.sessions.activeId,
+      )).document.composite(0)[66],
       0xffff0000,
     );
     expect(await File(savePath!).exists(), false);
@@ -137,23 +140,22 @@ void main() {
       await recovery().create();
       await recovery().delete();
       await Directory(recovery().path).create();
-      final state = await backend.invoke('stroke', {
+      await backend.invoke('stroke', {
         'tool': 'pencil',
         'points': [
           [2, 2],
         ],
         'color': 0xffff0000,
       });
-      expect(
-        state!['recoveryError'],
-        contains('Recovery could not be written'),
-      );
+      final state = await backend.invoke('flushDrafts', null);
+      expect(state!['recoveryError'], contains('Draft could not be written'));
       expect(backend.engine.dirty, true);
       expect(backend.engine.document.composite(0)[66], 0xffff0000);
     },
   );
   test('recover opens unsaved copy without overwrite path', () async {
     await draw();
+    await backend.dispose();
     final other = DesktopBackend(
       openPath: () async => null,
       savePath: (_) async => null,
@@ -168,10 +170,11 @@ void main() {
     expect(other.engine.dirty, true);
     expect(
       await File(
-        '${base.path}/support/recovery-${other.sessions.activeId}.aseprite',
+        '${base.path}/support/draft-${other.sessions.activeId}.sdd',
       ).exists(),
       true,
     );
+    await other.dispose();
   });
   test('successful open retains prior document history and recovery', () async {
     await draw();
@@ -193,7 +196,10 @@ void main() {
     await draw();
     final before = backend.engine.encode();
     await recovery().writeAsBytes(Uint8List(10));
-    await expectLater(backend.invoke('recover', null), throwsFormatException);
+    await expectLater(
+      backend.invoke('recover', {'id': backend.sessions.activeId}),
+      throwsFormatException,
+    );
     expect(backend.engine.encode(), before);
   });
   test(

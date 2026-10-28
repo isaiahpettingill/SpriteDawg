@@ -81,7 +81,8 @@ void main() {
       255,
     ]);
     expect(editor.canUndo, true);
-    expect(editor.state['recoveryAvailable'], true);
+    // Open documents are not duplicated in the closed-draft picker.
+    expect(editor.state['recoveryAvailable'], false);
     expect(await editor.call('undo'), true);
     expect((editor.state['pixels'] as Uint8List).every((v) => v == 0), true);
     expect(await editor.call('redo'), true);
@@ -93,9 +94,45 @@ void main() {
       true,
     );
     expect((editor.state['userData'] as Map)['sprite'], metadata);
-    // Recovery serializes and decodes the actual Aseprite bytes, exercising more
-    // than just a transient channel state map. No external/user file is touched.
-    expect(await editor.call('recover'), true);
+    // Flush uses the same real native operation as app backgrounding. Drafts
+    // serialize actual Aseprite bytes; no external/user file is touched.
+    Future<void> roundTripDraft() async {
+      final id = editor.state['documentId'];
+      final title = editor.maps('documents').firstWhere(
+        (document) => document['id'] == id,
+      )['title'];
+      expect(await editor.call('flushDrafts'), true);
+      expect(
+        editor.maps('documents').firstWhere(
+          (document) => document['id'] == id,
+        )['draftPending'],
+        false,
+      );
+      expect(
+        await editor.call('closeDocument', {'id': id, 'keepDraft': true}),
+        true,
+      );
+      final draft = editor.maps('drafts').firstWhere(
+        (draft) => draft['id'] == id,
+      );
+      expect(draft['title'], title);
+      expect(draft['updatedAt'], greaterThan(0));
+      expect(editor.state['recoveryAvailable'], true);
+      expect(await editor.call('recover', {'id': id}), true);
+      expect(editor.state['documentId'], id);
+      expect(editor.maps('drafts').where((draft) => draft['id'] == id), isEmpty);
+      expect(editor.dirty, true);
+    }
+
+    // Slow emulators may already have crossed the debounce boundary here;
+    // either way background flushing must leave a committed native snapshot.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await settleNative();
+    expect(await editor.call('flushDrafts'), true);
+    expect(editor.maps('documents').single['draftPending'], false);
+    expect(editor.maps('documents').single['draftSavedAt'], greaterThan(0));
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await roundTripDraft();
     expect((editor.state['userData'] as Map)['sprite'], metadata);
     expect(editor.state['pixels'], orderedEquals(colored));
     expect(editor.dirty, true);
@@ -205,7 +242,7 @@ void main() {
     );
     expect(editor.maps('tags')[0]['text'], 'game:terrain');
     final savedTags = editor.maps('tags');
-    expect(await editor.call('recover'), true);
+    await roundTripDraft();
     expect(editor.maps('tags'), equals(savedTags));
     await settleNative();
 
@@ -278,6 +315,9 @@ void main() {
         true,
       );
     }
+    // A queued debounce or lifecycle flush must not resurrect discarded tabs.
+    expect(await editor.call('flushDrafts'), true);
+    expect(editor.maps('drafts'), isEmpty);
     expect(await editor.call('discardRecovery'), true);
     await tester.pumpWidget(const SizedBox.shrink());
   });

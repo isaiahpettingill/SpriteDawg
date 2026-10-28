@@ -1,3 +1,4 @@
+import 'draft_picker.dart';
 import 'default_user_data_dialog.dart';
 import 'dart:async';
 
@@ -147,27 +148,7 @@ class _EditorScreenState extends State<EditorScreen>
     await e.call('init');
     if (!mounted) return;
     if (e.state['recoveryAvailable'] == true) {
-      final recover = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => AlertDialog(
-          title: const Text('Recover your drawing?'),
-          content: const Text(
-            'An unsaved project was found. Open it as a recovered copy, or discard it.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Discard'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Recover'),
-            ),
-          ],
-        ),
-      );
-      await e.call(recover == true ? 'recover' : 'discardRecovery');
+      await showDraftPicker(context, e);
       if (mounted) setState(() => fitToken++);
     }
     _initialized = true;
@@ -270,7 +251,10 @@ class _EditorScreenState extends State<EditorScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed) stop();
+    if (state != AppLifecycleState.resumed) {
+      stop();
+      unawaited(e.flushDrafts());
+    }
   }
 
   void stop() {
@@ -285,6 +269,7 @@ class _EditorScreenState extends State<EditorScreen>
       return false;
     }
     if (!mounted) return false;
+    if (!await e.flushDrafts() || !mounted) return false;
     final documents = e.maps('documents');
     final dirtyCount = documents.isEmpty
         ? (e.dirty ? 1 : 0)
@@ -612,6 +597,9 @@ class _EditorScreenState extends State<EditorScreen>
         await open();
       case 'saveAs':
         await fileAction('saveAs');
+      case 'drafts':
+        await showDraftPicker(context, e);
+        if (mounted) setState(() => fitToken++);
       case 'exportPng':
         await showExportDialog(context, e);
       case 'grid':
@@ -821,6 +809,10 @@ class _EditorScreenState extends State<EditorScreen>
               itemBuilder: (context) => [
                 const PopupMenuItem(value: 'new', child: Text('New canvas')),
                 const PopupMenuItem(value: 'saveAs', child: Text('Save as…')),
+                const PopupMenuItem(
+                  value: 'drafts',
+                  child: Text('Internal drafts…'),
+                ),
                 const PopupMenuItem(value: 'exportPng', child: Text('Export…')),
                 const PopupMenuDivider(),
                 CheckedPopupMenuItem(

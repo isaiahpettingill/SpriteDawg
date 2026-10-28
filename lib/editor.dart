@@ -33,14 +33,17 @@ class Editor extends ChangeNotifier {
            (transport == null
                ? DefaultUserDataStore.shared
                : DefaultUserDataStore.memory()),
-       transport =
-           transport ??
-           (kIsWeb || defaultTargetPlatform == TargetPlatform.linux
-               ? DesktopBackend().invoke
-               : _native);
+       _backend =
+           transport == null &&
+               (kIsWeb || defaultTargetPlatform == TargetPlatform.linux)
+           ? DesktopBackend()
+           : null {
+    this.transport = transport ?? _backend?.invoke ?? _native;
+  }
+  final DesktopBackend? _backend;
   final DefaultUserDataStore defaultsStore;
 
-  final EditorTransport transport;
+  late final EditorTransport transport;
   final EditorImageDecoder decodeImage;
   static Future<Map<String, dynamic>?> _native(
     String method,
@@ -68,6 +71,53 @@ class Editor extends ChangeNotifier {
   Listenable get documentChanges => _documentChanges;
   bool _disposed = false;
   String? error;
+  Timer? _draftStatusTimer;
+  Future<bool> flushDrafts() async {
+    _draftStatusTimer?.cancel();
+    while (busy && !_disposed && _operationDone != null) {
+      await _operationDone!.future;
+    }
+    if (_disposed) return false;
+    try {
+      // The platform queue orders this behind edits. It deliberately does not
+      // occupy the UI busy gate: a stroke arriving during disk IO must queue,
+      // not be dropped. A status refresh never decodes images or changes history.
+      final result = await transport('flushDrafts', null);
+      if (_disposed || result == null) return false;
+      final reports = {
+        for (final doc in (result['documents'] as List? ?? const []))
+          (doc as Map)['id']: doc['recoveryError'],
+      };
+      final activeId = state['documentId'];
+      state = {
+        ...state,
+        if (reports.containsKey(activeId))
+          'recoveryError':
+              reports[activeId] ??
+              (result['documentId'] == activeId
+                  ? result['recoveryError']
+                  : null),
+        if (result['drafts'] != null) 'drafts': result['drafts'],
+        'documents': [
+          for (final doc in maps('documents'))
+            {
+              ...doc,
+              if (reports.containsKey(doc['id']))
+                'recoveryError': reports[doc['id']],
+            },
+        ],
+      };
+      notifyListeners();
+      return true;
+    } catch (failure) {
+      if (!_disposed) {
+        error = 'Internal drafts could not be flushed: $failure';
+        notifyListeners();
+      }
+      return false;
+    }
+  }
+
   int revision = 0;
   String? imageOperation;
   int documentRevision = 0;
@@ -209,6 +259,8 @@ class Editor extends ChangeNotifier {
           'saveAs',
           'exportPng',
           'discardRecovery',
+          'listDrafts',
+          'flushDrafts',
           'copyTag',
           'clearTagClipboard',
         }.contains(method)) {
@@ -216,6 +268,22 @@ class Editor extends ChangeNotifier {
           _thumbnails.invalidate();
           documentChanged = true;
         }
+      }
+      if (state.containsKey('drafts') &&
+          const {
+            'new',
+            'open',
+            'openExternal',
+            'stroke',
+            'edit',
+            'undo',
+            'redo',
+            'pasteTag',
+          }.contains(method)) {
+        _draftStatusTimer?.cancel();
+        _draftStatusTimer = Timer(const Duration(milliseconds: 800), () {
+          unawaited(flushDrafts());
+        });
       }
       return true;
     } on PlatformException catch (e) {
@@ -300,6 +368,11 @@ class Editor extends ChangeNotifier {
       call('edit', {'action': action, ...args});
   @override
   void dispose() {
+    _draftStatusTimer?.cancel();
+    final backend = _backend;
+    if (backend != null) {
+      unawaited(backend.dispose().catchError((Object _) {}));
+    }
     _disposed = true;
     _slideEpoch++;
     next?.dispose();

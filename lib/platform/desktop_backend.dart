@@ -1,4 +1,9 @@
 import 'dart:io';
+
+import '../drafts/draft_autosave.dart';
+import '../drafts/draft_repository.dart';
+import '../drafts/draft_storage.dart';
+import 'draft_storage_io.dart';
 import 'dart:isolate';
 
 import 'dart:typed_data';
@@ -22,12 +27,36 @@ class DesktopBackend {
     Future<String?> Function()? openPath,
     Future<String?> Function(bool png)? savePath,
     Future<Directory> Function()? supportDirectory,
+    DraftStorage? draftStorage,
   }) : _openPath = openPath ?? _pickOpen,
        _savePath = savePath ?? _pickSave,
-       _supportDirectory = supportDirectory ?? getApplicationSupportDirectory;
+       _supportDirectory = supportDirectory ?? getApplicationSupportDirectory,
+       _providedStorage = draftStorage;
   final Future<String?> Function() _openPath;
   final Future<String?> Function(bool png) _savePath;
   final Future<Directory> Function() _supportDirectory;
+  final DraftStorage? _providedStorage;
+  late DraftRepository drafts;
+  bool _storeReady = false;
+  List<DraftInfo> _catalog = [];
+  late final _autosave = DraftAutosave(
+    flush: () async {
+      if (!_disposed) await invoke('flushDrafts', null);
+    },
+  );
+  bool _disposed = false;
+  Future<void> dispose() async {
+    if (_disposed) return;
+    _disposed = true;
+    _autosave.dispose();
+    await _queue;
+    if (_storeReady) await _flush();
+    _autosave.dispose();
+    if (_storeReady && drafts.storage is FileDraftStorage) {
+      await (drafts.storage as FileDraftStorage).close();
+    }
+  }
+
   Future<void> _queue = Future<void>.value();
   static Future<String?> _pickOpen() async =>
       (await openFile(acceptedTypeGroups: [_ase]))?.path;
@@ -47,9 +76,6 @@ class DesktopBackend {
   }
 
   Directory? _base;
-  File get _recovery =>
-      File('${_base!.path}/recovery-${sessions.active.id}.aseprite');
-  String? get _recoveryError => sessions.active.recoveryError;
   set _recoveryError(String? value) {
     sessions.active.recoveryError = value;
   }
@@ -58,45 +84,44 @@ class DesktopBackend {
     label: 'Aseprite project',
     extensions: ['ase', 'aseprite'],
   );
-  Future<List<File>> _recoveryFiles() async {
-    final files = await _base!
-        .list()
-        .where(
-          (f) =>
-              f is File &&
-              RegExp(
-                r'^recovery(?:-[0-9]+)?\.aseprite$',
-              ).hasMatch(f.path.split('/').last),
-        )
-        .cast<File>()
-        .toList();
-    files.sort((a, b) => a.path.compareTo(b.path));
-    return files;
+
+  Future<void> _refreshDrafts() async {
+    try {
+      _catalog = await drafts.list();
+    } catch (error) {
+      _recoveryError =
+          'Draft storage could not be read: $error. Save a copy now.';
+    }
   }
 
   Future<void> _init() async {
     if (_base != null) return;
     _base = await _supportDirectory();
     await _base!.create(recursive: true);
-    final files = await _recoveryFiles();
-    // Never overwrite an earlier process's recovery before it is recovered.
-    for (final file in files) {
-      final match = RegExp(
-        r'recovery-([0-9]+)\.aseprite$',
-      ).firstMatch(file.path);
-      if (match != null) {
-        final id = int.parse(match.group(1)!);
-        if (id >= sessions.nextId) sessions.nextId = id + 1;
-      }
+    drafts = DraftRepository(_providedStorage ?? FileDraftStorage(_base!));
+    _storeReady = true;
+    await _refreshDrafts();
+    for (final draft in _catalog) {
+      if (draft.id >= sessions.nextId) sessions.nextId = draft.id + 1;
     }
-    if (files.isNotEmpty) {
+    if (_catalog.isNotEmpty) {
       sessions.documents.clear();
-      final first = EditorSession(sessions.nextId++);
-      sessions.configure(first);
-      sessions.documents.add(first);
-      sessions.activeId = first.id;
+      final blank = EditorSession(sessions.nextId++);
+      sessions.configure(blank);
+      sessions.documents.add(blank);
+      sessions.activeId = blank.id;
     }
-    engine.recoveryAvailable = files.isNotEmpty;
+    engine.recoveryAvailable = _catalog.isNotEmpty;
+  }
+
+  Map<String, dynamic> _state() {
+    final opened = sessions.documents.map((s) => s.id).toSet();
+    final available = _catalog.where((d) => !opened.contains(d.id)).toList();
+    return {
+      ...sessions.state(),
+      'drafts': available.map((d) => d.toMap()).toList(),
+      'recoveryAvailable': available.isNotEmpty,
+    };
   }
 
   Future<void> _atomic(File file, Uint8List bytes) async {
@@ -116,26 +141,44 @@ class DesktopBackend {
     return bytes;
   }
 
-  Future<void> _persist() async {
+  Future<void> _persist(EditorSession session) async {
     try {
-      await _atomic(_recovery, _validated());
-      engine.recoveryAvailable = true;
-      _recoveryError = null;
-    } catch (e) {
-      _recoveryError = 'Recovery could not be written: $e. Save a copy now.';
+      final info = await drafts.save(
+        id: session.id,
+        title: session.title,
+        source: session.source ?? session.path,
+        document: session.engine.document,
+      );
+      _catalog.removeWhere((d) => d.id == session.id);
+      _catalog.add(info);
+      session.engine.recoveryAvailable = true;
+      session.recoveryError = null;
+    } catch (error) {
+      session.recoveryError =
+          'Draft could not be written: $error. Save a copy now.';
+    }
+  }
+
+  Future<void> _flush() async {
+    final pending = _autosave.takePending().toSet();
+    // Retry failed writes at an explicit lifecycle/save boundary too.
+    for (final session in sessions.documents) {
+      if (pending.contains(session.id) || session.recoveryError != null) {
+        await _persist(session);
+      }
     }
   }
 
   Future<void> _clearRecovery() async {
+    _autosave.forget(sessions.activeId);
     try {
-      if (await _recovery.exists()) await _recovery.delete();
+      await drafts.delete(sessions.activeId);
+      _catalog.removeWhere((d) => d.id == sessions.activeId);
       engine.recoveryAvailable = false;
       _recoveryError = null;
-    } catch (e) {
-      // The project has already opened/saved successfully. Return its new state
-      // even if stale recovery cleanup fails; never strand UI on old pixels.
+    } catch (error) {
       _recoveryError =
-          'Project is safe, but old recovery could not be removed: $e';
+          'Project is safe, but its old draft could not be removed: $error';
     }
   }
 
@@ -143,6 +186,7 @@ class DesktopBackend {
     String method,
     Map<String, dynamic>? arguments,
   ) {
+    if (_disposed) return Future.error(StateError('Editor has been closed'));
     final result = _queue.then((_) => _invoke(method, arguments));
     _queue = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
     return result;
@@ -161,6 +205,7 @@ class DesktopBackend {
       case 'init':
         sessions.initializePlaceholder(defaultText);
       case 'saveExport':
+        await _flush();
         return ExportFiles().save(args);
       case 'exportSnapshot':
         // Isolate message transfer detaches the model; avoid a second deep copy.
@@ -173,6 +218,8 @@ class DesktopBackend {
         return engine.invoke(method, args);
       case 'open':
       case 'openExternal':
+        // A modal picker blocks this command queue; protect pending edits first.
+        await _flush();
         final chosen = method == 'openExternal'
             ? args['path'] as String?
             : await _openPath();
@@ -195,22 +242,27 @@ class DesktopBackend {
         final decoded = AsepriteCodec.decode(bytes);
         final opened = sessions.add(decoded, title: file.path.split('/').last);
         opened.path = file.path;
+        opened.source = file.path;
+        _autosave.mark(opened.id);
       case 'save':
       case 'saveAs':
         var path = method == 'save' ? _path : null;
         if (path == null) {
+          await _flush();
           final chosen = await _savePath(false);
           if (chosen == null) break;
           path = chosen;
         }
         final bytes = _validated();
-        await _persist();
+        await _persist(sessions.active);
         await _atomic(File(path), bytes);
         _path = path;
+        sessions.active.source = path;
         sessions.active.title = path.split('/').last;
         engine.saved();
         await _clearRecovery();
       case 'exportPng':
+        await _flush();
         final chosen = await _savePath(true);
         if (chosen == null) break;
         final state = engine.state();
@@ -221,106 +273,85 @@ class DesktopBackend {
           height: engine.document.height,
         );
         await _atomic(File(chosen), encoded);
+      case 'flushDrafts':
+        await _flush();
+      case 'listDrafts':
+        await _refreshDrafts();
       case 'recover':
-        final files = await _recoveryFiles();
-        final existing = sessions.documents.map((s) => s.id).toSet();
-        final needed = files.where((f) {
-          final m = RegExp(r'recovery-([0-9]+)\.aseprite$').firstMatch(f.path);
-          return m == null || !existing.contains(int.parse(m.group(1)!));
-        }).length;
+        await _refreshDrafts();
+        final requested = (args['id'] as num?)?.toInt();
+        final opened = sessions.documents.map((s) => s.id).toSet();
+        final candidates = _catalog
+            .where(
+              (d) => requested == null
+                  ? !opened.contains(d.id) && d.error == null
+                  : d.id == requested,
+            )
+            .toList();
         require(
-          sessions.documents.length +
-                  needed -
-                  (sessions.documents.length == 1 &&
-                          sessions.active.placeholder &&
-                          !engine.dirty
-                      ? 1
-                      : 0) <=
-              8,
-          'Close documents before recovering more (8 maximum).',
+          candidates.isNotEmpty,
+          'No readable draft was selected. Stored drafts were kept.',
         );
-        var totalBytes = 0;
-        for (final file in files) {
-          totalBytes += await file.length();
-        }
-        require(
-          totalBytes <= AsepriteCodec.maxFile,
-          'Combined recovery exceeds the 64 MiB safety budget. Original recovery files were retained.',
-        );
-        var decodedPixels = 0;
-        final decoded = <File, SpriteDocument>{};
-        for (final file in files) {
-          if (await file.length() > AsepriteCodec.maxFile) {
-            throw const FormatException('Recovery exceeds 64 MiB');
-          }
-          final doc = AsepriteCodec.decode(await file.readAsBytes());
-          decodedPixels += doc.frames.fold<int>(
-            0,
-            (n, f) =>
-                n + f.cels.fold<int>(0, (n, c) => n + (c?.pixels.length ?? 0)),
-          );
-          require(
-            decodedPixels <= 16 * 1024 * 1024,
-            'Combined recovery exceeds the decoded-pixel budget. Original recovery files were retained.',
-          );
-          decoded[file] = doc;
-        }
-        sessions.validateRecoveryCandidates(
-          decoded.values.toList(),
-          files
-              .map(
-                (f) =>
-                    RegExp(r'recovery-([0-9]+)\.aseprite$').firstMatch(f.path),
-              )
-              .whereType<RegExpMatch>()
-              .map((m) => int.parse(m.group(1)!))
-              .toSet(),
-        );
-        final restored = sessions.restoreDecoded(
-          decoded.entries.map((entry) {
-            final match = RegExp(
-              r'recovery-([0-9]+)\.aseprite$',
-            ).firstMatch(entry.key.path);
-            return MapEntry(
-              match == null ? null : int.parse(match.group(1)!),
-              entry.value,
+        String? remainingIssue;
+        for (final candidate in candidates) {
+          try {
+            require(
+              !opened.contains(candidate.id),
+              'This draft is already open.',
             );
-          }).toList(),
-        );
-        final selectedAfterRestore = sessions.activeId;
-        for (var i = 0; i < restored.length; i++) {
-          sessions.select(restored[i].id);
-          await _persist();
-          final file = files[i];
-          if (_recoveryError == null && file.path != _recovery.path) {
-            await file.delete();
+            final snapshot = await drafts.load(candidate.id);
+            final restored = sessions.restoreDecoded([
+              MapEntry(candidate.id, snapshot.document),
+            ]).single;
+            restored.title = snapshot.info.title;
+            restored.source = snapshot.source;
+            restored.engine.recoveryAvailable = true;
+            sessions.select(restored.id);
+          } catch (error) {
+            if (requested != null) rethrow;
+            remainingIssue =
+                'Some drafts could not be opened and were kept: $error';
           }
         }
-        sessions.select(selectedAfterRestore);
+        if (remainingIssue != null) _recoveryError = remainingIssue;
       case 'discardRecovery':
-        // Explicit startup dismissal may remove old-process copies; never delete
-        // another currently-open document's recovery.
-        final protected = sessions.documents
-            .where((s) => s.id != sessions.activeId)
-            .map((s) => '${_base!.path}/recovery-${s.id}.aseprite')
-            .toSet();
-        for (final file in await _recoveryFiles()) {
-          if (!protected.contains(file.path)) await file.delete();
+        final requested = (args['id'] as num?)?.toInt();
+        final opened = sessions.documents.map((s) => s.id).toSet();
+        require(
+          requested == null || !opened.contains(requested),
+          'Close the open document before discarding its draft.',
+        );
+        for (final candidate in _catalog.toList()) {
+          if (!opened.contains(candidate.id) &&
+              (requested == null || candidate.id == requested)) {
+            await drafts.delete(candidate.id);
+            _catalog.removeWhere((d) => d.id == candidate.id);
+          }
         }
-        engine.recoveryAvailable = false;
       case 'selectDocument':
         sessions.select((args['id'] as num).toInt());
       case 'closeDocument':
         final id = (args['id'] as num).toInt();
         final matches = sessions.documents.where((s) => s.id == id);
         require(matches.isNotEmpty, 'Document is no longer open');
+        final session = matches.first;
+        final keep = args['keepDraft'] == true;
         require(
-          !matches.first.engine.dirty || args['discard'] == true,
-          'Save this document or confirm discarding its unsaved changes.',
+          !session.engine.dirty || args['discard'] == true || keep,
+          'Save this document, keep its draft, or confirm discarding changes.',
         );
-        final file = File('${_base!.path}/recovery-$id.aseprite');
-        if (await file.exists()) await file.delete();
-        sessions.close(id, discard: args['discard'] == true);
+        _autosave.forget(id);
+        if (keep) {
+          await _persist(session);
+          require(
+            session.recoveryError == null,
+            'Draft could not be kept. This document remains open. Save a copy first.',
+          );
+        } else {
+          await drafts.delete(id);
+          _catalog.removeWhere((d) => d.id == id);
+        }
+        sessions.close(id, discard: args['discard'] == true || keep);
         sessions.initializePlaceholder(defaultText);
       case 'clearTagClipboard':
         sessions.clearClipboard();
@@ -332,7 +363,7 @@ class DesktopBackend {
         } else {
           sessions.pasteTag(after: (args['after'] as num?)?.toInt());
         }
-        await _persist();
+        _autosave.mark(sessions.activeId);
       case 'new':
         sessions.add(
           newSprite(
@@ -342,7 +373,7 @@ class DesktopBackend {
           ),
           unsaved: true,
         );
-        await _persist();
+        _autosave.mark(sessions.activeId);
       default:
         engine.invoke(method, args);
         if (method == 'new') {
@@ -350,9 +381,9 @@ class DesktopBackend {
           engine.dirty = true;
         }
         if (['new', 'stroke', 'edit', 'undo', 'redo'].contains(method)) {
-          await _persist();
+          _autosave.mark(sessions.activeId);
         }
     }
-    return sessions.state();
+    return _state();
   }
 }

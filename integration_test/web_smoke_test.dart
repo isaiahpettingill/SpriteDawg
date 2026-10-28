@@ -1,3 +1,4 @@
+import 'browser_drafts.dart';
 // CI uses a disposable Chrome profile. Only picker/download boundaries are
 // injected: drawing, Aseprite import, snapshots and encoders are real browser code.
 import 'dart:convert';
@@ -28,6 +29,7 @@ import 'package:spritedawg/platform/web_backend.dart';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+  registerBrowserDraftTests();
 
   testWidgets('browser defaults persist and apply only to fresh documents', (
     tester,
@@ -43,10 +45,16 @@ void main() {
     final restart = DefaultUserDataStore(read: store.read, write: store.write);
     expect(await restart.load(), raw);
     XFile? picked;
+    final draftStorage = browserTestDraftStorage();
     final backend = DesktopBackend(
+      draftStorage: draftStorage,
       openFile: () async => picked,
       download: (_, _) async {},
     );
+    addTearDown(() async {
+      await backend.dispose();
+      await removeBrowserTestDraftStorage(draftStorage);
+    });
     final editor = Editor(transport: backend.invoke, defaultsStore: restart);
     expect(await editor.call('init'), true, reason: editor.error);
     expect(backend.engine.document.data!.text, raw);
@@ -96,12 +104,18 @@ void main() {
     expect(kIsWeb, true);
     XFile? picked;
     final downloads = <String, Uint8List>{};
+    final draftStorage = browserTestDraftStorage();
     final backend = DesktopBackend(
+      draftStorage: draftStorage,
       openFile: () async => picked,
       download: (name, bytes) async {
         downloads[name] = Uint8List.fromList(bytes);
       },
     );
+    addTearDown(() async {
+      await backend.dispose();
+      await removeBrowserTestDraftStorage(draftStorage);
+    });
     final editor = Editor(transport: backend.invoke);
     await tester.pumpWidget(PocketPixelApp(editor: editor));
     Future<void> settle() async {

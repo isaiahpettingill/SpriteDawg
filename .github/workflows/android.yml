@@ -62,11 +62,22 @@ jobs:
           overwrite: true
       - run: python3 scripts/fetch-fixtures.py
       - name: Check Dart formatting
+        id: format
+        continue-on-error: true
         run: |
           if ! dart format --output=none --set-exit-if-changed lib test; then
             dart format lib test
+            git diff --binary -- lib test > "$RUNNER_TEMP/dart-format.patch"
             git diff --exit-code -- lib test
           fi
+      - name: Preserve formatter corrections on failure
+        if: steps.format.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dart-format-corrections
+          path: ${{ runner.temp }}/dart-format.patch
+          if-no-files-found: ignore
+          retention-days: 3
       - run: flutter analyze
       - run: flutter test --reporter expanded
       - name: Render deterministic Bark brush preview
@@ -110,6 +121,11 @@ jobs:
           git clone https://github.com/TheCyberRonin/ase-parser.git /tmp/spritedawg-ase-parser
           git -C /tmp/spritedawg-ase-parser checkout 550bde9ec5d3dc03571d7ea5acd9612a49c61a80
           node scripts/check-ase-parser.cjs /tmp/spritedawg-ase-parser/Aseprite.js
+      - name: Require committed Dart formatting
+        if: steps.format.outcome == 'failure'
+        run: |
+          echo "Dart formatting differs; apply the dart-format-corrections artifact."
+          exit 1
       - name: Record actual tested checkout tree
         run: python3 scripts/ci_plan.py record
       - uses: actions/upload-artifact@v4
@@ -194,6 +210,7 @@ jobs:
           script: |
             flutter test integration_test/editor_smoke_test.dart -d emulator-5554 --reporter expanded
             flutter test integration_test/export_codec_test.dart -d emulator-5554 --reporter expanded
+            bash scripts/check-draft-restart.sh emulator-5554
   linux:
     needs: [version]
     if: needs.version.outputs.linux == 'true'
