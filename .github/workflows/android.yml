@@ -79,7 +79,18 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
       - run: flutter analyze
-      - run: flutter test --reporter expanded
+      - name: Run Flutter regression suite
+        run: |
+          set -o pipefail
+          flutter test --reporter expanded 2>&1 | tee "$RUNNER_TEMP/flutter-tests.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: flutter-test-output
+          path: ${{ runner.temp }}/flutter-tests.log
+          if-no-files-found: ignore
+          retention-days: 7
+          overwrite: true
       - name: Render deterministic Bark brush preview
         run: dart tool/bark_preview.dart
       - uses: actions/upload-artifact@v4
@@ -109,12 +120,26 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           overwrite: true
+      - name: Capture compact mirroring and expanded palette
+        run: |
+          font="$(fc-match -f '%{file}' sans)"
+          test -f "$font"
+          flutter test test/mirroring_controls_test.dart --dart-define=CAPTURE_UI=true --dart-define="CAPTURE_FONT=$font"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mirroring-ui
+          path: build/ui/mirror-*.png
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
       - name: Capture visual tag workspaces
+        if: success() || failure()
         run: |
           font="$(fc-match -f '%{file}' sans)"
           test -f "$font"
           flutter test test/feature_capture_test.dart --dart-define=CAPTURE_UI=true --dart-define="CAPTURE_FONT=$font"
       - uses: actions/upload-artifact@v4
+        if: success() || failure()
         with:
           name: visual-tag-ui
           path: build/ui/*-tags*.png

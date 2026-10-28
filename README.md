@@ -38,8 +38,17 @@ MIT licensed, no ads, accounts, tracking, networking or broad Android storage pe
 - Bucket fill's existing two-color horizontal/vertical gradients stay inside the connected fill region.
   Spray has adjustable density; blur/jumble have strength controls. Random tools
   use a fixed seed per gesture, and the entire gesture is one undo step.
-- Horizontal/vertical symmetry mirrors around the canvas center. Center-line
-  pixels are not applied repeatedly. In indexed mode, gradients and blur map
+- The compact **Mirroring** button holds horizontal, vertical and both diagonal
+  options without replacing your active drawing tool. Its badge shows the number
+  of enabled axes; **Turn off** clears them. The former checkbox row is now a
+  second row of visible palette swatches on phones, tablets and desktop.
+- Symmetry reflects around the canvas center; diagonal axes are true 45° lines,
+  even on rectangular canvases (not stretched corner-to-corner lines). Reflected
+  pixels outside the canvas are clipped. When width and height have different
+  parity, half-pixel results round toward the top/left once, after the complete
+  transform. Combining axes generates every distinct reflection/rotation, up to
+  eight copies. Coincident copies do not repeatedly apply opacity. In indexed
+  mode, gradients and blur map
   results to the current palette; jumble moves native pixel indices.
 - One finger/stylus draws; two fingers pan/pinch. Adding a second finger **keeps**
   the drawn segment and switches to navigation until all fingers lift.

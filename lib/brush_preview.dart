@@ -2,9 +2,12 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui';
 
+import 'engine/symmetry.dart';
+
 /// Pixel geometry used only for transient previews; the engines remain the
 /// authoritative editors. Fill/blur/jumble intentionally show a cursor instead
-/// of pretending a color stroke is their computed result.
+/// of pretending a color stroke is their computed result. [originX]/[originY]
+/// locate a bounded output window without changing source-coordinate rounding.
 Uint8List previewStrokeMask({
   required int width,
   required int height,
@@ -14,6 +17,10 @@ Uint8List previewStrokeMask({
   bool filled = false,
   bool mirrorX = false,
   bool mirrorY = false,
+  bool mirrorDiagonal = false,
+  bool mirrorAntiDiagonal = false,
+  int originX = 0,
+  int originY = 0,
   int seed = 1,
   int density = 12,
 }) {
@@ -25,13 +32,17 @@ Uint8List previewStrokeMask({
     return randomState >> 16;
   }
 
+  final symmetry = CanvasSymmetry(
+    width: width,
+    height: height,
+    mirrorX: mirrorX,
+    mirrorY: mirrorY,
+    mirrorDiagonal: mirrorDiagonal,
+    mirrorAntiDiagonal: mirrorAntiDiagonal,
+  );
   void pixel(int x, int y) {
-    for (final xx in [x, if (mirrorX) width - 1 - x]) {
-      for (final yy in [y, if (mirrorY) height - 1 - y]) {
-        if (xx >= 0 && yy >= 0 && xx < width && yy < height) {
-          out[yy * width + xx] = 1;
-        }
-      }
+    for (final point in symmetry.points(x - originX, y - originY)) {
+      out[point.$2 * width + point.$1] = 1;
     }
   }
 
@@ -90,8 +101,17 @@ Uint8List previewStrokeMask({
         b = math.max(first.$2, last.$2),
         w = r - l + 1,
         h = b - t + 1;
-    for (var y = math.max(0, t); y <= math.min(height - 1, b); y++) {
-      for (var x = math.max(0, l); x <= math.min(width - 1, r); x++) {
+    final bounds = symmetry.sourceBounds;
+    for (
+      var y = math.max(bounds.$2 + originY, t);
+      y <= math.min(bounds.$4 + originY, b);
+      y++
+    ) {
+      for (
+        var x = math.max(bounds.$1 + originX, l);
+        x <= math.min(bounds.$3 + originX, r);
+        x++
+      ) {
         final dx = 2 * x - l - r, dy = 2 * y - t - b;
         if (tool == 'rectangle' ||
             dx * dx * h * h + dy * dy * w * w <= w * w * h * h) {
@@ -147,6 +167,8 @@ List<Rect> previewStrokeRuns({
   bool filled = false,
   bool mirrorX = false,
   bool mirrorY = false,
+  bool mirrorDiagonal = false,
+  bool mirrorAntiDiagonal = false,
   int seed = 1,
   int density = 12,
 }) {
@@ -164,20 +186,32 @@ List<Rect> previewStrokeRuns({
     minY = math.min(minY, point.dy.floor());
     maxY = math.max(maxY, point.dy.floor());
   }
-  final margin = size ~/ 2 + 1;
-  final left = math.max(0, minX - margin),
-      top = math.max(0, minY - margin),
-      right = math.min(width, maxX + margin + 1),
-      bottom = math.min(height, maxY + margin + 1);
+  final symmetry = CanvasSymmetry(
+    width: width,
+    height: height,
+    mirrorX: mirrorX,
+    mirrorY: mirrorY,
+    mirrorDiagonal: mirrorDiagonal,
+    mirrorAntiDiagonal: mirrorAntiDiagonal,
+  );
+  final margin = size ~/ 2 + 1, bounds = symmetry.sourceBounds;
+  // Preserve off-canvas source pixels that reflect into a rectangular canvas,
+  // but bound the allocation by the canvas, even for very distant pointers.
+  final left = math.max(bounds.$1, minX - margin),
+      top = math.max(bounds.$2, minY - margin),
+      right = math.min(bounds.$3 + 1, maxX + margin + 1),
+      bottom = math.min(bounds.$4 + 1, maxY + margin + 1);
   if (right <= left || bottom <= top) return [];
   final w = right - left, h = bottom - top;
   final mask = previewStrokeMask(
     width: w,
     height: h,
     tool: tool,
-    points: points
-        .map((p) => p - Offset(left.toDouble(), top.toDouble()))
-        .toList(),
+    // Rasterize in original coordinates. Translating first would change Dart's
+    // away-from-zero rounding at negative half-pixels on ellipse outlines.
+    points: points,
+    originX: left,
+    originY: top,
     size: size,
     filled: filled,
     seed: seed,
@@ -185,7 +219,22 @@ List<Rect> previewStrokeRuns({
   );
   final rows = <int, List<(int, int)>>{};
   void add(int y, int start, int end) {
-    (rows[y] ??= []).add((start, end));
+    start = math.max(0, start);
+    end = math.min(width, end);
+    if (y < 0 || y >= height || end <= start) return;
+    // Merge as we go: rotated wide fills must not allocate one interval per
+    // pixel merely to merge all of them at the end.
+    final spans = rows[y] ??= [];
+    var at = 0;
+    while (at < spans.length && spans[at].$2 < start) {
+      at++;
+    }
+    while (at < spans.length && spans[at].$1 <= end) {
+      final span = spans.removeAt(at);
+      start = math.min(start, span.$1);
+      end = math.max(end, span.$2);
+    }
+    spans.insert(at, (start, end));
   }
 
   for (var y = 0; y < h; y++) {
@@ -200,40 +249,29 @@ List<Rect> previewStrokeRuns({
         x++;
       }
       final yy = y + top, a = start + left, b = x + left;
-      add(yy, a, b);
-      if (mirrorX) add(yy, width - b, width - a);
-      if (mirrorY) add(height - 1 - yy, a, b);
-      if (mirrorX && mirrorY) add(height - 1 - yy, width - b, width - a);
-    }
-  }
-  final output = <Rect>[];
-  for (final entry in rows.entries) {
-    final spans = entry.value..sort((a, b) => a.$1.compareTo(b.$1));
-    var start = spans.first.$1, end = spans.first.$2;
-    for (final span in spans.skip(1)) {
-      if (span.$1 <= end) {
-        end = math.max(end, span.$2);
-      } else {
-        output.add(
-          Rect.fromLTWH(
-            start.toDouble(),
-            entry.key.toDouble(),
-            (end - start).toDouble(),
-            1,
-          ),
-        );
-        start = span.$1;
-        end = span.$2;
+      for (final transform in symmetry.transforms) {
+        final from = transform.point(width, height, a, yy);
+        final to = transform.point(width, height, b - 1, yy);
+        if (from.$2 == to.$2) {
+          add(from.$2, math.min(from.$1, to.$1), math.max(from.$1, to.$1) + 1);
+        } else {
+          final top = math.max(0, math.min(from.$2, to.$2));
+          final bottom = math.min(height - 1, math.max(from.$2, to.$2));
+          for (var row = top; row <= bottom; row++) {
+            add(row, from.$1, from.$1 + 1);
+          }
+        }
       }
     }
-    output.add(
-      Rect.fromLTWH(
-        start.toDouble(),
-        entry.key.toDouble(),
-        (end - start).toDouble(),
-        1,
-      ),
-    );
   }
-  return output;
+  return [
+    for (final row in rows.entries)
+      for (final span in row.value)
+        Rect.fromLTWH(
+          span.$1.toDouble(),
+          row.key.toDouble(),
+          (span.$2 - span.$1).toDouble(),
+          1,
+        ),
+  ];
 }

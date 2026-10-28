@@ -74,4 +74,45 @@ class BrushInteropTest {
     }
 }
 
+@Test fun diagonalSymmetryMatchesDartOnSquareAndRectangularCanvases() {
+    val path=System.getenv("SPRITEDAWG_BRUSH_INTEROP_DIR")
+    assumeTrue("Set SPRITEDAWG_BRUSH_INTEROP_DIR to Dart fixtures",path != null)
+    val out=File(path!!)
+    val palette=intArrayOf(0,0x80241c0b.toInt(),0x80654b16.toInt(),0x80ae852a.toInt(),
+        0x80e0bd55.toInt(),0x80ffefae.toInt(),0xff1255ff.toInt())
+    val tools=listOf("pencil","eraser","line","rectangle","ellipse","fill","gradient",
+        "spray","airbrush","blur","jumble","splatter")+paletteTextureTools
+    for((width,height) in listOf(9 to 9,10 to 10,11 to 7,10 to 7)) for(depth in listOf(8,16,32)) for(tool in tools) {
+        val d=Document.create(width,height);d.depth=depth;d.frames[0].palette=palette.copyOf()
+        val c=d.editable(0,0)
+        for(y in 0 until height) for(x in 0 until width) c.pixels[y*width+x]=if(depth==8) 1+(x+2*y)%6
+            else d.drawingColor((((x*17+y*13)%256) shl 24) or (((x*7)%256) shl 16) or
+                (((y*9)%256) shl 8) or (((x+y)*5)%256),0)
+        val e=EditorEngine().apply { replace(d) }
+        e.stroke(mapOf("tool" to tool,"points" to listOf(if(tool=="fill") listOf(1,2) else listOf(-2,1),listOf(width-3,height-3),
+            listOf(width-3,height-3),listOf(2,height-2)),"size" to 5,"seed" to 42,"density" to 12,
+            "strength" to 50,"color" to 0x80ae852aL,"paletteIndex" to 3,"filled" to true,
+            "gradient" to true,"gradientDirection" to "horizontal","secondaryColor" to 0x20808080L,
+            "mirrorDiagonal" to true,"mirrorAntiDiagonal" to (height%2!=0),
+            "mirrorX" to (width%2==0),"mirrorY" to (depth==16)))
+        val name="symmetry-${width}x${height}-$depth-$tool"
+        assertArrayEquals(name,File(out,"$name.rgba").readBytes(),e.state(false)["pixels"] as ByteArray)
+    }
+}
+
+@Test fun negativeCenterEllipseOutlinesMatchDartInBothDragDirections() {
+    val path=System.getenv("SPRITEDAWG_BRUSH_INTEROP_DIR")
+    assumeTrue("Set SPRITEDAWG_BRUSH_INTEROP_DIR to Dart fixtures",path != null)
+    for((width,height,points) in listOf(
+        Triple(5,9,listOf(listOf(-4,0),listOf(-2,3))),
+        Triple(9,5,listOf(listOf(-2,-2),listOf(1,0)))
+    )) for(reverse in listOf(false,true)) {
+        val e=EditorEngine().apply { replace(Document.create(width,height)) }
+        e.stroke(mapOf("tool" to "ellipse","points" to if(reverse) points.reversed() else points,
+            "size" to 1,"color" to 0x80ff0000L,"mirrorDiagonal" to true))
+        val name="negative-outline-${width}x${height}-$reverse"
+        assertArrayEquals(name,File(path!!,"$name.rgba").readBytes(),e.state(false)["pixels"] as ByteArray)
+    }
+}
+
 }
