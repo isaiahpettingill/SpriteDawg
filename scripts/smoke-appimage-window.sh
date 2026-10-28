@@ -19,8 +19,9 @@ done
 if [[ -z "$window" ]]; then cat "$log"; echo 'Packaged Flutter app never rendered a window.' >&2; exit 1; fi
 xprop -id "$window" WM_CLASS >> "$log"
 grep -q 'org.pocketpixel.SpriteDawg' "$log"
-# xprop's built-in icon pretty-printer omits large icons; inspect raw CARDINALs.
-xprop -id "$window" -f _NET_WM_ICON 32c ' = $0+\n' _NET_WM_ICON > "$log.icon"
+# xprop's default 500000-byte cap truncates a 256px icon on 64-bit hosts
+# (65538 native longs need 524304 bytes). Read bounded raw CARDINALs instead.
+xprop -id "$window" -len 1048576 -f _NET_WM_ICON 32c ' = $0+\n' _NET_WM_ICON > "$log.icon"
 python3 scripts/check-window-icon.py verify "$log.icon" "$expected_icon" >> "$log"
 rm "$log.icon"
 assert_original_window() {

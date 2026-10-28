@@ -26,7 +26,7 @@ def verify(text, expected):
         width, height = values[:2]
         count = width * height
         if not (0 < width <= 1024 and 0 < height <= 1024) or len(values) < count + 2:
-            raise ValueError('Invalid window icon dimensions or pixels')
+            raise ValueError(f'Invalid/truncated window icon: {width}x{height}, {len(values) - 2} pixels supplied, {count} required')
         pixels, values = values[2:count + 2], values[count + 2:]
         if any(pixel < 0 or pixel > 0xffffffff for pixel in pixels):
             raise ValueError('Invalid window icon pixel')

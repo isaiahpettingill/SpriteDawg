@@ -22,6 +22,7 @@ icon_spec.loader.exec_module(window_icon)
 
 class AppImagePackagingTests(unittest.TestCase):
     def test_window_icon_requires_exact_nonempty_bundled_pixels(self):
+        self.assertIn('-len 1048576', (ROOT / 'scripts/smoke-appimage-window.sh').read_text())
         expected = window_icon.fingerprint(2, 1, [0xff7466a3, 0xfff5e6c8])
         good = '_NET_WM_ICON(CARDINAL) = 2, 1, 4285818531, 4294305480'
         window_icon.verify(good, expected)
