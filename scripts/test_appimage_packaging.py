@@ -15,7 +15,23 @@ tools = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(tools)
 
 
+icon_spec = importlib.util.spec_from_file_location('window_icon', ROOT / 'scripts/check-window-icon.py')
+window_icon = importlib.util.module_from_spec(icon_spec)
+icon_spec.loader.exec_module(window_icon)
+
+
 class AppImagePackagingTests(unittest.TestCase):
+    def test_window_icon_requires_exact_nonempty_bundled_pixels(self):
+        expected = window_icon.fingerprint(2, 1, [0xff7466a3, 0xfff5e6c8])
+        good = '_NET_WM_ICON(CARDINAL) = 2, 1, 4285818531, 4294305480'
+        window_icon.verify(good, expected)
+        for value in ('_NET_WM_ICON(CARDINAL) = ', 'not found',
+                      '_NET_WM_ICON(CARDINAL) = 2, 1, 1, 2',
+                      '_NET_WM_ICON(CARDINAL) = 2, 1, 1',
+                      '_NET_WM_ICON(CARDINAL) = 0, 0'):
+            with self.assertRaises(ValueError):
+                window_icon.verify(value, expected)
+
     def test_both_architectures_have_versioned_verified_official_tools(self):
         for arch in ('x64', 'arm64'):
             sources = tools.sources(arch)

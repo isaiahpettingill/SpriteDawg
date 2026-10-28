@@ -52,9 +52,7 @@ class LinuxUpdater {
       '${File(Platform.resolvedExecutable).parent.path}/update-spritedawg.sh',
     );
     if (!await script.exists()) {
-      throw StateError(
-        'The updater is available in official Linux AppImages.',
-      );
+      throw StateError('The updater is available in official Linux AppImages.');
     }
     final appimage = Platform.environment['APPIMAGE'];
     final current = File(

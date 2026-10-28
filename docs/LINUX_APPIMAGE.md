@@ -80,7 +80,10 @@ its identity/icon/MIME/updater/version, inspect library resolution, and export w
 the packaged AVIF codec plus independent image decoders. Xvfb/DBus launches the
 actual packaged Flutter app with an empty home and KDE environment, waits for its
 first visible rendered frame, verifies WM_CLASS and a populated window icon, then
-checks repeated launch routing. Extraction-and-run is mandatory; FUSE mounting is
+compares the actual window-icon pixels to the bundled PNG, performs a checksum-verified
+byte-identical replacement of the outer AppImage while its GUI is running, and
+checks repeated launch routing afterward. The live update uses a local mock
+transport, not an unpublished GitHub release. Extraction-and-run is mandatory; FUSE mounting is
 also tested when the runner exposes usable `/dev/fuse`.
 
 These are CI smoke checks, not physical ARM/Linux-phone, full KDE compositor or

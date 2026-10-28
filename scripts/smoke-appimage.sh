@@ -34,6 +34,7 @@ done < <(find "$appdir/usr/bin/lib" -type f -name '*.so*' -print0)
 dart tool/image_export_interop.dart build/appimage-export-interop "$appdir/usr/bin/lib/libflutter_avif.so"
 python3 scripts/check-image-exports.py build/appimage-export-interop --require-avif
 unset LD_LIBRARY_PATH
+python3 scripts/check-window-icon.py prepare art/spritedawg-256.png "$work/expected-icon.json"
 # Flutter shows this GTK window only after its first rendered frame. The KDE
 # environment and empty home test the explicit PNG fallback without theme setup.
 for mode in extraction fuse; do
@@ -46,5 +47,5 @@ for mode in extraction fuse; do
   HOME="$home" XDG_DATA_HOME="$home/data" XDG_CONFIG_HOME="$home/config" XDG_CACHE_HOME="$home/cache" \
     XDG_CURRENT_DESKTOP=KDE GDK_BACKEND=x11 LIBGL_ALWAYS_SOFTWARE=1 \
     dbus-run-session -- xvfb-run -a bash scripts/smoke-appimage-window.sh \
-      "$work/portable with spaces/SpriteDawg.AppImage" "$mode" "build/appimage-ui-$arch-$mode.log"
+      "$work/portable with spaces/SpriteDawg.AppImage" "$mode" "build/appimage-ui-$arch-$mode.log" "$work/expected-icon.json" "$version"
 done
