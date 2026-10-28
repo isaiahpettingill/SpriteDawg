@@ -6,6 +6,7 @@ const paletteTextureTools = {
   'stripes',
   'sphere',
   'knife',
+  'bark',
   'ditherPaint',
   'ditherRetouch',
 };
@@ -159,6 +160,61 @@ Map<int, int> paletteTexturePixels({
     return shade;
   }
 
+  // Canvas-anchored grain: the seed changes the tree, not each dab. A fixed
+  // vertical axis keeps bends, revisits and live-preview extensions seamless.
+  // All distances are in ridge widths, so detail scales with the brush size.
+  int bark(int x, int y) {
+    final cell = math.max(2.0, size / 5);
+    var u = x / cell;
+    final v = y / cell;
+    final knotColumn = (u / 6).floor(), knotRow = (v / 18).floor();
+    for (var ky = knotRow - 1; ky <= knotRow + 1; ky++) {
+      for (var kx = knotColumn - 1; kx <= knotColumn + 1; kx++) {
+        final h = hash(kx + 1709, ky - 313);
+        if (h % 3 != 0) continue;
+        final cx = kx * 6 + 1.5 + ((h >> 3) % 301) / 100;
+        final cy = ky * 18 + 4 + ((h >> 12) % 1001) / 100;
+        final dx = u - cx, dy = (v - cy) / 2.8;
+        final radius = math.sqrt(dx * dx + dy * dy);
+        if (radius < .24) return 0;
+        if (radius < .43) return 1;
+        if (radius < .62) return 3;
+        if (radius < .77) return 0;
+        if (radius < .95) return dx < 0 ? 3 : 2;
+        // Bend nearby grain around the elongated knot instead of stamping
+        // disconnected concentric circles over otherwise straight stripes.
+        if (radius < 2.2) {
+          u += (dx < 0 ? -1 : 1) * (2.2 - radius) * .38;
+        }
+      }
+    }
+    final lane = u.floor(), segment = (v / 7).floor();
+    final t = v / 7 - segment, smooth = t * t * (3 - 2 * t);
+    var distance = double.infinity, side = 0.0, nearest = lane;
+    for (var i = lane - 2; i <= lane + 2; i++) {
+      final start = (hash(i, segment) % 1001) / 1000;
+      final end = (hash(i, segment + 1) % 1001) / 1000;
+      final center = i + .15 + .7 * (start + (end - start) * smooth);
+      final delta = u - center;
+      if (delta.abs() < distance) {
+        distance = delta.abs();
+        side = delta;
+        nearest = i;
+      }
+    }
+    // Uneven fissures, shadowed walls and narrow lit ridges. Short cracks
+    // are coherent segments, never independent random bright pixels.
+    if (distance < .10) return 0;
+    if (distance < .23) return 1;
+    if (side > 0 && distance < .34) return 4;
+    if (side > 0 && distance < .49) return 3;
+    final crack = v / 3 + (hash(nearest, 911) % 100) / 100;
+    if (crack - crack.floor() < .09 && hash(nearest, crack.floor()) % 4 == 0) {
+      return 1;
+    }
+    return 2;
+  }
+
   void emit(int x, int y, int shade) {
     for (final xx in {x, if (mirrorX) width - 1 - x}) {
       for (final yy in {y, if (mirrorY) height - 1 - y}) {
@@ -170,6 +226,7 @@ Map<int, int> paletteTexturePixels({
   }
 
   final clusterCache = <int, int>{};
+  final barkCache = <int, int>{};
   void stamp(int x, int y, double tx, double ty) {
     final left = x - size ~/ 2, top = y - size ~/ 2;
     if (left >= width || top >= height || left + size <= 0 || top + size <= 0) {
@@ -191,6 +248,8 @@ Map<int, int> paletteTexturePixels({
             py * width + px,
             () => cluster(px.toDouble(), py.toDouble(), cell),
           );
+        } else if (tool == 'bark') {
+          shade = barkCache.putIfAbsent(py * width + px, () => bark(px, py));
         } else if (tool == 'stripes') {
           shade = cluster((px * tx + py * ty) / 4, -px * ty + py * tx, cell);
         } else if (tool == 'sphere') {

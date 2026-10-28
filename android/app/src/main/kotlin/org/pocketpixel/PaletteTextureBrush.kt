@@ -2,7 +2,7 @@ package org.pocketpixel
 
 import kotlin.math.*
 
-internal val paletteTextureTools = setOf("metal", "cluster", "stripes", "sphere", "knife", "ditherPaint", "ditherRetouch")
+internal val paletteTextureTools = setOf("metal", "cluster", "stripes", "sphere", "knife", "bark", "ditherPaint", "ditherRetouch")
 
 /** Oklab matrices from Björn Ottosson's public-domain reference (2021-01-25). */
 internal class PaletteLab(argb: Int) {
@@ -81,6 +81,55 @@ internal fun paletteTexturePixels(tool: String, points: List<Pair<Int,Int>>, wid
         }
         return shade
     }
+    // Canvas-anchored vertical grain. The seed changes the tree, not each dab;
+    // overlapping stamps and live-preview extensions sample the same field.
+    fun bark(x: Int, y: Int): Int {
+        val cell = max(2.0, size / 5.0)
+        var u = x / cell
+        val v = y / cell
+        val knotColumn = floor(u / 6).toInt(); val knotRow = floor(v / 18).toInt()
+        for (ky in knotRow - 1..knotRow + 1) {
+            for (kx in knotColumn - 1..knotColumn + 1) {
+                val h = hash(kx + 1709, ky - 313)
+                if (h % 3 != 0L) continue
+                val cx = kx * 6 + 1.5 + ((h ushr 3) % 301) / 100.0
+                val cy = ky * 18 + 4 + ((h ushr 12) % 1001) / 100.0
+                val dx = u - cx; val dy = (v - cy) / 2.8
+                val radius = sqrt(dx * dx + dy * dy)
+                if (radius < .24) return 0
+                if (radius < .43) return 1
+                if (radius < .62) return 3
+                if (radius < .77) return 0
+                if (radius < .95) return if (dx < 0) 3 else 2
+                // Deflect nearby grain around the elongated knot.
+                if (radius < 2.2) {
+                    u += (if (dx < 0) -1 else 1) * (2.2 - radius) * .38
+                }
+            }
+        }
+        val lane = floor(u).toInt(); val segment = floor(v / 7).toInt()
+        val t = v / 7 - segment; val smooth = t * t * (3 - 2 * t)
+        var distance = Double.POSITIVE_INFINITY; var side = 0.0; var nearest = lane
+        for (i in lane - 2..lane + 2) {
+            val start = (hash(i, segment) % 1001) / 1000.0
+            val end = (hash(i, segment + 1) % 1001) / 1000.0
+            val center = i + .15 + .7 * (start + (end - start) * smooth)
+            val delta = u - center
+            if (abs(delta) < distance) {
+                distance = abs(delta)
+                side = delta
+                nearest = i
+            }
+        }
+        if (distance < .10) return 0
+        if (distance < .23) return 1
+        if (side > 0 && distance < .34) return 4
+        if (side > 0 && distance < .49) return 3
+        // Short connected fissures, not independent random bright pixels.
+        val crack = v / 3 + (hash(nearest, 911) % 100) / 100.0
+        if (crack - floor(crack) < .09 && hash(nearest, floor(crack).toInt()) % 4 == 0L) return 1
+        return 2
+    }
     fun emit(x: Int,y: Int,shade: Int) {
         val xs=linkedSetOf(x); val ys=linkedSetOf(y)
         if(mirrorX) xs.add(width-1-x)
@@ -88,6 +137,7 @@ internal fun paletteTexturePixels(tool: String, points: List<Pair<Int,Int>>, wid
         for(xx in xs) for(yy in ys) if(xx in 0 until width && yy in 0 until height) out[yy*width+xx]=ramp[shade.coerceIn(0,4)]
     }
     val clusterCache = mutableMapOf<Int,Int>()
+    val barkCache = mutableMapOf<Int,Int>()
     fun stamp(x: Int,y: Int,tx: Double,ty: Double) {
         val left = x-size/2; val top = y-size/2
         if (left >= width || top >= height || left+size <= 0 || top+size <= 0) return
@@ -101,6 +151,7 @@ internal fun paletteTexturePixels(tool: String, points: List<Pair<Int,Int>>, wid
             val shade=when(tool) {
                 "ditherPaint", "ditherRetouch" -> 2
                 "cluster" -> clusterCache.getOrPut(py*width+px) { cluster(px.toDouble(),py.toDouble(),cell) }
+                "bark" -> barkCache.getOrPut(py*width+px) { bark(px, py) }
                 "stripes" -> cluster((px*tx+py*ty)/4,-px*ty+py*tx,cell)
                 "sphere" -> {
                     val light=(.62*sqrt(max(0.0,1-radius))-.70*ny-.18*nx).coerceIn(-1.0,1.0)

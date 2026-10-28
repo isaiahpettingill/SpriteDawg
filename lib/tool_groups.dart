@@ -22,6 +22,7 @@ const drawingToolGroups = <String, List<DrawingSubtool>>{
     DrawingSubtool('stripes', 'Stripes', Icons.texture),
     DrawingSubtool('sphere', 'Sphere', Icons.circle),
     DrawingSubtool('knife', 'Knife', Icons.architecture),
+    DrawingSubtool('bark', 'Bark', Icons.forest),
   ],
   'eraser': [DrawingSubtool('eraser', 'Eraser', Icons.auto_fix_normal)],
   'fill': [

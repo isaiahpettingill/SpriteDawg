@@ -157,6 +157,7 @@ void main(List<String> arguments) {
     'stripes',
     'sphere',
     'knife',
+    'bark',
     'ditherPaint',
     'ditherRetouch',
   ]) {

@@ -51,6 +51,7 @@ void main() {
     await t.pumpAndSettle();
     for (final choice in [
       ('texture', 'Knife', 'knife'),
+      ('texture', 'Bark', 'bark'),
       ('ink', 'Dither Paint', 'ditherPaint'),
       ('effect', 'Dither Retouch', 'ditherRetouch'),
     ]) {

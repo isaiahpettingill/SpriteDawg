@@ -69,6 +69,14 @@ jobs:
           fi
       - run: flutter analyze
       - run: flutter test --reporter expanded
+      - name: Render deterministic Bark brush preview
+        run: dart tool/bark_preview.dart
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bark-brush-preview
+          path: build/bark-preview.png
+          retention-days: 7
+          overwrite: true
       - name: Capture compact frame panels
         run: |
           font="$(fc-match -f '%{file}' sans)"
