@@ -164,6 +164,7 @@ class _FramePanelState extends State<FramePanel> {
       child: GestureDetector(
         onSecondaryTap: widget.busy ? null : duration,
         child: Focus(
+          skipTraversal: true,
           onKeyEvent: (_, event) {
             if (!widget.busy &&
                 event is KeyDownEvent &&

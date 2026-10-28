@@ -1,5 +1,6 @@
 import 'dart:ui' show PointerDeviceKind;
 
+import 'package:flutter/gestures.dart' show kSecondaryMouseButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -32,10 +33,13 @@ Widget _panel({
   Object documentId = 1,
   bool busy = false,
   double width = 320,
+  TextDirection direction = TextDirection.ltr,
   int duration = 100,
   ValueChanged<int>? onSelect,
   ValueChanged<int>? onDuration,
 }) => MaterialApp(
+  builder: (context, child) =>
+      Directionality(textDirection: direction, child: child!),
   home: Scaffold(
     body: Align(
       alignment: Alignment.topLeft,
@@ -241,12 +245,54 @@ void main() {
     final timed = <int>[];
     await tester.pumpWidget(_panel(count: 2, onDuration: timed.add));
     await tester.pumpAndSettle();
-    final ink = find.descendant(of: _card(1), matching: find.byType(InkWell));
+    final ink = find.descendant(of: _card(1), matching: find.byType(Ink));
     Focus.of(tester.element(ink)).requestFocus();
     await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.contextMenu);
     await tester.pumpAndSettle();
     expect(timed, [1]);
+  });
+
+  testWidgets('Tab reaches one actionable target per frame', (tester) async {
+    final selected = <int>[];
+    await tester.pumpWidget(_panel(count: 2, onSelect: selected.add));
+    await tester.pumpAndSettle();
+    FocusNode focusFor(int index) => Focus.of(
+      tester.element(
+        find.descendant(of: _card(index), matching: find.byType(Ink)),
+      ),
+    );
+    focusFor(0).requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(selected, [0]);
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    expect(FocusManager.instance.primaryFocus, focusFor(1));
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pump();
+    expect(selected, [0, 1, 1]);
+    await tester.pumpWidget(_panel(count: 2, busy: true));
+    await tester.pumpAndSettle();
+    expect(focusFor(0).canRequestFocus, isFalse);
+    expect(focusFor(1).canRequestFocus, isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('RTL reveal reaches lazy middle and end frames', (tester) async {
+    await tester.pumpWidget(_panel(frame: 50, direction: TextDirection.rtl));
+    await tester.pumpAndSettle();
+    _expectVisible(tester, 50);
+    await tester.pumpWidget(_panel(frame: 999, direction: TextDirection.rtl));
+    await tester.pumpAndSettle();
+    _expectVisible(tester, 999);
+    await tester.pumpWidget(_panel(frame: 0, direction: TextDirection.rtl));
+    await tester.pumpAndSettle();
+    _expectVisible(tester, 0);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('Busy frames cannot select or change duration', (tester) async {
