@@ -32,7 +32,10 @@ MIT licensed, no ads, accounts, tracking, networking or broad Android storage pe
   result before release; the gesture remains one undo step. RGB transparency blends
   source-over without repeatedly darkening overlapping ordinary brush stamps.
 - Undo/redo; visible/editable layer safeguards; layers, opacity and ordering.
-- Frames, duration, duplication and animation playback with direction/repeat tags.
+- Compact frame navigation, duplication and animation playback with direction/repeat tags.
+  Opening **Frames** brings the current frame into view. Set timing through
+  **Frame options → Duration…**, or long-press/right-click a frame; timing stays
+  out of the strip so there is more room for drawing.
 - Visual tag editing keeps frame thumbnails visible with the selected range and
   current frame marked. Rename, adjust endpoints or duplicate quickly; browse tile
   variants without starting playback, or explicitly preview an animation. Tags
