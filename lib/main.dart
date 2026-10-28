@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'editor.dart';
+import 'frame_panel.dart';
 import 'export_dialog.dart';
 import 'pixel_canvas.dart';
 import 'canvas_view_mode.dart';
@@ -892,6 +893,7 @@ class _EditorScreenState extends State<EditorScreen>
                   tools: toolRail(),
                   layers: layerPanel(),
                   timeline: wideTimeline(),
+                  timelineHeight: panel == 'tags' ? 260 : 168,
                   mobileBody: Column(
                     children: [
                       SizedBox(
@@ -955,7 +957,9 @@ class _EditorScreenState extends State<EditorScreen>
                       ),
                       if (panel != null && !compactTags)
                         SizedBox(
-                          height: panel == 'tags'
+                          height: panel == 'frames'
+                              ? 120
+                              : panel == 'tags'
                               ? 280
                               : compactHeight
                               ? (MediaQuery.sizeOf(context).height - 210)
@@ -1735,93 +1739,30 @@ class _EditorScreenState extends State<EditorScreen>
     );
   }
 
-  Widget framePanel() {
+  Widget framePanel() => FramePanel(
+    frame: e.frame,
+    durations: [for (final frame in e.maps('frames')) frame['duration'] as int],
+    documentId: e.state['documentId'],
+    busy: e.busy,
+    onSelect: (index) => e.call('select', {'frame': index}),
+    onDuration: frameDuration,
+    onAdd: () => edit('addFrame'),
+    onDuplicate: () => edit('duplicateFrame'),
+    onDelete: () => edit('deleteFrame'),
+  );
+
+  Future<void> frameDuration(int index) async {
+    if (e.busy) return;
+    stop();
+    if (!await e.call('select', {'frame': index}) || !mounted) return;
     final frames = e.maps('frames');
-    return Material(
-      color: const Color(0xff1c2331),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              const SizedBox(width: 12),
-              Text('Frame ${e.frame + 1} / ${frames.length}'),
-              const Spacer(),
-              IconButton(
-                tooltip: 'Add blank frame',
-                onPressed: e.busy ? null : () => edit('addFrame'),
-                icon: const Icon(Icons.add),
-              ),
-              IconButton(
-                tooltip: 'Duplicate frame',
-                onPressed: e.busy ? null : () => edit('duplicateFrame'),
-                icon: const Icon(Icons.copy),
-              ),
-              IconButton(
-                tooltip: 'Delete frame',
-                onPressed: e.busy || frames.length < 2
-                    ? null
-                    : () => edit('deleteFrame'),
-                icon: const Icon(Icons.delete_outline),
-              ),
-            ],
-          ),
-          Expanded(
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.all(12),
-              itemCount: frames.length,
-              separatorBuilder: (_, i) => const SizedBox(width: 8),
-              itemBuilder: (context, index) => InkWell(
-                onTap: e.busy ? null : () => e.call('select', {'frame': index}),
-                onLongPress: e.busy
-                    ? null
-                    : () async {
-                        await e.call('select', {'frame': index});
-                        await number(
-                          'Frame duration (ms)',
-                          frames[index]['duration'] as int,
-                          1,
-                          65535,
-                          (n) => edit('frameDuration', {'duration': n}),
-                        );
-                      },
-                child: Container(
-                  width: 84,
-                  decoration: BoxDecoration(
-                    color: index == e.frame
-                        ? Theme.of(context).colorScheme.primaryContainer
-                        : const Color(0xff293244),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: index == e.frame
-                          ? Theme.of(context).colorScheme.primary
-                          : Colors.transparent,
-                    ),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        '${index + 1}',
-                        style: const TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      Text('${frames[index]['duration']} ms'),
-                      const SizedBox(height: 4),
-                      const Text(
-                        'Hold to time',
-                        style: TextStyle(fontSize: 10),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
+    if (index >= frames.length) return;
+    await number(
+      'Frame duration (ms)',
+      frames[index]['duration'] as int,
+      1,
+      65535,
+      (n) => edit('frameDuration', {'duration': n}),
     );
   }
 
