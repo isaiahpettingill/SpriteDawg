@@ -141,6 +141,7 @@ class _PixelCanvasState extends State<PixelCanvas> {
     'stripes',
     'sphere',
     'knife',
+    'bark',
     'ditherPaint',
     'ditherRetouch',
   }.contains(widget.tool);
@@ -748,6 +749,7 @@ class _CanvasPainter extends CustomPainter {
         'stripes',
         'sphere',
         'knife',
+        'bark',
         'ditherPaint',
         'ditherRetouch',
       }.contains(tool)) {

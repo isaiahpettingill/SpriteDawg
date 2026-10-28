@@ -64,6 +64,14 @@ jobs:
       - run: dart format --output=none --set-exit-if-changed lib test
       - run: flutter analyze
       - run: flutter test --reporter expanded
+      - name: Render deterministic Bark brush preview
+        run: dart tool/bark_preview.dart
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bark-brush-preview
+          path: build/bark-preview.png
+          retention-days: 7
+          overwrite: true
       - name: Verify exports with independent Pillow decoders
         run: |
           python3 -m pip install --disable-pip-version-check Pillow==12.3.0

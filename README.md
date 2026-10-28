@@ -12,8 +12,13 @@ MIT licensed, no ads, accounts, tracking, networking or broad Android storage pe
   ellipses, dispersed spray, soft airbrush, blur, jumble and pan. The eraser has its own eraser icon.
 - Long-hold a toolbar group to choose a subtool (right-click or the Menu key on desktop).
   Tap to use its last-selected tool; groups include ink, fill/gradient, shapes and effects.
-  Filled rectangles/ellipses live with the outline shapes. Seven touch-sized group buttons
+  Filled rectangles/ellipses live with the outline shapes. Eight touch-sized group buttons
   wrap on very narrow phones rather than hiding tools in a long scrolling strip.
+- The texture group includes **Bark**: irregular vertical grooves, lit ridges and
+  occasional knots, using perceptually related shades from your chosen palette.
+  Its grain is canvas-anchored throughout a gesture, including bends and repeated
+  dabs; brush size scales the grain. It shares the texture tools' live preview,
+  symmetry, exact indexed-color handling and single-step undo.
 - The dedicated **Gradient** subtool paints a linear gradient across the **whole active
   layer's canvas area**. Choose Start and End colors (including alpha), then drag to set
   direction and endpoint positions; outside the endpoints the respective color is clamped.

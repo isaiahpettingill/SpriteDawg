@@ -118,6 +118,7 @@ class _EditorScreenState extends State<EditorScreen>
     'stripes': (Icons.texture, 'Stripes'),
     'sphere': (Icons.circle, 'Sphere'),
     'knife': (Icons.architecture, 'Knife'),
+    'bark': (Icons.forest, 'Bark'),
     'ditherPaint': (Icons.gradient, 'Dither Paint'),
     'ditherRetouch': (Icons.grid_4x4, 'Dither Retouch'),
     'pan': (Icons.pan_tool_alt, 'Pan'),
@@ -442,6 +443,7 @@ class _EditorScreenState extends State<EditorScreen>
     'stripes': 12,
     'sphere': 12,
     'knife': 12,
+    'bark': 12,
     'ditherPaint': 12,
     'ditherRetouch': 12,
   };

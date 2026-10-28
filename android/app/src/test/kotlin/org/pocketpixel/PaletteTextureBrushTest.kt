@@ -4,7 +4,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PaletteTextureBrushTest {
-    private val tools = listOf("metal", "cluster", "stripes", "sphere", "knife")
+    private val tools = listOf("metal", "cluster", "stripes", "sphere", "knife", "bark")
     private val palette = intArrayOf(0, 0xff241c0b.toInt(), 0xff654b16.toInt(), 0xffae852a.toInt(), 0xffe0bd55.toInt(), 0xffffefae.toInt(), 0xff1255ff.toInt())
     private fun canvas(depth: Int = 32): EditorEngine {
         val d = Document.create(32, 32)
@@ -178,6 +178,47 @@ class PaletteTextureBrushTest {
         val se=pixelMap("sphere",east);val sw=pixelMap("sphere",west)
         assertTrue(se[14*32+16]!!>se[18*32+16]!!)
         assertTrue(sw[14*32+16]!!>sw[18*32+16]!!)
+    }
+
+    @Test fun barkIsStableAcrossRevisitsAndPreviewExtensions() {
+        fun raster(points: List<Pair<Int,Int>>, seed: Long = 421L) =
+            paletteTexturePixels("bark", points, 96, 96, 24, listOf(0,1,2,3,4), seed)
+        val first = raster(listOf(16 to 24, 64 to 24))
+        val extended = raster(listOf(16 to 24, 64 to 24, 64 to 64, 16 to 64, 16 to 24))
+        assertEquals(first, raster(listOf(16 to 24, 16 to 24, 32 to 24, 48 to 24, 64 to 24)))
+        assertEquals(first, raster(listOf(64 to 24, 16 to 24)))
+        for ((pixel, shade) in first) assertEquals("Extended preview must not repaint prior grain", shade, extended[pixel])
+        assertNotEquals(first, raster(listOf(16 to 24, 64 to 24), 422L))
+    }
+
+    @Test fun barkHasLongitudinalIrregularGrainRatherThanSpecklesOrStripes() {
+        val points = listOf(16 to 16, 80 to 16, 80 to 40, 16 to 40,
+            16 to 64, 80 to 64, 80 to 80, 16 to 80)
+        val pixels = paletteTexturePixels("bark", points, 96, 96, 32, listOf(0,1,2,3,4), 421L)
+        var horizontalChanges = 0; var verticalChanges = 0
+        for (y in 16 until 79) for (x in 16 until 79) {
+            val shade = pixels[y*96+x]
+            assertNotNull(shade)
+            if (shade != pixels[y*96+x+1]) horizontalChanges++
+            if (shade != pixels[(y+1)*96+x]) verticalChanges++
+        }
+        assertEquals(setOf(0,1,2,3,4), pixels.values.toSet())
+        assertTrue("Furrows should vary along their length", verticalChanges > 0)
+        assertTrue("Grain should run vertically, not speckle", verticalChanges * 2 < horizontalChanges)
+        assertNotEquals(pixels, paletteTexturePixels("stripes", points, 96, 96, 32, listOf(0,1,2,3,4), 421L))
+    }
+
+    @Test fun barkIncludesSeededElongatedKnotWithDarkCoreAndLitRim() {
+        val pixels = paletteTexturePixels("bark", listOf(61 to 62), 96, 96, 32, listOf(0,1,2,3,4), 17L)
+        // This seed places a knot at (61.056, 62.272). Probe its core, wall,
+        // lit inner rim and dark outer ring in both axes, not just coverage.
+        assertEquals(0, pixels[62*96+61])
+        assertEquals(1, pixels[62*96+63])
+        assertEquals(3, pixels[62*96+64])
+        assertEquals(0, pixels[62*96+57])
+        assertEquals(1, pixels[69*96+61])
+        assertEquals(3, pixels[72*96+61])
+        assertEquals(0, pixels[75*96+61])
     }
 
 }
