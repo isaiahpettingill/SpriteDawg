@@ -61,9 +61,26 @@ jobs:
           retention-days: 7
           overwrite: true
       - run: python3 scripts/fetch-fixtures.py
-      - run: dart format --output=none --set-exit-if-changed lib test
+      - name: Check Dart formatting
+        run: |
+          if ! dart format --output=none --set-exit-if-changed lib test; then
+            dart format lib test
+            git diff --exit-code
+          fi
       - run: flutter analyze
       - run: flutter test --reporter expanded
+      - name: Capture compact frame panels
+        run: |
+          font="$(fc-match -f '%{file}' sans)"
+          test -f "$font"
+          flutter test test/frame_panel_capture_test.dart --dart-define=CAPTURE_UI=true --dart-define="CAPTURE_FONT=$font"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frame-panel-ui
+          path: build/ui/frames-*.png
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
       - name: Verify exports with independent Pillow decoders
         run: |
           python3 -m pip install --disable-pip-version-check Pillow==12.3.0

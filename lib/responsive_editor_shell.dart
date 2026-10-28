@@ -11,9 +11,11 @@ class ResponsiveEditorShell extends StatelessWidget {
     required this.layers,
     required this.timeline,
     this.documentTabs,
+    this.timelineHeight = 260,
   });
   final Widget mobileBody, canvas, tools, layers, timeline;
   final Widget? documentTabs;
+  final double timelineHeight;
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, box) {
@@ -41,7 +43,7 @@ class ResponsiveEditorShell extends StatelessWidget {
                           children: [
                             Expanded(child: canvas),
                             const Divider(height: 1),
-                            SizedBox(height: 260, child: timeline),
+                            SizedBox(height: timelineHeight, child: timeline),
                           ],
                         ),
                       ),
