@@ -65,7 +65,7 @@ Widget _panel({
 EditorEngine _engine({int count = 80, int frame = 60}) {
   final engine = EditorEngine()..document = SpriteDocument.create(4, 4);
   for (var i = 1; i < count; i++) {
-    engine.document.frames.add(Frame(cels: [], duration: 100 + i));
+    engine.document.frames.add(Frame(cels: [null], duration: 100 + i));
   }
   engine.frame = frame;
   return engine;
@@ -319,6 +319,7 @@ void main() {
     final editor = _editor(engine);
     await tester.pumpWidget(PocketPixelApp(editor: editor));
     await tester.pumpAndSettle();
+    expect(editor.error, isNull);
     await tester.tap(find.text('Frames'));
     await tester.pumpAndSettle();
     _expectVisible(tester, 60);
@@ -329,6 +330,7 @@ void main() {
     await tester.pumpAndSettle();
     await editor.call('select', {'frame': 79});
     await tester.pumpAndSettle();
+    expect(editor.error, isNull);
     await tester.tap(find.text('Frames'));
     await tester.pumpAndSettle();
     _expectVisible(tester, 79);
@@ -350,6 +352,7 @@ void main() {
     final editor = _editor(engine);
     await tester.pumpWidget(PocketPixelApp(editor: editor));
     await tester.pumpAndSettle();
+    expect(editor.error, isNull);
     await tester.tap(find.text('Frames'));
     await tester.pumpAndSettle();
     await tester.drag(_strip, const Offset(600, 0));
@@ -378,8 +381,10 @@ void main() {
   ) async {
     _phone(tester);
     final engine = _engine(count: 3, frame: 1);
-    await tester.pumpWidget(PocketPixelApp(editor: _editor(engine)));
+    final editor = _editor(engine);
+    await tester.pumpWidget(PocketPixelApp(editor: editor));
     await tester.pumpAndSettle();
+    expect(editor.error, isNull);
     await tester.tap(find.text('Frames'));
     await tester.pumpAndSettle();
     final original = engine.document.frames[1].duration;
