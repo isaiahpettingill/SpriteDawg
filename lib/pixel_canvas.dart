@@ -9,6 +9,7 @@ import 'package:flutter/gestures.dart' show PointerScrollEvent;
 
 import 'editor.dart';
 import 'brush_preview.dart';
+import 'engine/symmetry.dart';
 import 'canvas_view_mode.dart';
 
 class PixelCanvas extends StatefulWidget {
@@ -26,6 +27,8 @@ class PixelCanvas extends StatefulWidget {
     this.filled = false,
     this.mirrorX = false,
     this.mirrorY = false,
+    this.mirrorDiagonal = false,
+    this.mirrorAntiDiagonal = false,
     this.density = 12,
     this.seed = 1,
     this.strength = 50,
@@ -37,7 +40,7 @@ class PixelCanvas extends StatefulWidget {
   final String tool;
   final int color, brush, fitToken;
   final bool grid, onion;
-  final bool filled, mirrorX, mirrorY;
+  final bool filled, mirrorX, mirrorY, mirrorDiagonal, mirrorAntiDiagonal;
   final int density, seed, strength;
   final Map<String, dynamic> previewOptions;
   final ValueChanged<int> onPick;
@@ -100,6 +103,8 @@ class _PixelCanvasState extends State<PixelCanvas> {
         widget.filled,
         widget.mirrorX,
         widget.mirrorY,
+        widget.mirrorDiagonal,
+        widget.mirrorAntiDiagonal,
         widget.density,
         _strokeSeed,
         widget.strength,
@@ -188,6 +193,8 @@ class _PixelCanvasState extends State<PixelCanvas> {
         'strength': widget.strength,
         'mirrorX': widget.mirrorX,
         'mirrorY': widget.mirrorY,
+        'mirrorDiagonal': widget.mirrorDiagonal,
+        'mirrorAntiDiagonal': widget.mirrorAntiDiagonal,
       });
       final bytes = result?['pixels'];
       if (bytes is Uint8List && bytes.length == width * height * 4) {
@@ -293,6 +300,8 @@ class _PixelCanvasState extends State<PixelCanvas> {
         old.filled != widget.filled ||
         old.mirrorX != widget.mirrorX ||
         old.mirrorY != widget.mirrorY ||
+        old.mirrorDiagonal != widget.mirrorDiagonal ||
+        old.mirrorAntiDiagonal != widget.mirrorAntiDiagonal ||
         old.density != widget.density ||
         old.strength != widget.strength) {
       _stopSpraying();
@@ -480,6 +489,8 @@ class _PixelCanvasState extends State<PixelCanvas> {
                 widget.filled,
                 widget.mirrorX,
                 widget.mirrorY,
+                widget.mirrorDiagonal,
+                widget.mirrorAntiDiagonal,
                 widget.density,
                 _strokeSeed,
                 widget.strength,
@@ -509,6 +520,8 @@ class _CanvasPainter extends CustomPainter {
     this.filled,
     this.mirrorX,
     this.mirrorY,
+    this.mirrorDiagonal,
+    this.mirrorAntiDiagonal,
     this.density,
     this.seed,
     this.strength,
@@ -528,7 +541,7 @@ class _CanvasPainter extends CustomPainter {
   final List<Offset> points;
   final String tool;
   final int color, brush;
-  final bool filled, mirrorX, mirrorY;
+  final bool filled, mirrorX, mirrorY, mirrorDiagonal, mirrorAntiDiagonal;
   final int density, seed, strength;
   @override
   void paint(Canvas canvas, Size size) {
@@ -624,6 +637,27 @@ class _CanvasPainter extends CustomPainter {
         canvas.drawLine(
           Offset(0, editor.height / 2),
           Offset(editor.width.toDouble(), editor.height / 2),
+          p,
+        );
+      }
+    }
+    if (mirrorDiagonal || mirrorAntiDiagonal) {
+      final center = Offset(editor.width / 2, editor.height / 2);
+      final radius = math.min(editor.width, editor.height) / 2;
+      final p = Paint()
+        ..color = const Color(0x9989a7ff)
+        ..strokeWidth = 1 / scale;
+      if (mirrorDiagonal) {
+        canvas.drawLine(
+          center - Offset(radius, radius),
+          center + Offset(radius, radius),
+          p,
+        );
+      }
+      if (mirrorAntiDiagonal) {
+        canvas.drawLine(
+          center - Offset(radius, -radius),
+          center + Offset(radius, -radius),
           p,
         );
       }
@@ -762,25 +796,30 @@ class _CanvasPainter extends CustomPainter {
           ..color = Colors.white
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1 / scale;
-        for (final x in [
-          point.dx.floor(),
-          if (mirrorX) editor.width - 1 - point.dx.floor(),
-        ]) {
-          for (final y in [
-            point.dy.floor(),
-            if (mirrorY) editor.height - 1 - point.dy.floor(),
-          ]) {
-            final size = tool == 'fill' ? 1 : brush;
-            canvas.drawRect(
-              Rect.fromLTWH(
-                (x - size ~/ 2).toDouble(),
-                (y - size ~/ 2).toDouble(),
-                size.toDouble(),
-                size.toDouble(),
-              ),
-              p,
-            );
-          }
+        final symmetry = CanvasSymmetry(
+          width: editor.width,
+          height: editor.height,
+          mirrorX: mirrorX,
+          mirrorY: mirrorY,
+          mirrorDiagonal: mirrorDiagonal,
+          mirrorAntiDiagonal: mirrorAntiDiagonal,
+        );
+        final size = tool == 'fill' ? 1 : brush;
+        final left = point.dx.floor() - size ~/ 2;
+        final top = point.dy.floor() - size ~/ 2;
+        final cursors = <Rect>{};
+        for (final transform in symmetry.transforms) {
+          final a = transform.point(editor.width, editor.height, left, top);
+          final b = transform.point(
+            editor.width, editor.height, left + size - 1, top + size - 1,
+          );
+          final cursor = Rect.fromLTRB(
+            math.min(a.$1, b.$1).toDouble(),
+            math.min(a.$2, b.$2).toDouble(),
+            (math.max(a.$1, b.$1) + 1).toDouble(),
+            (math.max(a.$2, b.$2) + 1).toDouble(),
+          );
+          if (cursors.add(cursor)) canvas.drawRect(cursor, p);
         }
       } else {
         final runs = previewStrokeRuns(
@@ -792,6 +831,8 @@ class _CanvasPainter extends CustomPainter {
           filled: filled,
           mirrorX: mirrorX,
           mirrorY: mirrorY,
+          mirrorDiagonal: mirrorDiagonal,
+          mirrorAntiDiagonal: mirrorAntiDiagonal,
           seed: seed,
           density: density,
         );

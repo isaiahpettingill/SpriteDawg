@@ -8,6 +8,7 @@ import 'default_user_data.dart';
 import 'palette_operations.dart';
 import 'palette_texture_brush.dart';
 import 'splatter_brush.dart';
+import 'symmetry.dart';
 
 /// Portable Linux editing backend with exactly the Android channel contract.
 /// File picking, atomic recovery and PNG encoding belong to the platform adapter.
@@ -295,6 +296,8 @@ class EditorEngine {
         strength = _n(a, 'strength', 50).clamp(1, 100);
     final mirrorX = a['mirrorX'] == true,
         mirrorY = a['mirrorY'] == true,
+        mirrorDiagonal = a['mirrorDiagonal'] == true,
+        mirrorAntiDiagonal = a['mirrorAntiDiagonal'] == true,
         paletteIndex = a['paletteIndex'];
     if ((document.depth == 8 || paletteTextureTools.contains(tool)) &&
         paletteIndex != null) {
@@ -305,6 +308,14 @@ class EditorEngine {
         'Invalid palette index',
       );
     }
+    final symmetry = CanvasSymmetry(
+      width: document.width,
+      height: document.height,
+      mirrorX: mirrorX,
+      mirrorY: mirrorY,
+      mirrorDiagonal: mirrorDiagonal,
+      mirrorAntiDiagonal: mirrorAntiDiagonal,
+    );
     var randomState = _n(a, 'seed', 1) & 0xffffffff;
     int random() {
       randomState = (1664525 * randomState + 1013904223) & 0xffffffff;
@@ -332,6 +343,8 @@ class EditorEngine {
         seed: _n(a, 'seed', 1),
         mirrorX: mirrorX,
         mirrorY: mirrorY,
+        mirrorDiagonal: mirrorDiagonal,
+        mirrorAntiDiagonal: mirrorAntiDiagonal,
       );
       final changes = <int, int>{};
       for (final entry in pixels.entries) {
@@ -391,6 +404,8 @@ class EditorEngine {
         seed: _n(a, 'seed', 1),
         mirrorX: mirrorX,
         mirrorY: mirrorY,
+        mirrorDiagonal: mirrorDiagonal,
+        mirrorAntiDiagonal: mirrorAntiDiagonal,
       );
       if (pixels.isEmpty) return;
       final d = document, source = document.resolved(frame, layer);
@@ -478,19 +493,13 @@ class EditorEngine {
       }
 
       void pixel(int x, int y, int value, [Set<int>? stamp]) {
-        final xs = [x, if (mirrorX) d.width - 1 - x],
-            ys = [y, if (mirrorY) d.height - 1 - y];
-        for (final yy in ys.toSet()) {
-          for (final xx in xs.toSet()) {
-            if (xx >= 0 && yy >= 0 && xx < d.width && yy < d.height) {
-              final i = (yy - c.y) * c.width + xx - c.x;
-              if (stamp != null && !stamp.add(i)) continue;
-              if (effect) {
-                covered.add(i);
-              } else {
-                paint(i, value);
-              }
-            }
+        for (final (xx, yy) in symmetry.points(x, y)) {
+          final i = (yy - c.y) * c.width + xx - c.x;
+          if (stamp != null && !stamp.add(i)) continue;
+          if (effect) {
+            covered.add(i);
+          } else {
+            paint(i, value);
           }
         }
       }
@@ -531,18 +540,13 @@ class EditorEngine {
               if (d.depth == 8) {
                 // Quantize the blended result rather than replacing an index
                 // with a partially transparent palette entry.
-                for (final yy in {py, if (mirrorY) d.height - 1 - py}) {
-                  for (final xx in {px, if (mirrorX) d.width - 1 - px}) {
-                    if (xx < 0 || yy < 0 || xx >= d.width || yy >= d.height) {
-                      continue;
-                    }
-                    final i = (yy - c.y) * c.width + xx - c.x;
-                    if (!stamp.add(i)) continue;
-                    c.pixels[i] = d.drawingColor(
-                      over(d.display(c.pixels[i], frame, layer), ink),
-                      frame,
-                    );
-                  }
+                for (final (xx, yy) in symmetry.points(px, py)) {
+                  final i = (yy - c.y) * c.width + xx - c.x;
+                  if (!stamp.add(i)) continue;
+                  c.pixels[i] = d.drawingColor(
+                    over(d.display(c.pixels[i], frame, layer), ink),
+                    frame,
+                  );
                 }
               } else {
                 pixel(px, py, d.drawingColor(ink, frame), stamp);
@@ -626,17 +630,14 @@ class EditorEngine {
           }
         }
       } else if (tool == 'fill') {
-        final seeds = <(int, int, bool, bool)>[
-          (first.$1, first.$2, false, false),
-          if (mirrorX) (d.width - 1 - first.$1, first.$2, true, false),
-          if (mirrorY) (first.$1, d.height - 1 - first.$2, false, true),
-          if (mirrorX && mirrorY)
-            (d.width - 1 - first.$1, d.height - 1 - first.$2, true, true),
-        ];
         final visited = Uint8List(c.pixels.length),
             region = Uint32List(d.width * d.height);
-        for (final seed in seeds) {
-          final x = seed.$1, y = seed.$2;
+        for (final transform in symmetry.transforms) {
+          final (x, y) = transform.point(d.width, d.height, first.$1, first.$2);
+          final (dx, dy) = direction == 'horizontal'
+              ? transform.vector(1, 0)
+              : transform.vector(0, 1);
+          final horizontal = dx != 0, reversed = dx < 0 || dy < 0;
           if (x < 0 || y < 0 || x >= d.width || y >= d.height) continue;
           final start = (y - c.y) * c.width + x - c.x, old = original[start];
           if (visited[start] != 0) continue;
@@ -667,7 +668,7 @@ class EditorEngine {
             if (i >= c.width) push(i - c.width);
             if (i < c.pixels.length - c.width) push(i + c.width);
           }
-          final denominator = direction == 'horizontal'
+          final denominator = horizontal
                   ? maxX - minX
                   : maxY - minY,
               mapped = <int, int>{};
@@ -675,11 +676,10 @@ class EditorEngine {
             final i = region[n];
             var value = v;
             if (gradient && denominator > 0) {
-              var p = direction == 'horizontal'
+              var p = horizontal
                   ? c.x + i % c.width - minX
                   : c.y + i ~/ c.width - minY;
-              if ((direction == 'horizontal' && seed.$3) ||
-                  (direction == 'vertical' && seed.$4)) {
+              if (reversed) {
                 p = denominator - p;
               }
               value = mapped.putIfAbsent(p, () {
@@ -705,14 +705,15 @@ class EditorEngine {
             bottom = math.max(first.$2, last.$2),
             w = right - left + 1,
             h = bottom - top + 1;
+        final bounds = symmetry.sourceBounds;
         for (
-          var y = math.max(0, top);
-          y <= math.min(d.height - 1, bottom);
+          var y = math.max(bounds.$2, top);
+          y <= math.min(bounds.$4, bottom);
           y++
         ) {
           for (
-            var x = math.max(0, left);
-            x <= math.min(d.width - 1, right);
+            var x = math.max(bounds.$1, left);
+            x <= math.min(bounds.$3, right);
             x++
           ) {
             final dx = 2 * x - left - right, dy = 2 * y - top - bottom;

@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 
+import 'symmetry.dart';
+
 const paletteTextureTools = {
   'metal',
   'cluster',
@@ -118,8 +120,18 @@ Map<int, int> paletteTexturePixels({
   int seed = 1,
   bool mirrorX = false,
   bool mirrorY = false,
+  bool mirrorDiagonal = false,
+  bool mirrorAntiDiagonal = false,
 }) {
   final out = <int, int>{};
+  final symmetry = CanvasSymmetry(
+    width: width,
+    height: height,
+    mirrorX: mirrorX,
+    mirrorY: mirrorY,
+    mirrorDiagonal: mirrorDiagonal,
+    mirrorAntiDiagonal: mirrorAntiDiagonal,
+  );
   if (points.isEmpty || ramp.isEmpty) return out;
   final p = <(int, int)>[];
   for (final point in points) {
@@ -261,22 +273,29 @@ Map<int, int> paletteTexturePixels({
     return shade;
   }
 
+  final leavesCache = <int, int>{};
   void emit(int x, int y, int shade) {
-    for (final xx in {x, if (mirrorX) width - 1 - x}) {
-      for (final yy in {y, if (mirrorY) height - 1 - y}) {
-        if (xx >= 0 && yy >= 0 && xx < width && yy < height) {
-          out[yy * width + xx] = ramp[shade.clamp(0, 4)];
-        }
-      }
+    for (final (xx, yy) in symmetry.points(x, y)) {
+      // Leaves are a canvas-anchored field. Sample the destination's canonical
+      // point so overlapping reflected dabs remain stable, even when a mixed-
+      // parity rectangle needs nearest-pixel rounding.
+      final value = tool == 'leaves'
+          ? leavesCache.putIfAbsent(yy * width + xx, () {
+              final sample = symmetry.canonicalPoint(xx, yy);
+              return leaves(sample.$1, sample.$2);
+            })
+          : shade;
+      out[yy * width + xx] = ramp[value.clamp(0, 4)];
     }
   }
 
-  final clusterCache = <int, int>{};
-  final barkCache = <int, int>{};
-  final leavesCache = <int, int>{};
+  final clusterCache = <(int, int), int>{};
+  final barkCache = <(int, int), int>{};
   void stamp(int x, int y, double tx, double ty) {
     final left = x - size ~/ 2, top = y - size ~/ 2;
-    if (left >= width || top >= height || left + size <= 0 || top + size <= 0) {
+    final bounds = symmetry.sourceBounds;
+    if (left > bounds.$3 || top > bounds.$4 ||
+        left + size <= bounds.$1 || top + size <= bounds.$2) {
       return;
     }
     final cell = math.max(2.0, size / 3);
@@ -286,27 +305,21 @@ Map<int, int> paletteTexturePixels({
         final radius = nx * nx + ny * ny;
         if (radius > 1) continue;
         final px = x - size ~/ 2 + ox, py = y - size ~/ 2 + oy;
-        if (px < 0 || py < 0 || px >= width || py >= height) continue;
+        if (px < bounds.$1 || py < bounds.$2 ||
+            px > bounds.$3 || py > bounds.$4) continue;
         var shade = 2;
         if (tool == 'ditherPaint' || tool == 'ditherRetouch') {
           shade = 2;
         } else if (tool == 'cluster') {
           shade = clusterCache.putIfAbsent(
-            py * width + px,
+            (px, py),
             () => cluster(px.toDouble(), py.toDouble(), cell),
           );
         } else if (tool == 'bark') {
-          shade = barkCache.putIfAbsent(py * width + px, () => bark(px, py));
+          shade = barkCache.putIfAbsent((px, py), () => bark(px, py));
         } else if (tool == 'leaves') {
-          shade = leavesCache.putIfAbsent(
-            py * width + px,
-            // Sample one canonical half so mirrored overlapping dabs cannot
-            // overwrite earlier leaves with a different side of the field.
-            () => leaves(
-              mirrorX ? math.min(px, width - 1 - px) : px,
-              mirrorY ? math.min(py, height - 1 - py) : py,
-            ),
-          );
+          // Destination-anchored canonical sampling happens in emit.
+          shade = 2;
         } else if (tool == 'stripes') {
           shade = cluster((px * tx + py * ty) / 4, -px * ty + py * tx, cell);
         } else if (tool == 'sphere') {

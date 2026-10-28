@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:spritedawg/engine/editor_engine.dart';
+import 'package:spritedawg/engine/palette_texture_brush.dart';
 
 /// Generate portable output consumed by Android's cross-backend regression test.
 /// Run: dart tool/brush_interop.dart /tmp/spritedawg-dart-brush-interop
@@ -226,4 +227,75 @@ void main(List<String> arguments) {
       background: 0x80a5802c,
     );
   }
+  // Small canvases expose diagonal center, clipping, parity, overlap and
+  // directional texture differences without bloating the checked-in fixtures.
+  for (final (width, height) in [(9, 9), (10, 10), (11, 7), (10, 7)]) {
+    for (final depth in [8, 16, 32]) {
+      for (final tool in [
+        'pencil', 'eraser', 'line', 'rectangle', 'ellipse', 'fill', 'gradient',
+        'spray', 'airbrush', 'blur', 'jumble', 'splatter', ...paletteTextureTools,
+      ]) {
+        final e = EditorEngine();
+        e.invoke('new', {'width': width, 'height': height});
+        final d = e.document;
+        d.depth = depth;
+        d.frames[0].palette = [
+          0, 0x80241c0b, 0x80654b16, 0x80ae852a, 0x80e0bd55, 0x80ffefae,
+          0xff1255ff,
+        ];
+        final c = d.editable(0, 0);
+        for (var y = 0; y < height; y++) {
+          for (var x = 0; x < width; x++) {
+            c.pixels[y * width + x] = depth == 8
+                ? 1 + (x + 2 * y) % 6
+                : d.drawingColor(
+                    ((x * 17 + y * 13) % 256) << 24 |
+                    ((x * 7) % 256) << 16 |
+                    ((y * 9) % 256) << 8 |
+                    ((x + y) * 5) % 256,
+                    0,
+                  );
+          }
+        }
+        e.stroke({
+          'tool': tool,
+          'points': [tool == 'fill' ? [1, 2] : [-2, 1], [width - 3, height - 3],
+            [width - 3, height - 3], [2, height - 2]],
+          'size': 5, 'seed': 42, 'density': 12, 'strength': 50,
+          'color': 0x80ae852a, 'paletteIndex': 3, 'filled': true,
+          'gradient': true, 'gradientDirection': 'horizontal',
+          'secondaryColor': 0x20808080,
+          'mirrorDiagonal': true, 'mirrorAntiDiagonal': height.isOdd,
+          'mirrorX': width.isEven, 'mirrorY': depth == 16,
+        });
+        final name = 'symmetry-${width}x$height-$depth-$tool';
+        final bytes = e.state()['pixels'] as Uint8List;
+        File('${root.path}/$name.rgba').writeAsBytesSync(bytes);
+      }
+    }
+  }
+
+  // Negative half-pixel outline coordinates must use Dart's away-from-zero
+  // rounding in the native engine too, before a diagonal brings them onscreen.
+  for (final (width, height, from, to) in [
+    (5, 9, [-4, 0], [-2, 3]),
+    (9, 5, [-2, -2], [1, 0]),
+  ]) {
+    for (final reverse in [false, true]) {
+      final e = EditorEngine();
+      e.invoke('new', {'width': width, 'height': height});
+      e.stroke({
+        'tool': 'ellipse',
+        'points': reverse ? [to, from] : [from, to],
+        'size': 1,
+        'color': 0x80ff0000,
+        'mirrorDiagonal': true,
+      });
+      final name = 'negative-outline-${width}x$height-$reverse';
+      File('${root.path}/$name.rgba').writeAsBytesSync(
+        e.state()['pixels'] as Uint8List,
+      );
+    }
+  }
+
 }
