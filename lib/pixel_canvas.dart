@@ -9,6 +9,7 @@ import 'package:flutter/gestures.dart' show PointerScrollEvent;
 
 import 'editor.dart';
 import 'brush_preview.dart';
+import 'engine/symmetry.dart';
 import 'canvas_view_mode.dart';
 
 class PixelCanvas extends StatefulWidget {
@@ -26,6 +27,8 @@ class PixelCanvas extends StatefulWidget {
     this.filled = false,
     this.mirrorX = false,
     this.mirrorY = false,
+    this.mirrorDiagonal = false,
+    this.mirrorAntiDiagonal = false,
     this.density = 12,
     this.seed = 1,
     this.strength = 50,
@@ -37,7 +40,7 @@ class PixelCanvas extends StatefulWidget {
   final String tool;
   final int color, brush, fitToken;
   final bool grid, onion;
-  final bool filled, mirrorX, mirrorY;
+  final bool filled, mirrorX, mirrorY, mirrorDiagonal, mirrorAntiDiagonal;
   final int density, seed, strength;
   final Map<String, dynamic> previewOptions;
   final ValueChanged<int> onPick;
@@ -52,7 +55,7 @@ class _PixelCanvasState extends State<PixelCanvas> {
   double scale = 1;
   Offset origin = Offset.zero;
   Size viewport = Size.zero;
-  bool fitted = false, navigating = false;
+  bool fitted = false, navigating = false, _explicitPan = false;
   Timer? _spraying, _previewTimer;
   Duration _startedAt = Duration.zero;
   ui.Image? _preview;
@@ -100,10 +103,13 @@ class _PixelCanvasState extends State<PixelCanvas> {
         widget.filled,
         widget.mirrorX,
         widget.mirrorY,
+        widget.mirrorDiagonal,
+        widget.mirrorAntiDiagonal,
         widget.density,
         _strokeSeed,
         widget.strength,
         preview,
+        viewMode: widget.viewMode,
       );
 
   void _commit(List<Offset> points) {
@@ -130,23 +136,27 @@ class _PixelCanvasState extends State<PixelCanvas> {
 
   bool _previewRunning = false;
   int _previewEpoch = 0, _pointVersion = 0;
-  bool get _usesPreview => const {
-    'spray',
-    'airbrush',
-    'blur',
-    'jumble',
-    'gradient',
-    'metal',
-    'cluster',
-    'stripes',
-    'sphere',
-    'knife',
-    'bark',
-    'leaves',
-    'splatter',
-    'ditherPaint',
-    'ditherRetouch',
-  }.contains(widget.tool);
+  bool get _usesPreview =>
+      (widget.viewMode == CanvasViewMode.tiled &&
+          widget.tool != 'pan' &&
+          widget.tool != 'eyedropper') ||
+      const {
+        'spray',
+        'airbrush',
+        'blur',
+        'jumble',
+        'gradient',
+        'metal',
+        'cluster',
+        'stripes',
+        'sphere',
+        'knife',
+        'bark',
+        'leaves',
+        'splatter',
+        'ditherPaint',
+        'ditherRetouch',
+      }.contains(widget.tool);
   void _clearPreview() {
     _previewEpoch++;
     _previewTimer?.cancel();
@@ -180,6 +190,8 @@ class _PixelCanvasState extends State<PixelCanvas> {
       final result = await widget.editor.transport('previewStroke', {
         ...widget.previewOptions,
         'tool': widget.tool,
+        'wrap': widget.viewMode == CanvasViewMode.tiled,
+        'filled': widget.filled,
         'color': widget.color,
         'size': widget.brush,
         'points': stroke.map((p) => [p.dx.floor(), p.dy.floor()]).toList(),
@@ -188,6 +200,8 @@ class _PixelCanvasState extends State<PixelCanvas> {
         'strength': widget.strength,
         'mirrorX': widget.mirrorX,
         'mirrorY': widget.mirrorY,
+        'mirrorDiagonal': widget.mirrorDiagonal,
+        'mirrorAntiDiagonal': widget.mirrorAntiDiagonal,
       });
       final bytes = result?['pixels'];
       if (bytes is Uint8List && bytes.length == width * height * 4) {
@@ -293,6 +307,8 @@ class _PixelCanvasState extends State<PixelCanvas> {
         old.filled != widget.filled ||
         old.mirrorX != widget.mirrorX ||
         old.mirrorY != widget.mirrorY ||
+        old.mirrorDiagonal != widget.mirrorDiagonal ||
+        old.mirrorAntiDiagonal != widget.mirrorAntiDiagonal ||
         old.density != widget.density ||
         old.strength != widget.strength) {
       _stopSpraying();
@@ -312,17 +328,21 @@ class _PixelCanvasState extends State<PixelCanvas> {
         pointers.length == 1 &&
             !navigating &&
             stroke.isNotEmpty &&
-            (stroke.length > 1 ||
+            (widget.viewMode == CanvasViewMode.tiled ||
+                stroke.length > 1 ||
                 e.timeStamp - _startedAt > const Duration(milliseconds: 150))
         ? List<Offset>.of(stroke)
         : null;
     if (pending != null && widget.tool != 'eyedropper') _commit(pending);
     setState(() {
+      if (pointers.isEmpty) {
+        _explicitPan = widget.tool == 'pan' || e.buttons == 2;
+      }
       pointers[e.pointer] = e.localPosition;
       if (pointers.length > 1 ||
           widget.tool == 'pan' ||
           e.buttons == 2 ||
-          (widget.viewMode != CanvasViewMode.normal &&
+          (widget.viewMode == CanvasViewMode.slide &&
               !isEditableCanvasPoint(
                 _pixel(e.localPosition),
                 widget.editor.width,
@@ -334,6 +354,17 @@ class _PixelCanvasState extends State<PixelCanvas> {
         stroke.clear();
       } else {
         navigating = false;
+        // The margin outside the bounded 3x3 view is not another hidden tile.
+        // Ignore one-finger drags started there rather than silently panning.
+        if (widget.viewMode == CanvasViewMode.tiled &&
+            !isTiledCanvasPoint(
+              _pixel(e.localPosition),
+              widget.editor.width,
+              widget.editor.height,
+            )) {
+          stroke.clear();
+          return;
+        }
         _startedAt = e.timeStamp;
         stroke = [_pixel(e.localPosition)];
         _strokeSeed = _nextSeed;
@@ -349,6 +380,13 @@ class _PixelCanvasState extends State<PixelCanvas> {
       final oldCenter = centroid, oldDistance = distance;
       pointers[e.pointer] = e.localPosition;
       if (navigating) {
+        // A remaining finger waits for the navigation gesture to finish. It
+        // neither pans nor resumes a partially committed tiled stroke.
+        if (widget.viewMode == CanvasViewMode.tiled &&
+            pointers.length < 2 &&
+            !_explicitPan) {
+          return;
+        }
         final newCenter = centroid;
         final next =
             (scale *
@@ -360,8 +398,16 @@ class _PixelCanvasState extends State<PixelCanvas> {
         origin = newCenter - (oldCenter - origin) * (next / scale);
         scale = next;
       } else {
-        final p = _pixel(e.localPosition);
-        if (widget.viewMode != CanvasViewMode.normal &&
+        if (stroke.isEmpty) return;
+        final raw = _pixel(e.localPosition);
+        final p = widget.viewMode == CanvasViewMode.tiled
+            ? clampTiledCanvasPoint(
+                raw,
+                widget.editor.width,
+                widget.editor.height,
+              )
+            : raw;
+        if (widget.viewMode == CanvasViewMode.slide &&
             !isEditableCanvasPoint(
               p,
               widget.editor.width,
@@ -403,7 +449,12 @@ class _PixelCanvasState extends State<PixelCanvas> {
     if (!commit) return;
     if (widget.tool == 'eyedropper') {
       final p = points.last, bytes = widget.editor.state['pixels'];
-      final x = p.dx.floor(), y = p.dy.floor();
+      final x = widget.viewMode == CanvasViewMode.tiled
+          ? p.dx.floor() % widget.editor.width
+          : p.dx.floor();
+      final y = widget.viewMode == CanvasViewMode.tiled
+          ? p.dy.floor() % widget.editor.height
+          : p.dy.floor();
       if (x >= 0 &&
           y >= 0 &&
           x < widget.editor.width &&
@@ -480,6 +531,8 @@ class _PixelCanvasState extends State<PixelCanvas> {
                 widget.filled,
                 widget.mirrorX,
                 widget.mirrorY,
+                widget.mirrorDiagonal,
+                widget.mirrorAntiDiagonal,
                 widget.density,
                 _strokeSeed,
                 widget.strength,
@@ -509,6 +562,8 @@ class _CanvasPainter extends CustomPainter {
     this.filled,
     this.mirrorX,
     this.mirrorY,
+    this.mirrorDiagonal,
+    this.mirrorAntiDiagonal,
     this.density,
     this.seed,
     this.strength,
@@ -528,7 +583,7 @@ class _CanvasPainter extends CustomPainter {
   final List<Offset> points;
   final String tool;
   final int color, brush;
-  final bool filled, mirrorX, mirrorY;
+  final bool filled, mirrorX, mirrorY, mirrorDiagonal, mirrorAntiDiagonal;
   final int density, seed, strength;
   @override
   void paint(Canvas canvas, Size size) {
@@ -628,6 +683,27 @@ class _CanvasPainter extends CustomPainter {
         );
       }
     }
+    if (mirrorDiagonal || mirrorAntiDiagonal) {
+      final center = Offset(editor.width / 2, editor.height / 2);
+      final radius = math.min(editor.width, editor.height) / 2;
+      final p = Paint()
+        ..color = const Color(0x9989a7ff)
+        ..strokeWidth = 1 / scale;
+      if (mirrorDiagonal) {
+        canvas.drawLine(
+          center - Offset(radius, radius),
+          center + Offset(radius, radius),
+          p,
+        );
+      }
+      if (mirrorAntiDiagonal) {
+        canvas.drawLine(
+          center - Offset(radius, -radius),
+          center + Offset(radius, -radius),
+          p,
+        );
+      }
+    }
     if (grid && scale >= 6) {
       final p = Paint()
         ..color = const Color(0x44000000)
@@ -670,7 +746,20 @@ class _CanvasPainter extends CustomPainter {
       editor.height.toDouble(),
     );
     canvas.saveLayer(bounds, Paint());
-    final image = editor.image;
+    final visuals = [...committing, this];
+    var image = editor.image;
+    var firstOverlay = 0;
+    for (var i = 0; i < visuals.length; i++) {
+      final replacement = visuals[i].preview;
+      if (replacement != null) {
+        image = replacement;
+        firstOverlay = i + 1;
+      }
+    }
+    // A preview is a complete composited frame, not an ink overlay. Draw the
+    // latest one exactly like a committed image. Drawing it with BlendMode.src
+    // over stale pixels leaves antialiased edge residue at fractional zoom,
+    // especially where an eraser makes a tile boundary transparent.
     if (image != null) {
       canvas.drawImage(
         image,
@@ -678,10 +767,9 @@ class _CanvasPainter extends CustomPainter {
         Paint()..filterQuality = FilterQuality.none,
       );
     }
-    for (final visual in committing) {
-      visual.paintStroke(canvas);
+    for (var i = firstOverlay; i < visuals.length; i++) {
+      visuals[i].paintStroke(canvas);
     }
-    paintStroke(canvas);
     canvas.restore();
   }
 
@@ -716,18 +804,6 @@ class _CanvasPainter extends CustomPainter {
   }
 
   void paintStroke(Canvas canvas) {
-    if (preview != null) {
-      // Effect previews contain the complete composited frame, including its
-      // transparency. Replace the prior frame rather than alpha-blending it
-      // twice. The checkerboard remains outside this isolated pixel layer.
-      canvas.drawImage(
-        preview!,
-        Offset.zero,
-        Paint()
-          ..filterQuality = FilterQuality.none
-          ..blendMode = BlendMode.src,
-      );
-    }
     if (preview == null &&
         points.isNotEmpty &&
         tool != 'pan' &&
@@ -757,30 +833,44 @@ class _CanvasPainter extends CustomPainter {
         'ditherPaint',
         'ditherRetouch',
       }.contains(tool)) {
-        final point = tool == 'fill' ? points.first : points.last;
+        final raw = tool == 'fill' ? points.first : points.last;
+        final point = viewMode == CanvasViewMode.tiled
+            ? Offset(
+                (raw.dx.floor() % editor.width).toDouble(),
+                (raw.dy.floor() % editor.height).toDouble(),
+              )
+            : raw;
         final p = Paint()
           ..color = Colors.white
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1 / scale;
-        for (final x in [
-          point.dx.floor(),
-          if (mirrorX) editor.width - 1 - point.dx.floor(),
-        ]) {
-          for (final y in [
-            point.dy.floor(),
-            if (mirrorY) editor.height - 1 - point.dy.floor(),
-          ]) {
-            final size = tool == 'fill' ? 1 : brush;
-            canvas.drawRect(
-              Rect.fromLTWH(
-                (x - size ~/ 2).toDouble(),
-                (y - size ~/ 2).toDouble(),
-                size.toDouble(),
-                size.toDouble(),
-              ),
-              p,
-            );
-          }
+        final symmetry = CanvasSymmetry(
+          width: editor.width,
+          height: editor.height,
+          mirrorX: mirrorX,
+          mirrorY: mirrorY,
+          mirrorDiagonal: mirrorDiagonal,
+          mirrorAntiDiagonal: mirrorAntiDiagonal,
+        );
+        final size = tool == 'fill' ? 1 : brush;
+        final left = point.dx.floor() - size ~/ 2;
+        final top = point.dy.floor() - size ~/ 2;
+        final cursors = <Rect>{};
+        for (final transform in symmetry.transforms) {
+          final a = transform.point(editor.width, editor.height, left, top);
+          final b = transform.point(
+            editor.width,
+            editor.height,
+            left + size - 1,
+            top + size - 1,
+          );
+          final cursor = Rect.fromLTRB(
+            math.min(a.$1, b.$1).toDouble(),
+            math.min(a.$2, b.$2).toDouble(),
+            (math.max(a.$1, b.$1) + 1).toDouble(),
+            (math.max(a.$2, b.$2) + 1).toDouble(),
+          );
+          if (cursors.add(cursor)) canvas.drawRect(cursor, p);
         }
       } else {
         final runs = previewStrokeRuns(
@@ -792,12 +882,18 @@ class _CanvasPainter extends CustomPainter {
           filled: filled,
           mirrorX: mirrorX,
           mirrorY: mirrorY,
+          mirrorDiagonal: mirrorDiagonal,
+          mirrorAntiDiagonal: mirrorAntiDiagonal,
           seed: seed,
           density: density,
+          wrap: viewMode == CanvasViewMode.tiled,
         );
         final p = Paint()
           ..color = tool == 'eraser' ? const Color(0x99ffffff) : Color(color)
-          ..isAntiAlias = false;
+          ..isAntiAlias = false
+          ..blendMode = tool == 'eraser' && viewMode == CanvasViewMode.tiled
+              ? BlendMode.clear
+              : BlendMode.srcOver;
         for (final run in runs) {
           canvas.drawRect(run, p);
         }

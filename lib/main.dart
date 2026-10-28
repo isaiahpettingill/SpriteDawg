@@ -10,6 +10,7 @@ import 'editor.dart';
 import 'frame_panel.dart';
 import 'export_dialog.dart';
 import 'pixel_canvas.dart';
+import 'mirroring_controls.dart';
 import 'canvas_view_mode.dart';
 import 'visual_tag_editor.dart';
 import 'palette_editor.dart';
@@ -87,7 +88,9 @@ class _EditorScreenState extends State<EditorScreen>
   bool filledShape = false,
       gradientFill = false,
       mirrorX = false,
-      mirrorY = false;
+      mirrorY = false,
+      mirrorDiagonal = false,
+      mirrorAntiDiagonal = false;
   String gradientDirection = 'vertical';
   int sprayDensity = 12, effectStrength = 50, strokeSeed = 1;
   bool grid = false, onion = false, playing = false, allowExit = false;
@@ -487,6 +490,7 @@ class _EditorScreenState extends State<EditorScreen>
     strokeSeed = (strokeSeed + 1) & 0xffffffff;
     await e.call('stroke', {
       'tool': value,
+      'wrap': canvasViewMode == CanvasViewMode.tiled,
       'points': points.map((p) => [p.dx.floor(), p.dy.floor()]).toList(),
       'color': color,
       'size': brush,
@@ -499,18 +503,32 @@ class _EditorScreenState extends State<EditorScreen>
       'seed': seed,
       'mirrorX': mirrorX,
       'mirrorY': mirrorY,
+      'mirrorDiagonal': mirrorDiagonal,
+      'mirrorAntiDiagonal': mirrorAntiDiagonal,
       if (e.state['depth'] == 8 && selectedPaletteIndex != null)
         'paletteIndex': selectedPaletteIndex,
     });
   }
 
   int playbackDirection = 1, completedLoops = 0;
+  bool _startingPlayback = false;
   Future<void> play() async {
     if (playing) {
       stop();
       return;
     }
-    if (e.maps('frames').length < 2) return;
+    if (_startingPlayback || e.busy || e.maps('frames').length < 2) return;
+    _startingPlayback = true;
+    final startingPanel = panel;
+    bool ready;
+    try {
+      ready =
+          await (_tagEditorKey.currentState?.savePending() ??
+              Future.value(true));
+    } finally {
+      _startingPlayback = false;
+    }
+    if (!ready || !mounted || panel != startingPanel) return;
     setState(() => playing = true);
     final tags = e.maps('tags');
     final tag = selectedTag >= 0 && selectedTag < tags.length
@@ -742,6 +760,10 @@ class _EditorScreenState extends State<EditorScreen>
             MediaQuery.viewInsetsOf(context).bottom <
         430;
     final compactTags = panel == 'tags' && compactHeight;
+    final tightTagKeyboard =
+        panel == 'tags' &&
+        tightHeight &&
+        MediaQuery.viewInsetsOf(context).bottom > 0;
     final hideDrawingStrips =
         (compactHeight && panel != null) || panel == 'tags';
     final layers = e.maps('layers');
@@ -769,104 +791,121 @@ class _EditorScreenState extends State<EditorScreen>
       },
       child: Scaffold(
         resizeToAvoidBottomInset: panel == 'tags',
-        appBar: AppBar(
-          title: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'SpriteDawg${e.dirty ? ' •' : ''}',
-                style: const TextStyle(
-                  fontSize: 19,
-                  fontWeight: FontWeight.w700,
+        appBar: tightTagKeyboard
+            ? null
+            : AppBar(
+                title: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'SpriteDawg${e.dirty ? ' •' : ''}',
+                      style: const TextStyle(
+                        fontSize: 19,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      '${e.width} × ${e.height} · ${e.state['depth'] ?? 32}-bit',
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
+                  ],
                 ),
-              ),
-              Text(
-                '${e.width} × ${e.height} · ${e.state['depth'] ?? 32}-bit',
-                style: Theme.of(context).textTheme.labelSmall,
-              ),
-            ],
-          ),
-          actions: [
-            IconButton(
-              tooltip: 'Open Aseprite',
-              onPressed: e.busy ? null : open,
-              icon: const Icon(Icons.folder_open),
-            ),
-            IconButton(
-              tooltip: 'Save Aseprite',
-              onPressed: e.busy
-                  ? null
-                  : () {
-                      stop();
-                      fileAction('save');
-                    },
-              icon: const Icon(Icons.save_outlined),
-            ),
-            PopupMenuButton<String>(
-              tooltip: 'Project and view options',
-              enabled: !e.busy,
-              onSelected: menu,
-              itemBuilder: (context) => [
-                const PopupMenuItem(value: 'new', child: Text('New canvas')),
-                const PopupMenuItem(value: 'saveAs', child: Text('Save as…')),
-                const PopupMenuItem(
-                  value: 'drafts',
-                  child: Text('Internal drafts…'),
-                ),
-                const PopupMenuItem(value: 'exportPng', child: Text('Export…')),
-                const PopupMenuDivider(),
-                CheckedPopupMenuItem(
-                  value: 'grid',
-                  checked: grid,
-                  child: const Text('Pixel grid'),
-                ),
-                CheckedPopupMenuItem(
-                  value: 'onion',
-                  checked: onion,
-                  child: const Text('Onion skin'),
-                ),
-                CheckedPopupMenuItem(
-                  value: 'viewNormal',
-                  checked: canvasViewMode == CanvasViewMode.normal,
-                  child: const Text('View · Normal'),
-                ),
-                CheckedPopupMenuItem(
-                  value: 'viewTiled',
-                  checked: canvasViewMode == CanvasViewMode.tiled,
-                  child: const Text('View · Tiled (3×3)'),
-                ),
-                CheckedPopupMenuItem(
-                  value: 'viewSlide',
-                  checked: canvasViewMode == CanvasViewMode.slide,
-                  child: const Text('View · Slide'),
-                ),
-                const PopupMenuItem(value: 'fit', child: Text('Fit canvas')),
-                const PopupMenuItem(
-                  value: 'flipHorizontal',
-                  child: Text('Flip active cel horizontally'),
-                ),
-                const PopupMenuItem(
-                  value: 'flipVertical',
-                  child: Text('Flip active cel vertically'),
-                ),
-                const PopupMenuItem(
-                  value: 'metadata',
-                  child: Text('User data'),
-                ),
-                const PopupMenuItem(
-                  value: 'defaultUserData',
-                  child: Text('Default user data'),
-                ),
-                const PopupMenuItem(value: 'help', child: Text('Drawing help')),
-                if (LinuxUpdater.supported)
-                  const PopupMenuItem(
-                    value: 'updates',
-                    child: Text('Check for updates…'),
+                actions: [
+                  IconButton(
+                    tooltip: 'Open Aseprite',
+                    onPressed: e.busy ? null : open,
+                    icon: const Icon(Icons.folder_open),
                   ),
-              ],
-            ),
-          ],
-        ),
+                  IconButton(
+                    tooltip: 'Save Aseprite',
+                    onPressed: e.busy
+                        ? null
+                        : () {
+                            stop();
+                            fileAction('save');
+                          },
+                    icon: const Icon(Icons.save_outlined),
+                  ),
+                  PopupMenuButton<String>(
+                    tooltip: 'Project and view options',
+                    enabled: !e.busy,
+                    onSelected: menu,
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(
+                        value: 'new',
+                        child: Text('New canvas'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'saveAs',
+                        child: Text('Save as…'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'drafts',
+                        child: Text('Internal drafts…'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'exportPng',
+                        child: Text('Export…'),
+                      ),
+                      const PopupMenuDivider(),
+                      CheckedPopupMenuItem(
+                        value: 'grid',
+                        checked: grid,
+                        child: const Text('Pixel grid'),
+                      ),
+                      CheckedPopupMenuItem(
+                        value: 'onion',
+                        checked: onion,
+                        child: const Text('Onion skin'),
+                      ),
+                      CheckedPopupMenuItem(
+                        value: 'viewNormal',
+                        checked: canvasViewMode == CanvasViewMode.normal,
+                        child: const Text('View · Normal'),
+                      ),
+                      CheckedPopupMenuItem(
+                        value: 'viewTiled',
+                        checked: canvasViewMode == CanvasViewMode.tiled,
+                        child: const Text('View · Tiled (3×3)'),
+                      ),
+                      CheckedPopupMenuItem(
+                        value: 'viewSlide',
+                        checked: canvasViewMode == CanvasViewMode.slide,
+                        child: const Text('View · Slide'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'fit',
+                        child: Text('Fit canvas'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'flipHorizontal',
+                        child: Text('Flip active cel horizontally'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'flipVertical',
+                        child: Text('Flip active cel vertically'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'metadata',
+                        child: Text('User data'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'defaultUserData',
+                        child: Text('Default user data'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'help',
+                        child: Text('Drawing help'),
+                      ),
+                      if (LinuxUpdater.supported)
+                        const PopupMenuItem(
+                          value: 'updates',
+                          child: Text('Check for updates…'),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
         body: SafeArea(
           top: false,
           child: Column(
@@ -874,22 +913,27 @@ class _EditorScreenState extends State<EditorScreen>
               if (recoveryIssue != null) recoveryBanner(),
               Expanded(
                 child: ResponsiveEditorShell(
-                  documentTabs: DocumentTabs(
-                    editor: e,
-                    onNew: () => newProject(),
-                    onOpen: () => open(),
-                    beforeSwitch: beforeDocumentSwitch,
-                  ),
+                  documentTabs:
+                      panel == 'tags' &&
+                          MediaQuery.viewInsetsOf(context).bottom > 0
+                      ? null
+                      : DocumentTabs(
+                          editor: e,
+                          onNew: () => newProject(),
+                          onOpen: () => open(),
+                          beforeSwitch: beforeDocumentSwitch,
+                        ),
                   canvas: Column(
                     children: [
-                      strokeOptions(),
+                      paletteStrip(),
+                      if (hasStrokeOptions) strokeOptions(),
                       Expanded(child: drawingCanvas()),
                     ],
                   ),
                   tools: toolRail(),
                   layers: layerPanel(),
                   timeline: wideTimeline(),
-                  timelineHeight: panel == 'tags' ? 260 : 168,
+                  timelineHeight: panel == 'tags' ? 288 : 168,
                   mobileBody: Column(
                     children: [
                       SizedBox(
@@ -919,6 +963,7 @@ class _EditorScreenState extends State<EditorScreen>
                                   onPressed: managePalette,
                                   icon: const Icon(Icons.palette_outlined),
                                 ),
+                              if (tightHeight) mirroringMenu(),
                               if (tightHeight) compactBrushMenu(),
                               IconButton(
                                 tooltip: 'Undo',
@@ -949,110 +994,46 @@ class _EditorScreenState extends State<EditorScreen>
                           ),
                         ),
                       Expanded(
-                        child: compactTags ? tagPanel() : drawingCanvas(),
-                      ),
-                      if (panel != null && !compactTags)
-                        SizedBox(
-                          height: panel == 'frames'
-                              ? 120
-                              : panel == 'tags'
-                              ? 280
-                              : compactHeight
-                              ? (MediaQuery.sizeOf(context).height - 210)
-                                    .clamp(130.0, 180.0)
-                                    .toDouble()
-                              : 180,
-                          child: panel == 'layers'
-                              ? layerPanel()
-                              : panel == 'frames'
-                              ? framePanel()
-                              : tagPanel(),
-                        ),
-                      if (!hideDrawingStrips && !tightHeight)
-                        SizedBox(
-                          height: 50,
-                          child: Row(
-                            children: [
-                              IconButton(
-                                tooltip: 'Brush color',
-                                onPressed: colorDialog,
-                                icon: BrushColorSwatch(color: color),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: ListView.separated(
-                                  scrollDirection: Axis.horizontal,
-                                  itemCount: e.palette.length,
-                                  separatorBuilder: (_, index) =>
-                                      const SizedBox(width: 5),
-                                  itemBuilder: (context, index) {
-                                    final c = e.palette[index];
-                                    final selected =
-                                        e.state['depth'] == 8 &&
-                                            selectedPaletteIndex != null
-                                        ? index == selectedPaletteIndex
-                                        : c == color;
-                                    return Center(
-                                      child: Semantics(
-                                        label: 'Palette color ${index + 1}',
-                                        selected: selected,
-                                        button: true,
-                                        child: InkWell(
-                                          onTap: () => setState(() {
-                                            color = c;
-                                            selectedPaletteIndex = index;
-                                          }),
-                                          child: Container(
-                                            width: 30,
-                                            height: 30,
-                                            decoration: BoxDecoration(
-                                              color: Color(c),
-                                              borderRadius:
-                                                  BorderRadius.circular(5),
-                                              border: Border.all(
-                                                color: selected
-                                                    ? Theme.of(
-                                                        context,
-                                                      ).colorScheme.primary
-                                                    : Colors.white24,
-                                                width: selected ? 3 : 1,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
+                        child: LayoutBuilder(
+                          builder: (context, box) {
+                            final tagHeight = (box.maxHeight * .78).clamp(
+                              0.0,
+                              tightTagKeyboard ? 132.0 : 248.0,
+                            );
+                            final panelHeight = panel == 'tags'
+                                ? tagHeight
+                                : panel == 'frames'
+                                ? 120.0
+                                : panel == 'layers'
+                                ? (box.maxHeight * .6).clamp(0.0, 180.0)
+                                : 0.0;
+                            return Column(
+                              children: [
+                                Expanded(child: drawingCanvas()),
+                                SizedBox(
+                                  height: panelHeight,
+                                  child: Stack(
+                                    children: [
+                                      if (panel == 'layers') layerPanel(),
+                                      if (panel == 'frames') framePanel(),
+                                      // Retain unfinished names while changing panels.
+                                      Offstage(
+                                        offstage: panel != 'tags',
+                                        child: tagPanel(),
                                       ),
-                                    );
-                                  },
-                                ),
-                              ),
-                              IconButton(
-                                tooltip: 'Manage palette and color mode',
-                                onPressed: e.busy ? null : managePalette,
-                                icon: const Icon(Icons.palette_outlined),
-                              ),
-                              if (tool != 'gradient')
-                                PopupMenuButton<int>(
-                                  tooltip: 'Brush size',
-                                  initialValue: brush,
-                                  onSelected: (v) => setState(() => brush = v),
-                                  itemBuilder: (_) =>
-                                      [1, 2, 3, 4, 6, 8, 12, 16, 24, 32]
-                                          .map(
-                                            (v) => PopupMenuItem(
-                                              value: v,
-                                              child: Text('$v px'),
-                                            ),
-                                          )
-                                          .toList(),
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(12),
-                                    child: Text('$brush px'),
+                                    ],
                                   ),
                                 ),
-                            ],
-                          ),
+                              ],
+                            );
+                          },
                         ),
-                      if (!hideDrawingStrips && !tightHeight) strokeOptions(),
+                      ),
+                      if (!hideDrawingStrips && !tightHeight) paletteStrip(),
+                      if (!hideDrawingStrips &&
+                          !tightHeight &&
+                          hasStrokeOptions)
+                        strokeOptions(),
                       if (!hideDrawingStrips)
                         Wrap(
                           alignment: WrapAlignment.center,
@@ -1147,6 +1128,9 @@ class _EditorScreenState extends State<EditorScreen>
                 control: true,
               ): () {
                 if (!e.busy) open();
+              },
+              const SingleActivator(LogicalKeyboardKey.f2): () {
+                if (panel == 'tags') _tagEditorKey.currentState?.rename();
               },
               const SingleActivator(LogicalKeyboardKey.keyB): () =>
                   chooseTool('pencil'),
@@ -1268,10 +1252,14 @@ class _EditorScreenState extends State<EditorScreen>
     filled: filledShape,
     mirrorX: mirrorX,
     mirrorY: mirrorY,
+    mirrorDiagonal: mirrorDiagonal,
+    mirrorAntiDiagonal: mirrorAntiDiagonal,
     density: sprayDensity,
     seed: strokeSeed,
     strength: effectStrength,
     previewOptions: {
+      'gradient': gradientFill,
+      'gradientDirection': gradientDirection,
       'secondaryColor': secondaryColor,
       if (e.state['depth'] == 8 && selectedPaletteIndex != null)
         'paletteIndex': selectedPaletteIndex,
@@ -1282,6 +1270,118 @@ class _EditorScreenState extends State<EditorScreen>
     }),
     onStroke: stroke,
   );
+  Widget mirroringMenu() => MirroringButton(
+    mirrorX: mirrorX,
+    mirrorY: mirrorY,
+    mirrorDiagonal: mirrorDiagonal,
+    mirrorAntiDiagonal: mirrorAntiDiagonal,
+    ignored: tool == 'gradient',
+    onToggle: (value) => setState(() {
+      switch (value) {
+        case 'x':
+          mirrorX = !mirrorX;
+        case 'y':
+          mirrorY = !mirrorY;
+        case 'diagonal':
+          mirrorDiagonal = !mirrorDiagonal;
+        case 'antiDiagonal':
+          mirrorAntiDiagonal = !mirrorAntiDiagonal;
+        case 'off':
+          mirrorX = mirrorY = mirrorDiagonal = mirrorAntiDiagonal = false;
+      }
+    }),
+  );
+
+  // The former mirror-checkbox row now holds a second row of palette colors.
+  // Both responsive layouts share this strip, including exact-index selection.
+  Widget paletteStrip() => SizedBox(
+    key: const Key('palette-strip'),
+    height: 96,
+    child: Row(
+      children: [
+        SizedBox(
+          width: 48,
+          child: Column(
+            children: [
+              IconButton(
+                tooltip: 'Brush color',
+                onPressed: colorDialog,
+                icon: BrushColorSwatch(color: color),
+              ),
+              IconButton(
+                tooltip: 'Manage palette and color mode',
+                onPressed: e.busy ? null : managePalette,
+                icon: const Icon(Icons.palette_outlined),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: GridView.builder(
+            key: const Key('palette-swatches'),
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              mainAxisExtent: 44,
+            ),
+            itemCount: e.palette.length,
+            itemBuilder: (context, index) {
+              final c = e.palette[index];
+              final selected =
+                  e.state['depth'] == 8 && selectedPaletteIndex != null
+                  ? index == selectedPaletteIndex
+                  : c == color;
+              return Semantics(
+                label: 'Palette color ${index + 1}',
+                selected: selected,
+                button: true,
+                child: InkWell(
+                  key: Key('palette-color-$index'),
+                  onTap: () => setState(() {
+                    color = c;
+                    selectedPaletteIndex = index;
+                  }),
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: selected
+                              ? Theme.of(context).colorScheme.primary
+                              : Colors.transparent,
+                          width: 2,
+                        ),
+                      ),
+                      child: BrushColorSwatch(color: c, size: 30),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        SizedBox(
+          width: 48,
+          child: Column(children: [mirroringMenu(), compactBrushMenu()]),
+        ),
+      ],
+    ),
+  );
+
+  bool get hasStrokeOptions => const {
+    'rectangle',
+    'ellipse',
+    'fill',
+    'gradient',
+    'spray',
+    'blur',
+    'jumble',
+    'airbrush',
+    'ditherPaint',
+  }.contains(tool);
+
   Widget compactBrushMenu() => PopupMenuButton<String>(
     tooltip: 'Brush options',
     icon: const Icon(Icons.tune),
@@ -1318,10 +1418,6 @@ class _EditorScreenState extends State<EditorScreen>
             setState(() => effectStrength = n);
             return true;
           });
-        case 'x':
-          setState(() => mirrorX = !mirrorX);
-        case 'y':
-          setState(() => mirrorY = !mirrorY);
       }
     },
     itemBuilder: (_) => [
@@ -1364,18 +1460,6 @@ class _EditorScreenState extends State<EditorScreen>
         PopupMenuItem(
           value: 'strength',
           child: Text('Strength: $effectStrength%'),
-        ),
-      if (tool != 'gradient')
-        CheckedPopupMenuItem(
-          value: 'x',
-          checked: mirrorX,
-          child: const Text('Mirror X'),
-        ),
-      if (tool != 'gradient')
-        CheckedPopupMenuItem(
-          value: 'y',
-          checked: mirrorY,
-          child: const Text('Mirror Y'),
         ),
     ],
   );
@@ -1470,22 +1554,6 @@ class _EditorScreenState extends State<EditorScreen>
                 child: Text('Strength $effectStrength%'),
               ),
             ),
-          if (tool != 'gradient')
-            TextButton.icon(
-              onPressed: () => setState(() => mirrorX = !mirrorX),
-              icon: Icon(
-                mirrorX ? Icons.check_box : Icons.check_box_outline_blank,
-              ),
-              label: const Text('Mirror X'),
-            ),
-          if (tool != 'gradient')
-            TextButton.icon(
-              onPressed: () => setState(() => mirrorY = !mirrorY),
-              icon: Icon(
-                mirrorY ? Icons.check_box : Icons.check_box_outline_blank,
-              ),
-              label: const Text('Mirror Y'),
-            ),
         ],
       ),
     ),
@@ -1494,35 +1562,6 @@ class _EditorScreenState extends State<EditorScreen>
     children: [
       ...groupedTools(),
       const Divider(),
-      IconButton(
-        tooltip: 'Brush color',
-        onPressed: colorDialog,
-        icon: BrushColorSwatch(color: color),
-      ),
-      IconButton(
-        tooltip: 'Manage palette and color mode',
-        onPressed: managePalette,
-        icon: const Icon(Icons.palette_outlined),
-      ),
-      if (tool != 'gradient')
-        PopupMenuButton<int>(
-          tooltip: 'Brush size',
-          onSelected: (value) => setState(() => brush = value),
-          itemBuilder: (_) => [
-            1,
-            2,
-            4,
-            8,
-            12,
-            16,
-            24,
-            32,
-          ].map((v) => PopupMenuItem(value: v, child: Text('$v px'))).toList(),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Text('$brush px'),
-          ),
-        ),
       IconButton(
         tooltip: 'Undo',
         onPressed: e.canUndo && !e.busy ? () => e.call('undo') : null,
@@ -1542,11 +1581,11 @@ class _EditorScreenState extends State<EditorScreen>
         child: Row(
           children: [
             TextButton(
-              onPressed: () => setState(() => panel = 'frames'),
+              onPressed: () => changePanel('frames'),
               child: const Text('Frames'),
             ),
             TextButton(
-              onPressed: () => setState(() => panel = 'tags'),
+              onPressed: () => changePanel('tags'),
               child: const Text('Tags'),
             ),
             const Spacer(),
@@ -1562,17 +1601,30 @@ class _EditorScreenState extends State<EditorScreen>
           ],
         ),
       ),
-      Expanded(child: panel == 'tags' ? tagPanel() : framePanel()),
+      Expanded(
+        child: Stack(
+          children: [
+            if (panel != 'tags') framePanel(),
+            Offstage(offstage: panel != 'tags', child: tagPanel()),
+          ],
+        ),
+      ),
     ],
   );
 
+  void changePanel(String? value) {
+    stop();
+    _tagEditorKey.currentState?.pauseEditing();
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      panel = value;
+      editingText = false;
+    });
+  }
+
   Widget panelButton(String key, IconData icon, String label) => Expanded(
     child: TextButton(
-      onPressed: () {
-        stop();
-        FocusManager.instance.primaryFocus?.unfocus();
-        setState(() => panel = panel == key ? null : key);
-      },
+      onPressed: () => changePanel(panel == key ? null : key),
       style: TextButton.styleFrom(
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
         minimumSize: const Size(0, 48),
@@ -1766,11 +1818,10 @@ class _EditorScreenState extends State<EditorScreen>
     key: _tagEditorKey,
     editor: e,
     selectedTag: selectedTag,
-    playing: playing,
     onSelected: (index) => setState(() => selectedTag = index),
     onEdit: edit,
     onStop: stop,
-    onPlay: () => play(),
+    active: panel == 'tags',
     onEditingChanged: (value) {
       if (mounted) setState(() => editingText = value);
     },

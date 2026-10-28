@@ -25,7 +25,7 @@ class GradientToolTest {
         a.document.editable(0,0).pixels.fill(0xff00ff00.toInt())
         b.document.editable(0,0).pixels.fill(0xff00ff00.toInt())
         val p=args(mapOf("color" to 0x00ff0000L,"secondaryColor" to 0x800000ffL))
-        a.stroke(p);b.stroke(p+mapOf("mirrorX" to true,"mirrorY" to true,"size" to 32))
+        a.stroke(p);b.stroke(p+mapOf("mirrorX" to true,"mirrorY" to true,"mirrorDiagonal" to true,"mirrorAntiDiagonal" to true,"size" to 32))
         assertArrayEquals(a.document.composite(0),b.document.composite(0))
         assertEquals(0xff00ff00.toInt(),a.document.composite(0)[0])
         assertEquals(over(0xff00ff00.toInt(),0x800000ff.toInt()),a.document.composite(0)[4])

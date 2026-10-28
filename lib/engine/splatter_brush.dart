@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 
+import 'symmetry.dart';
+
 /// A seeded burst of round droplets, resampled by travelled pixel distance.
 /// Holding still never sprays more ink. Coverage is the strongest droplet at a
 /// pixel, so overlapping dabs and symmetry blend once, not repeatedly darker.
@@ -10,10 +12,22 @@ Map<int, int> splatterPixels({
   required int height,
   required int size,
   int seed = 1,
+  bool wrap = false,
   bool mirrorX = false,
   bool mirrorY = false,
+  bool mirrorDiagonal = false,
+  bool mirrorAntiDiagonal = false,
 }) {
   final out = <int, int>{};
+  final symmetry = CanvasSymmetry(
+    width: width,
+    height: height,
+    wrap: wrap,
+    mirrorX: mirrorX,
+    mirrorY: mirrorY,
+    mirrorDiagonal: mirrorDiagonal,
+    mirrorAntiDiagonal: mirrorAntiDiagonal,
+  );
   if (points.isEmpty) return out;
   final path = <(int, int)>[];
   for (final point in points) {
@@ -28,24 +42,27 @@ Map<int, int> splatterPixels({
     path.add(point);
   }
   void emit(int x, int y, int coverage) {
-    for (final yy in {y, if (mirrorY) height - 1 - y}) {
-      for (final xx in {x, if (mirrorX) width - 1 - x}) {
-        if (xx < 0 || yy < 0 || xx >= width || yy >= height) continue;
-        final key = yy * width + xx;
-        out[key] = math.max(out[key] ?? 0, coverage);
-      }
+    for (final (xx, yy) in symmetry.points(x, y)) {
+      final key = yy * width + xx;
+      out[key] = math.max(out[key] ?? 0, coverage);
     }
   }
 
   final stamped = <(int, int)>{};
   void stamp(int x, int y) {
-    if (!stamped.add((x, y))) return;
+    final seedX = wrap ? x % width : x, seedY = wrap ? y % height : y;
+    if (!stamped.add((seedX, seedY))) return;
     final left = x - size ~/ 2, top = y - size ~/ 2;
-    if (left >= width || top >= height || left + size <= 0 || top + size <= 0) {
+    final bounds = symmetry.sourceBounds;
+    if (!wrap &&
+        (left > bounds.$3 ||
+            top > bounds.$4 ||
+            left + size <= bounds.$1 ||
+            top + size <= bounds.$2)) {
       return;
     }
     var state =
-        (x * 374761393 + y * 668265263 + (seed & 0xffffffff) * 69069) &
+        (seedX * 374761393 + seedY * 668265263 + (seed & 0xffffffff) * 69069) &
         0xffffffff;
     int random() {
       state = (state * 1664525 + 1013904223) & 0xffffffff;

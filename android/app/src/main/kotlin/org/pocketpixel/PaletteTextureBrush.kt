@@ -51,8 +51,10 @@ internal fun paletteShadeRamp(palette: IntArray, color: Int, selectedIndex: Int?
 }
 
 /** Same integer resampling, palette indices and deterministic texture as Dart. */
-internal fun paletteTexturePixels(tool: String, points: List<Pair<Int,Int>>, width: Int, height: Int, size: Int, ramp: List<Int>, seed: Long=1L, mirrorX: Boolean=false, mirrorY: Boolean=false): Map<Int,Int> {
+internal fun paletteTexturePixels(tool: String, points: List<Pair<Int,Int>>, width: Int, height: Int, size: Int, ramp: List<Int>, seed: Long=1L, mirrorX: Boolean=false, mirrorY: Boolean=false,
+    mirrorDiagonal: Boolean=false, mirrorAntiDiagonal: Boolean=false, wrap: Boolean=false): Map<Int,Int> {
     val out=linkedMapOf<Int,Int>()
+    val symmetry=StrokeSymmetry(width,height,mirrorX,mirrorY,mirrorDiagonal,mirrorAntiDiagonal,wrap)
     if(points.isEmpty() || ramp.isEmpty()) return out
     val p=mutableListOf<Pair<Int,Int>>()
     for(point in points) {
@@ -168,35 +170,39 @@ internal fun paletteTexturePixels(tool: String, points: List<Pair<Int,Int>>, wid
         }
         return shade
     }
-    fun emit(x: Int,y: Int,shade: Int) {
-        val xs=linkedSetOf(x); val ys=linkedSetOf(y)
-        if(mirrorX) xs.add(width-1-x)
-        if(mirrorY) ys.add(height-1-y)
-        for(xx in xs) for(yy in ys) if(xx in 0 until width && yy in 0 until height) out[yy*width+xx]=ramp[shade.coerceIn(0,4)]
-    }
-    val clusterCache = mutableMapOf<Int,Int>()
-    val barkCache = mutableMapOf<Int,Int>()
     val leavesCache = mutableMapOf<Int,Int>()
+    fun emit(x: Int,y: Int,shade: Int) {
+        for((xx,yy) in symmetry.points(x,y)) {
+            val targetShade=if(tool=="leaves") leavesCache.getOrPut(yy*width+xx) {
+                // Canonicalize the destination, not a previously rounded source.
+                // This keeps mixed-parity diagonal overlap stable across dabs.
+                val canonical=symmetry.canonical(xx,yy)
+                leaves(canonical.first,canonical.second)
+            } else shade
+            out[yy*width+xx]=ramp[targetShade.coerceIn(0,4)]
+        }
+    }
+    val clusterCache = mutableMapOf<Pair<Int,Int>,Int>()
+    val barkCache = mutableMapOf<Pair<Int,Int>,Int>()
+    val bounds=symmetry.sourceBounds
     fun stamp(x: Int,y: Int,tx: Double,ty: Double) {
         val left = x-size/2; val top = y-size/2
-        if (left >= width || top >= height || left+size <= 0 || top+size <= 0) return
+        if (!wrap && (left > bounds.right || top > bounds.bottom || left+size <= bounds.left || top+size <= bounds.top)) return
         val cell=max(2.0,size/3.0)
         for(oy in 0 until size) for(ox in 0 until size) {
             val px=left+ox; val py=top+oy
-            if (px !in 0 until width || py !in 0 until height) continue
+            if (!wrap && (px !in bounds.left..bounds.right || py !in bounds.top..bounds.bottom)) continue
             val nx=(2*ox-size+1).toDouble()/size;val ny=(2*oy-size+1).toDouble()/size
             val radius=nx*nx+ny*ny
             if(radius>1) continue
+            val sampleX=if(wrap) Math.floorMod(px,width) else px
+            val sampleY=if(wrap) Math.floorMod(py,height) else py
             val shade=when(tool) {
                 "ditherPaint", "ditherRetouch" -> 2
-                "cluster" -> clusterCache.getOrPut(py*width+px) { cluster(px.toDouble(),py.toDouble(),cell) }
-                "bark" -> barkCache.getOrPut(py*width+px) { bark(px, py) }
-                "leaves" -> leavesCache.getOrPut(py*width+px) {
-                    // Canonical halves keep mirrored overlap independent of dab order.
-                    leaves(if (mirrorX) min(px, width-1-px) else px,
-                        if (mirrorY) min(py, height-1-py) else py)
-                }
-                "stripes" -> cluster((px*tx+py*ty)/4,-px*ty+py*tx,cell)
+                "cluster" -> clusterCache.getOrPut(sampleX to sampleY) { cluster(sampleX.toDouble(),sampleY.toDouble(),cell) }
+                "bark" -> barkCache.getOrPut(sampleX to sampleY) { bark(sampleX, sampleY) }
+                "leaves" -> 2 // Destination-space canonical texture is sampled in emit.
+                "stripes" -> cluster((sampleX*tx+sampleY*ty)/4,-sampleX*ty+sampleY*tx,cell)
                 "sphere" -> {
                     val light=(.62*sqrt(max(0.0,1-radius))-.70*ny-.18*nx).coerceIn(-1.0,1.0)
                     ((light+1)*2).roundToInt()

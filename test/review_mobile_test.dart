@@ -72,6 +72,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Grass'));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('tag-options')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rename tag'));
+    await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('tag-name')), 'Water');
     await tester.pump();
     await tester.tap(find.byTooltip('Save Aseprite'));

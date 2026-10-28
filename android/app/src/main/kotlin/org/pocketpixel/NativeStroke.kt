@@ -11,7 +11,8 @@ internal object NativeStroke {
         val index = if (d.depth == 8) selected ?: d.drawingColor(color, frame) else null
         if (index != null && d.display(index, frame, layer) ushr 24 == 0) return emptyMap()
         val pixels = splatterPixels(points, d.width, d.height, size,
-            (args["seed"] as? Number)?.toLong() ?: 1L, args["mirrorX"] == true, args["mirrorY"] == true)
+            (args["seed"] as? Number)?.toLong() ?: 1L, args["mirrorX"] == true, args["mirrorY"] == true,
+            args["mirrorDiagonal"] == true, args["mirrorAntiDiagonal"] == true, args["wrap"] == true)
         val changes = linkedMapOf<Int,Int>()
         val cel = d.resolved(frame, layer)
         for ((position, coverage) in pixels) {
@@ -36,7 +37,8 @@ internal object NativeStroke {
         if (!dithering && selected != null && selected == excluded) return emptyMap()
         val ramp = if (dithering) listOf(0,0,0,0,0) else paletteShadeRamp(palette, color, selected, excluded)
         val pixels = paletteTexturePixels(tool, points, d.width, d.height, size, ramp,
-            (args["seed"] as? Number)?.toLong() ?: 1L, args["mirrorX"] == true, args["mirrorY"] == true)
+            (args["seed"] as? Number)?.toLong() ?: 1L, args["mirrorX"] == true, args["mirrorY"] == true,
+            args["mirrorDiagonal"] == true, args["mirrorAntiDiagonal"] == true, args["wrap"] == true)
         val cache = mutableMapOf<Long, Int>()
         val strength = args.strictInteger("strength", 50).coerceIn(1, 100)
         val changes = linkedMapOf<Int,Int>()
@@ -83,7 +85,9 @@ internal object NativeStroke {
         if (d.depth == 8 && paletteIndex != null) require(paletteIndex in d.frames[frame].palette.indices) { "Invalid palette index" }
         val value = if (d.depth == 8 && paletteIndex != null && tool != "eraser" && tool != "gradient" && tool != "blur" && !(tool == "fill" && args["gradient"] == true)) paletteIndex
             else d.drawingColor(color,frame,tool=="eraser")
-        val mirrorX = args["mirrorX"] == true; val mirrorY = args["mirrorY"] == true
+        val wrap=args["wrap"] == true
+        val symmetry=StrokeSymmetry(d.width,d.height,args["mirrorX"] == true,args["mirrorY"] == true,
+            args["mirrorDiagonal"] == true,args["mirrorAntiDiagonal"] == true,wrap)
         val mask = linkedSetOf<Int>()
         val painted = mutableSetOf<Int>()
         val accumulates = tool == "spray" || tool == "airbrush"
@@ -95,11 +99,7 @@ internal object NativeStroke {
         fun next(): Long { randomState=(randomState*1664525L+1013904223L) and 0xffffffffL; return randomState ushr 16 }
         fun index(x: Int,y: Int) = (y-cel.y)*cel.width+x-cel.x
         fun pixel(x: Int,y: Int, ink: Int = value, stamp: MutableSet<Int>? = null) {
-            val xs=linkedSetOf(x); val ys=linkedSetOf(y)
-            if(mirrorX) xs.add(d.width-1-x)
-            if(mirrorY) ys.add(d.height-1-y)
-            for(py in ys) for(px in xs) {
-                if(px !in 0 until d.width || py !in 0 until d.height) continue
+            for((px,py) in symmetry.points(x,y)) {
                 val i=index(px,py)
                 if(stamp != null && !stamp.add(i)) continue
                 if(effect) mask.add(i) else paint(i,ink)
@@ -125,11 +125,13 @@ internal object NativeStroke {
         if(tool=="gradient") {
             // Canvas-wide linear field: size and mirror settings do not apply.
             val dx=(b.first-a.first).toLong();val dy=(b.second-a.second).toLong()
+            val originX=if(wrap) Math.floorMod(a.first,d.width) else a.first
+            val originY=if(wrap) Math.floorMod(a.second,d.height) else a.second
             val denominator=dx*dx+dy*dy
             if(denominator==0L) return
             val second=(args["secondaryColor"] as? Number)?.toLong()?.toInt() ?: color
             for(y in 0 until d.height) for(x in 0 until d.width) {
-                val position=((x-a.first)*dx+(y-a.second)*dy).coerceIn(0L,denominator)
+                val position=((x-originX)*dx+(y-originY)*dy).coerceIn(0L,denominator)
                 var ink=0
                 for(shift in listOf(0,8,16,24)) {
                     val from=color ushr shift and 255;val to=second ushr shift and 255
@@ -147,19 +149,24 @@ internal object NativeStroke {
             val second=(args["secondaryColor"] as? Number)?.toLong()?.toInt() ?: color
             val direction=args["gradientDirection"] as? String ?: "vertical"
             require(!gradient || direction in listOf("horizontal","vertical")) { "Gradient direction must be horizontal or vertical" }
-            val seeds=mutableListOf(Triple(a.first,a.second,false))
-            // Third component reverses the chosen gradient axis for this reflection.
-            if(mirrorX) seeds.add(Triple(d.width-1-a.first,a.second,direction=="horizontal"))
-            if(mirrorY) seeds.add(Triple(a.first,d.height-1-a.second,direction=="vertical"))
-            if(mirrorX&&mirrorY) seeds.add(Triple(d.width-1-a.first,d.height-1-a.second,true))
+            // Transform the gradient vector as well as its seed: diagonals swap
+            // horizontal/vertical directions rather than merely reversing them.
+            val seeds=symmetry.transforms.map { t ->
+                val point=symmetry.transformedPoint(t,a.first,a.second)
+                val vector=t.vector(if(direction=="horizontal") 1 else 0,if(direction=="vertical") 1 else 0)
+                Triple(point,vector.first != 0,vector.first+vector.second < 0)
+            }
             val visited=BooleanArray(source.size);val region=IntArray(source.size)
-            for((sx,sy,reverse) in seeds) {
+            for((point,horizontal,reverse) in seeds) {
+                val (sx,sy)=point
                 if(sx !in 0 until d.width || sy !in 0 until d.height || visited[index(sx,sy)]) continue
                 val target=source[index(sx,sy)];var count=0;var head=0
                 var left=sx;var right=sx;var top=sy;var bottom=sy
                 fun queue(x: Int,y: Int) {
-                    if(x !in 0 until d.width || y !in 0 until d.height) return
-                    val i=index(x,y)
+                    val xx=if(wrap) Math.floorMod(x,d.width) else x
+                    val yy=if(wrap) Math.floorMod(y,d.height) else y
+                    if(xx !in 0 until d.width || yy !in 0 until d.height) return
+                    val i=index(xx,yy)
                     if(!visited[i] && source[i]==target) { visited[i]=true;region[count++]=i }
                 }
                 queue(sx,sy)
@@ -168,13 +175,13 @@ internal object NativeStroke {
                     left=min(left,x);right=max(right,x);top=min(top,y);bottom=max(bottom,y)
                     queue(x-1,y);queue(x+1,y);queue(x,y-1);queue(x,y+1)
                 }
-                val start=if(direction=="horizontal") left else top
-                val end=if(direction=="horizontal") right else bottom
+                val start=if(horizontal) left else top
+                val end=if(horizontal) right else bottom
                 val den=end-start
                 for(n in 0 until count) {
                     val i=region[n]
                     if(!gradient) { paint(i,value);continue }
-                    var position=(if(direction=="horizontal") i%cel.width+cel.x else i/cel.width+cel.y)-start
+                    var position=(if(horizontal) i%cel.width+cel.x else i/cel.width+cel.y)-start
                     if(reverse) position=den-position
                     var mixed=0
                     for(shift in listOf(0,8,16,24)) {
@@ -194,8 +201,15 @@ internal object NativeStroke {
                 val top=min(a.second,b.second);val bottom=max(a.second,b.second)
                 if(args["filled"]==true) {
                     val w=(right-left+1).toLong();val h=(bottom-top+1).toLong()
-                    for(y in max(0,top)..min(d.height-1,bottom)) for(x in max(0,left)..min(d.width-1,right)) {
-                        val nx=2L*x-left-right;val ny=2L*y-top-bottom
+                    val bounds=symmetry.sourceBounds
+                    val minX=if(wrap) 0 else max(bounds.left,left)
+                    val maxX=if(wrap) d.width-1 else min(bounds.right,right)
+                    val minY=if(wrap) 0 else max(bounds.top,top)
+                    val maxY=if(wrap) d.height-1 else min(bounds.bottom,bottom)
+                    for(y in minY..maxY) for(x in minX..maxX) {
+                        val sx=if(wrap) periodicRepresentative(left,right,x,d.width) ?: continue else x
+                        val sy=if(wrap) periodicRepresentative(top,bottom,y,d.height) ?: continue else y
+                        val nx=2L*sx-left-right;val ny=2L*sy-top-bottom
                         if(tool=="rectangle" || nx*nx*h*h+ny*ny*w*w<=w*w*h*h) pixel(x,y)
                     }
                 } else if(tool=="rectangle") {
@@ -205,8 +219,12 @@ internal object NativeStroke {
                     val rx=abs(b.first-a.first)/2.0;val ry=abs(b.second-a.second)/2.0
                     val cx=(a.first+b.first)/2.0;val cy=(a.second+b.second)/2.0
                     val steps=max(12,ceil(2*PI*max(rx,ry)).toInt())
-                    var previous=Pair((cx+rx).roundToInt(),cy.roundToInt())
-                    for(i in 1..steps) { val t=2*PI*i/steps;val p=Pair((cx+rx*cos(t)).roundToInt(),(cy+ry*sin(t)).roundToInt());line(previous,p);previous=p }
+                    // Dart rounds half-pixels away from zero; Kotlin's default
+                    // rounds negative halves toward positive infinity. Keep the
+                    // original-coordinate outline identical before reflection.
+                    fun rasterRound(v: Double) = if(v < 0) -(-v).roundToInt() else v.roundToInt()
+                    var previous=Pair(rasterRound(cx+rx),rasterRound(cy))
+                    for(i in 1..steps) { val t=2*PI*i/steps;val p=Pair(rasterRound(cx+rx*cos(t)),rasterRound(cy+ry*sin(t)));line(previous,p);previous=p }
                 }
             }
             "airbrush" -> {
@@ -223,11 +241,7 @@ internal object NativeStroke {
                         val ink=(color and 0xffffff) or (alpha shl 24)
                         val px=x-size/2+ox;val py=y-size/2+oy
                         if(d.depth==8) {
-                            val xs=linkedSetOf(px);val ys=linkedSetOf(py)
-                            if(mirrorX) xs.add(d.width-1-px)
-                            if(mirrorY) ys.add(d.height-1-py)
-                            for(yy in ys) for(xx in xs) {
-                                if(xx !in 0 until d.width || yy !in 0 until d.height) continue
+                            for((xx,yy) in symmetry.points(px,py)) {
                                 val i=index(xx,yy)
                                 if(!stamp.add(i)) continue
                                 cel.pixels[i]=d.drawingColor(over(d.display(cel.pixels[i],frame,layer),ink),frame)
@@ -261,9 +275,11 @@ internal object NativeStroke {
                     if(next()%100>=strength) continue
                     val x=i%cel.width+cel.x;val y=i/cel.width+cel.y
                     val neighbours=mutableListOf<Int>()
-                    for(yy in max(0,y-1)..min(d.height-1,y+1)) for(xx in max(0,x-1)..min(d.width-1,x+1)) {
-                        val j=index(xx,yy)
-                        if(j!=i && cel.pixels[j]!=cel.pixels[i]) neighbours.add(j)
+                    val minX=if(wrap) x-1 else max(0,x-1);val maxX=if(wrap) x+1 else min(d.width-1,x+1)
+                    val minY=if(wrap) y-1 else max(0,y-1);val maxY=if(wrap) y+1 else min(d.height-1,y+1)
+                    for(yy in minY..maxY) for(xx in minX..maxX) {
+                        val j=index(if(wrap) Math.floorMod(xx,d.width) else xx,if(wrap) Math.floorMod(yy,d.height) else yy)
+                        if(j!=i && cel.pixels[j]!=cel.pixels[i] && j !in neighbours) neighbours.add(j)
                     }
                     if(neighbours.isEmpty()) continue
                     val j=neighbours[(next()%neighbours.size).toInt()];val old=cel.pixels[i]
@@ -272,8 +288,12 @@ internal object NativeStroke {
             } else for(i in mask) {
                 val x=i%cel.width+cel.x;val y=i/cel.width+cel.y
                 var count=0;var alpha=0;val sums=LongArray(3)
-                for(py in max(0,y-1)..min(d.height-1,y+1)) for(px in max(0,x-1)..min(d.width-1,x+1)) {
-                    val c=d.display(source[index(px,py)],frame,layer);val ca=c ushr 24
+                val minX=if(wrap) x-1 else max(0,x-1);val maxX=if(wrap) x+1 else min(d.width-1,x+1)
+                val minY=if(wrap) y-1 else max(0,y-1);val maxY=if(wrap) y+1 else min(d.height-1,y+1)
+                for(py in minY..maxY) for(px in minX..maxX) {
+                    val sx=if(wrap) Math.floorMod(px,d.width) else px
+                    val sy=if(wrap) Math.floorMod(py,d.height) else py
+                    val c=d.display(source[index(sx,sy)],frame,layer);val ca=c ushr 24
                     alpha+=ca;count++
                     for(channel in 0..2) sums[channel]+=(c ushr (16-channel*8) and 255).toLong()*ca
                 }
