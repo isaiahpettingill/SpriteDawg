@@ -300,7 +300,12 @@ Map<int, int> paletteTexturePixels({
         } else if (tool == 'leaves') {
           shade = leavesCache.putIfAbsent(
             py * width + px,
-            () => leaves(px, py),
+            // Sample one canonical half so mirrored overlapping dabs cannot
+            // overwrite earlier leaves with a different side of the field.
+            () => leaves(
+              mirrorX ? math.min(px, width - 1 - px) : px,
+              mirrorY ? math.min(py, height - 1 - py) : py,
+            ),
           );
         } else if (tool == 'stripes') {
           shade = cluster((px * tx + py * ty) / 4, -px * ty + py * tx, cell);

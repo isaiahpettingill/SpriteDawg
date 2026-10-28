@@ -29,6 +29,7 @@ MIT licensed, no ads, accounts, tracking, networking or broad Android storage pe
   up. Indexed mode uses the exact selected palette entry and its alpha instead
   of synthesizing off-palette transparency. Both new brushes support live preview,
   mirrored strokes, per-tool sizes and single-step undo.
+  See [rendered examples and verification](docs/BRUSHES.md).
 - The dedicated **Gradient** subtool paints a linear gradient across the **whole active
   layer's canvas area**. Choose Start and End colors (including alpha), then drag to set
   direction and endpoint positions; outside the endpoints the respective color is clamped.

@@ -249,4 +249,13 @@ class PaletteTextureBrushTest {
         assertTrue(litRims > 100)
     }
 
+    @Test fun mirroredLeavesKeepTheSameFieldAcrossOverlappingDabs() {
+        val path = listOf(8 to 8, 72 to 8, 72 to 72, 16 to 48)
+        fun raster(p: List<Pair<Int,Int>>) = paletteTexturePixels("leaves", p,
+            96, 96, 12, listOf(0,1,2,3,4), 421L, true, true)
+        val full = raster(path)
+        assertEquals(full, raster(path.reversed()))
+        for ((pixel, shade) in raster(path.take(3))) assertEquals(shade, full[pixel])
+    }
+
 }

@@ -191,7 +191,11 @@ internal fun paletteTexturePixels(tool: String, points: List<Pair<Int,Int>>, wid
                 "ditherPaint", "ditherRetouch" -> 2
                 "cluster" -> clusterCache.getOrPut(py*width+px) { cluster(px.toDouble(),py.toDouble(),cell) }
                 "bark" -> barkCache.getOrPut(py*width+px) { bark(px, py) }
-                "leaves" -> leavesCache.getOrPut(py*width+px) { leaves(px, py) }
+                "leaves" -> leavesCache.getOrPut(py*width+px) {
+                    // Canonical halves keep mirrored overlap independent of dab order.
+                    leaves(if (mirrorX) min(px, width-1-px) else px,
+                        if (mirrorY) min(py, height-1-py) else py)
+                }
                 "stripes" -> cluster((px*tx+py*ty)/4,-px*ty+py*tx,cell)
                 "sphere" -> {
                     val light=(.62*sqrt(max(0.0,1-radius))-.70*ny-.18*nx).coerceIn(-1.0,1.0)

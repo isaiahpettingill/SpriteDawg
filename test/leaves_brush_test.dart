@@ -2,16 +2,21 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:spritedawg/engine/editor_engine.dart';
 import 'package:spritedawg/engine/palette_texture_brush.dart';
 
-Map<int, int> raster(List<(int, int)> points, {int seed = 421}) =>
-    paletteTexturePixels(
-      tool: 'leaves',
-      points: points,
-      width: 96,
-      height: 96,
-      size: 12,
-      ramp: [0, 1, 2, 3, 4],
-      seed: seed,
-    );
+Map<int, int> raster(
+  List<(int, int)> points, {
+  int seed = 421,
+  bool mirror = false,
+}) => paletteTexturePixels(
+  tool: 'leaves',
+  points: points,
+  width: 96,
+  height: 96,
+  size: 12,
+  ramp: [0, 1, 2, 3, 4],
+  seed: seed,
+  mirrorX: mirror,
+  mirrorY: mirror,
+);
 
 void main() {
   test(
@@ -30,6 +35,16 @@ void main() {
       expect(full.values.toSet(), {0, 1, 2, 3, 4});
     },
   );
+
+  test('mirrored overlapping leaves stay stable in both directions', () {
+    const path = [(8, 8), (72, 8), (72, 72), (16, 48)];
+    final full = raster(path, mirror: true);
+    final prefix = raster(path.take(3).toList(), mirror: true);
+    expect(raster(path.reversed.toList(), mirror: true), full);
+    for (final pixel in prefix.entries) {
+      expect(full[pixel.key], pixel.value);
+    }
+  });
 
   test('leaves form coherent shaded shapes rather than cluster noise', () {
     final points = <(int, int)>[];
