@@ -79,6 +79,9 @@ MIT licensed, no ads, accounts, tracking, networking or broad Android storage pe
   shown with a Save a copy action; they never count as successful autosaves.
 
 Android uses the system document picker. Linux uses native GTK file dialogs.
+Android tabs and internal drafts use the document provider's filename, not its
+opaque URI ID. Older URI-ID draft labels are repaired when the original provider
+is accessible; recovery still opens an unsaved copy without restoring a save grant.
 Linux also supports pointer-wheel zoom, right-drag pan, Ctrl-Z/Y, Ctrl-Shift-Z,
 Ctrl-S/O, and B/E/G/I/H tool shortcuts. Controls remain usable in narrow portrait
 windows; desktop packaging declares mobile support to Linux phone shells.

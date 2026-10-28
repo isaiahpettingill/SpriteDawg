@@ -16,6 +16,7 @@ internal class DraftStore(
     private val directory: File,
     private val capacity: Long = 256L * 1024 * 1024,
     private val maximumDrafts: Int = 64,
+    private val resolveLegacyTitle: (String?, String) -> String? = { _, _ -> null },
 ) {
     data class Draft(
         val id: Int,
@@ -24,6 +25,8 @@ internal class DraftStore(
         val updatedAt: Long,
         val document: Document,
         val fallback: Boolean = false,
+        val titleNeedsRefresh: Boolean = false,
+        val titleRefreshed: Boolean = false,
     ) {
         fun summary(): Map<String, Any?> = mapOf(
             "id" to id, "title" to title, "updatedAt" to updatedAt,
@@ -76,19 +79,27 @@ internal class DraftStore(
                 val draft = if (index < 2) decode(file.readBytes(), id) else Draft(
                     id, "Recovered $id", null, file.lastModified(), Aseprite.read(file.readBytes()),
                 )
-                return draft.copy(fallback = index == 1 || index == 2)
+                val resolved = if (draft.titleNeedsRefresh) try {
+                    resolveLegacyTitle(draft.sourceUri, draft.title)
+                } catch (_: Exception) { null } else null
+                return draft.copy(
+                    fallback = index == 1 || index == 2,
+                    title = resolved ?: draft.title,
+                    titleNeedsRefresh = draft.titleNeedsRefresh && resolved == null,
+                    titleRefreshed = resolved != null,
+                )
             } catch (e: Exception) { failure = e }
         }
         throw IllegalStateException("Draft $id has no readable snapshot", failure)
     }
 
-    fun write(id: Int, title: String, sourceUri: String?, document: Document, updatedAt: Long = System.currentTimeMillis()) {
+    fun write(id: Int, title: String, sourceUri: String?, document: Document, updatedAt: Long = System.currentTimeMillis(), titleNeedsRefresh: Boolean = false) {
         require(id > 0 && id < Int.MAX_VALUE - 1) { "Invalid draft ID" }
         summaries()
         require(id in cache || cache.size < maximumDrafts) { "Internal draft limit reached ($maximumDrafts). Save or explicitly delete an older draft; no drafts were removed." }
         val bytes = Aseprite.write(document)
         Aseprite.read(bytes) // Never replace a last-good generation with invalid output.
-        val draft = Draft(id, title.take(512), sourceUri?.take(8192), updatedAt, document)
+        val draft = Draft(id, title.take(512), sourceUri?.take(8192), updatedAt, document, titleNeedsRefresh = titleNeedsRefresh)
         val encoded = encode(draft, bytes)
         val old = listOf(current(id), previous(id)).firstOrNull { candidate ->
             candidate.isFile && candidate.length() <= Aseprite.MAX_FILE + 32768L && try { decode(candidate.readBytes(), id); true } catch (_: Exception) { false }
@@ -128,8 +139,9 @@ internal class DraftStore(
     private fun encode(draft: Draft, bytes: ByteArray): ByteArray {
         val body = ByteArrayOutputStream()
         DataOutputStream(body).use { out ->
-            out.writeInt(0x53444431); out.writeInt(draft.id); out.writeLong(draft.updatedAt)
+            out.writeInt(0x53444432); out.writeInt(draft.id); out.writeLong(draft.updatedAt)
             out.writeUTF(draft.title); out.writeUTF(draft.sourceUri ?: "")
+            out.writeBoolean(draft.titleNeedsRefresh)
             out.writeInt(bytes.size); out.write(bytes)
         }
         val payload = body.toByteArray()
@@ -143,13 +155,15 @@ internal class DraftStore(
         val input = DataInputStream(ByteArrayInputStream(bytes))
         val checksum = input.readLong()
         require(CRC32().apply { update(bytes, 8, bytes.size - 8) }.value == checksum) { "Draft checksum mismatch" }
-        require(input.readInt() == 0x53444431) { "Unsupported draft format" }
+        val format = input.readInt()
+        require(format == 0x53444431 || format == 0x53444432) { "Unsupported draft format" }
         val id = input.readInt(); require(id == expectedId) { "Draft identity mismatch" }
         val updatedAt = input.readLong(); val title = input.readUTF(); val source = input.readUTF()
+        val titleNeedsRefresh = if (format == 0x53444431) true else input.readBoolean()
         val size = input.readInt()
         require(size in 128..Aseprite.MAX_FILE && size == input.available()) { "Invalid draft payload" }
         val document = ByteArray(size).also { input.readFully(it) }.let(Aseprite::read)
-        return Draft(id, title, source.ifEmpty { null }, updatedAt, document)
+        return Draft(id, title, source.ifEmpty { null }, updatedAt, document, titleNeedsRefresh = titleNeedsRefresh)
     }
 }
 

@@ -3,6 +3,8 @@ package org.pocketpixel
 class EditorSession(val id: Int, var title: String = "Untitled $id") {
     val engine = EditorEngine()
     var path: String? = null
+    // Only old URI-tail titles may be repaired when provider access returns.
+    var titleNeedsRefresh = false
     // Informational provenance only; never restored as a save permission.
     var sourceUri: String? = null
     var recoveryError: String? = null
