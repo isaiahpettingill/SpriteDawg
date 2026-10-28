@@ -77,6 +77,15 @@ jobs:
           path: build/bark-preview.png
           retention-days: 7
           overwrite: true
+      - name: Render production Leaves and Splatter preview
+        run: dart tool/new_brush_preview.dart
+      - uses: actions/upload-artifact@v4
+        with:
+          name: leaves-splatter-preview
+          path: build/new-brush-preview.png
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
       - name: Capture compact frame panels
         run: |
           font="$(fc-match -f '%{file}' sans)"

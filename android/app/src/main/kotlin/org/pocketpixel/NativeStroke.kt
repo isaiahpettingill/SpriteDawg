@@ -4,6 +4,28 @@ import kotlin.math.*
 
 /** Native pixel operations. Ordinary ink covers once; spray/airbrush accumulate per dab. */
 internal object NativeStroke {
+    fun prepareSplatterPixels(d: Document, frame: Int, layer: Int, args: Map<String,Any?>, points: List<Pair<Int,Int>>, size: Int, color: Int): Map<Int,Int> {
+        val selected = if (args.containsKey("paletteIndex")) args.strictInteger("paletteIndex", -1) else null
+        if (d.depth == 8 && selected != null) require(selected in d.frames[frame].palette.indices) { "Invalid palette index" }
+        if (color ushr 24 == 0) return emptyMap()
+        val index = if (d.depth == 8) selected ?: d.drawingColor(color, frame) else null
+        if (index != null && d.display(index, frame, layer) ushr 24 == 0) return emptyMap()
+        val pixels = splatterPixels(points, d.width, d.height, size,
+            (args["seed"] as? Number)?.toLong() ?: 1L, args["mirrorX"] == true, args["mirrorY"] == true)
+        val changes = linkedMapOf<Int,Int>()
+        val cel = d.resolved(frame, layer)
+        for ((position, coverage) in pixels) {
+            val x = position % d.width; val y = position / d.width
+            val original = if (cel != null && x >= cel.x && x < cel.x+cel.width && y >= cel.y && y < cel.y+cel.height)
+                cel.pixels[(y-cel.y)*cel.width+x-cel.x] else if (d.depth == 8) d.transparentIndex else 0
+            val alpha = ((color ushr 24)*coverage+127)/255
+            if (index == null && alpha == 0) continue
+            val ink = (color and 0xffffff) or (alpha shl 24)
+            val value = index ?: d.drawingColor(over(original, ink), frame)
+            if (value != original) changes[position] = value
+        }
+        return changes
+    }
     fun preparePalettePixels(d: Document, frame: Int, layer: Int, args: Map<String, Any?>, points: List<Pair<Int,Int>>, size: Int, color: Int): Map<Int,Int> {
         val tool = args["tool"] as? String ?: "pencil"
         val palette = d.frames[frame].palette
@@ -43,8 +65,9 @@ internal object NativeStroke {
     }
     fun apply(d: Document, frame: Int, layer: Int, args: Map<String, Any?>, points: List<Pair<Int,Int>>, size: Int, color: Int, preparedPixels: Map<Int,Int>? = null) {
         val tool = args["tool"] as? String ?: "pencil"
-        if (tool in paletteTextureTools) {
-            val changes = preparedPixels ?: preparePalettePixels(d, frame, layer, args, points, size, color)
+        if (tool in paletteTextureTools || tool == "splatter") {
+            val changes = preparedPixels ?: if (tool == "splatter") prepareSplatterPixels(d, frame, layer, args, points, size, color)
+                else preparePalettePixels(d, frame, layer, args, points, size, color)
             if (changes.isEmpty()) return
             val cel = d.editable(frame,layer)
             for ((position, value) in changes) {

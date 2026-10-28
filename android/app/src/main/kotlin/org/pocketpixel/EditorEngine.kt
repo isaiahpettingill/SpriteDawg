@@ -54,7 +54,7 @@ class EditorEngine {
     }
     fun stroke(args: Map<String, Any?>) {
         val tool = args["tool"] as? String ?: "pencil"
-        require(tool in listOf("pencil", "eraser", "fill", "gradient", "line", "rectangle", "ellipse", "spray", "airbrush", "blur", "jumble") || tool in paletteTextureTools) { "Unknown drawing tool" }
+        require(tool in listOf("pencil", "eraser", "fill", "gradient", "line", "rectangle", "ellipse", "spray", "splatter", "airbrush", "blur", "jumble") || tool in paletteTextureTools) { "Unknown drawing tool" }
         val points = (args["points"] as? List<*>)?.map { p ->
             val a = p as List<*>; Pair((a[0] as Number).toInt(), (a[1] as Number).toInt())
         } ?: emptyList()
@@ -62,12 +62,14 @@ class EditorEngine {
         require(points.size <= 100000) { "Stroke is too long" }
         require(points.all { abs(it.first.toLong()) <= 8192 && abs(it.second.toLong()) <= 8192 }) { "Stroke exceeds canvas limits" }
         if (tool == "gradient" && points.first() == points.last()) return
-        val size = args.number("size", if(tool == "spray" || tool == "airbrush") 12 else 1).coerceIn(1, 32)
+        val size = args.number("size", if(tool == "spray" || tool == "airbrush" || tool == "splatter") 12 else 1).coerceIn(1, 32)
         val color = (args["color"] as? Number)?.toLong()?.toInt() ?: 0xff000000.toInt()
         require(document.layers[layer].visible) { "Show this layer before drawing" }
         require(document.layers[layer].flags and 2 != 0) { "This layer is locked" }
         require(tool != "eraser" || document.layers[layer].flags and 8 == 0) { "Convert this background layer to transparent before erasing" }
-        val palettePixels = if (tool in paletteTextureTools) {
+        val palettePixels = if (tool == "splatter") {
+            NativeStroke.prepareSplatterPixels(document, frame, layer, args, points, size, color).also { if (it.isEmpty()) return }
+        } else if (tool in paletteTextureTools) {
             if (document.frames[frame].palette.isEmpty()) return
             NativeStroke.preparePalettePixels(document, frame, layer, args, points, size, color).also { if (it.isEmpty()) return }
         } else null

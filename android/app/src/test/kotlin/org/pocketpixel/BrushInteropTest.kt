@@ -50,4 +50,28 @@ class BrushInteropTest {
     }
 }
 
+@Test fun splatterMatchesDartExactRgbaAndIndexedAlpha() {
+    val path = System.getenv("SPRITEDAWG_BRUSH_INTEROP_DIR")
+    assumeTrue("Set SPRITEDAWG_BRUSH_INTEROP_DIR to Dart fixtures", path != null)
+    for (indexed in listOf(false, true)) {
+        val d = Document.create(32,32)
+        if (indexed) {
+            d.depth = 8
+            d.frames[0].palette = intArrayOf(0, 0x80c86432.toInt(), 0x80c86432.toInt())
+        } else {
+            val c = d.editable(0,0)
+            for (y in 0..31) for (x in 0..31) c.pixels[y*32+x] = (((x*17+y*13)%256) shl 24) or (((x*7)%256) shl 16) or (((y*9)%256) shl 8) or (((x+y)*5)%256)
+        }
+        val e = EditorEngine(); e.replace(d)
+        val args = mutableMapOf<String,Any?>("tool" to "splatter",
+            "points" to listOf(listOf(-3,5),listOf(18,19),listOf(18,19),listOf(20,19)),
+            "size" to 20, "seed" to 42, "mirrorX" to true, "mirrorY" to true, "color" to 0x80c86432L)
+        if (indexed) args["paletteIndex"] = 2
+        e.stroke(args)
+        val name = if (indexed) "splatter-indexed" else "splatter"
+        assertArrayEquals(name, File(path!!,"$name.rgba").readBytes(), e.state(false)["pixels"] as ByteArray)
+        if (indexed) org.junit.Assert.assertTrue(e.document.resolved(0,0)!!.pixels.all { it == 0 || it == 2 })
+    }
+}
+
 }
