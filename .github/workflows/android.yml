@@ -65,7 +65,7 @@ jobs:
         run: |
           if ! dart format --output=none --set-exit-if-changed lib test; then
             dart format lib test
-            git diff --exit-code
+            git diff --exit-code -- lib test
           fi
       - run: flutter analyze
       - run: flutter test --reporter expanded

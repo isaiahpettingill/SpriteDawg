@@ -267,9 +267,7 @@ void main() {
     expect(timed, isEmpty);
   });
 
-  testWidgets('Frames reopen at selection, not stale browsing', (
-    tester,
-  ) async {
+  testWidgets('Frames reopen at selection, not stale browsing', (tester) async {
     _phone(tester);
     final engine = _engine();
     final editor = _editor(engine);

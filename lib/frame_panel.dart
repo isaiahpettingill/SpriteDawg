@@ -108,7 +108,10 @@ class _FramePanelState extends State<FramePanel> {
                 if (value == 'delete') widget.onDelete();
               },
               itemBuilder: (_) => [
-                const PopupMenuItem(value: 'duration', child: Text('Duration…')),
+                const PopupMenuItem(
+                  value: 'duration',
+                  child: Text('Duration…'),
+                ),
                 PopupMenuItem(
                   value: 'delete',
                   enabled: widget.durations.length > 1,
