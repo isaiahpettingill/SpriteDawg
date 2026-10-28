@@ -3,34 +3,33 @@
 set -euo pipefail
 command -v python3 >/dev/null || { echo 'Python 3 is required.' >&2; exit 1; }
 exec python3 - "$@" <<'PYTHON'
-"""Download only official stable releases; never run scripts from the archive."""
+"""Download only official stable releases; never execute downloaded code during installation."""
 import argparse
 import contextlib
 import fcntl
 import hashlib
 import json
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import platform
 import re
 import shutil
 import stat
 import subprocess
 import sys
-import tarfile
 import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
-import uuid
 
 REPO = 'isaiahpettingill/SpriteDawg'
 API = 'https://api.github.com/repos/' + REPO + '/releases/'
 HOSTS = {'api.github.com', 'github.com', 'release-assets.githubusercontent.com',
          'objects.githubusercontent.com'}
 MAX_DOWNLOAD = 512 * 1024 * 1024
-MAX_UNPACKED = 2 * 1024 * 1024 * 1024
 APP_ID = 'org.pocketpixel.SpriteDawg'
+ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">\n<title>SpriteDawg</title>\n<desc>An original pixel dog on a warm violet tile. MIT licensed.</desc>\n<rect x="4" y="5" width="56" height="56" rx="8" fill="#000000" opacity=".2"/>\n<rect x="4" y="4" width="56" height="56" rx="8" fill="#7466a3"/>\n<path fill="#ffffff" opacity=".2" d="M12 4H52Q60 4 60 12V13Q60 5 52 5H12Q4 5 4 13V12Q4 4 12 4Z"/>\n<path d="M20,16 44,16 44,20 52,20 52,40 44,40 44,48 40,48 40,52 24,52 24,48 20,48 20,40 12,40 12,20 20,20Z" fill="#000000" opacity=".2" transform="translate(0 1)"/>\n<path d="M20,16 44,16 44,20 52,20 52,40 44,40 44,48 40,48 40,52 24,52 24,48 20,48 20,40 12,40 12,20 20,20Z" fill="#f5e6c8"/>\n<path fill="#b88a60" d="M12 20H20V40H12Z"/>\n<path fill="#b88a60" d="M44 20H52V40H44Z"/>\n<path fill="#403743" d="M24 28H28V32H24Z"/>\n<path fill="#403743" d="M36 28H40V32H36Z"/>\n<path fill="#403743" d="M28 36H36V40H28Z"/>\n<path fill="#403743" d="M30 40H34V44H30Z"/>\n<path fill="#cc7574" d="M28 44H36V48H28Z"/>\n</svg>\n'
+MIME = '<?xml version="1.0" encoding="UTF-8"?>\n<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">\n  <mime-type type="image/x-aseprite">\n    <comment>Aseprite sprite project</comment>\n    <alias type="application/x-aseprite"/>\n    <glob pattern="*.aseprite"/>\n    <glob pattern="*.ase"/>\n    <magic priority="60"><match type="little16" value="0xA5E0" offset="4"/></magic>\n  </mime-type>\n</mime-info>\n'
 
 
 def version(tag):
@@ -101,7 +100,7 @@ def release(tag=None, arch=None):
     if data.get('draft') or data.get('prerelease') or (tag and actual != tag):
         raise ValueError('Expected a published stable release')
     arch = arch or architecture()
-    name = 'spritedawg-%s-linux-%s.tar.gz' % (actual, arch)
+    name = 'spritedawg-%s-linux-%s.AppImage' % (actual, arch)
     assets = {}
     for item in data.get('assets', []):
         key = item.get('name')
@@ -126,57 +125,18 @@ def checksum(manifest, name):
         if match[2] == name:
             matches.append(match[1])
     if len(matches) != 1:
-        raise ValueError('Missing or duplicate archive checksum')
+        raise ValueError('Missing or duplicate AppImage checksum')
     return matches[0]
 
 
-def unpack(archive, target):
-    """No links/devices/traversal/duplicates; bounded expanded bytes and entries."""
-    with tarfile.open(archive, 'r:gz') as source:
-        seen, total = set(), 0
-        members = []
-        for member in source:
-            path = PurePosixPath(member.name)
-            if (path.is_absolute() or '..' in path.parts or '\\' in member.name or
-                    any(ord(c) < 32 for c in member.name)):
-                raise ValueError('Unsafe release archive path')
-            relative = str(path)
-            if relative == '.' and member.isdir():
-                continue
-            if relative in seen or not (member.isfile() or member.isdir()):
-                raise ValueError('Release archive contains links or duplicate/special entries')
-            seen.add(relative)
-            total += member.size
-            if len(seen) > 20000 or member.size < 0 or total > MAX_UNPACKED:
-                raise ValueError('Release archive exceeds extraction limits')
-            members.append((member, path))
-        for member, relative in members:
-            destination = target.joinpath(*relative.parts)
-            if member.isdir():
-                destination.mkdir(parents=True, exist_ok=True)
-            else:
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                with source.extractfile(member) as input_file, open(destination, 'xb') as output:
-                    shutil.copyfileobj(input_file, output)
-                destination.chmod(0o755 if member.mode & 0o111 else 0o644)
-
-
-def verify_bundle(bundle, info):
-    executable = bundle / 'spritedawg'
-    with executable.open('rb') as stream:
+def verify_appimage(path, arch):
+    with path.open('rb') as stream:
         header = stream.read(20)
-    expected_machine = 62 if info['arch'] == 'x64' else 183
-    if (len(header) < 20 or header[:4] != b'\x7fELF' or header[4:6] != b'\x02\x01' or
-            int.from_bytes(header[18:20], 'little') != expected_machine or
-            not executable.stat().st_mode & stat.S_IXUSR):
-        raise ValueError('Release executable does not match this architecture')
-    recorded = (bundle / 'release-version.txt').read_text().strip()
-    if recorded != info['tag']:
-        raise ValueError('Bundle version does not match the selected release')
-    for file in ('share/icons/hicolor/scalable/apps/' + APP_ID + '.svg',
-                 'share/mime/packages/' + APP_ID + '.xml', 'update-spritedawg.sh'):
-        if not (bundle / file).is_file():
-            raise ValueError('Release bundle is missing required installation files')
+    expected_machine = 62 if arch == 'x64' else 183
+    if (len(header) < 20 or header[:6] != b'\x7fELF\x02\x01' or
+            header[8:11] != b'AI\x02' or
+            int.from_bytes(header[18:20], 'little') != expected_machine):
+        raise ValueError('Release is not a type-2 AppImage for this architecture')
 
 
 def desktop_quote(value):
@@ -187,13 +147,13 @@ def desktop_quote(value):
     return '"' + escaped.replace('\\', '\\\\').replace('%', '%%') + '"'
 
 
-def desktop_text(current):
+def desktop_text(executable, icon):
     return ('[Desktop Entry]\nType=Application\nName=SpriteDawg\n'
             'Comment=Draw pixel art and edit Aseprite projects\nExec=%s %%F\n'
             'Icon=%s\nTerminal=false\nCategories=Graphics;2DGraphics;\n'
             'StartupWMClass=%s\nX-Purism-FormFactor=Workstation;Mobile;\n'
             'MimeType=image/x-aseprite;application/x-aseprite;\n') % (
-                desktop_quote(str(current / 'spritedawg')), APP_ID, APP_ID)
+                desktop_quote(str(executable)), str(icon).replace('\\', '\\\\'), APP_ID)
 
 
 def atomic_bytes(path, data):
@@ -211,91 +171,138 @@ def atomic_bytes(path, data):
             os.unlink(temporary)
 
 
-def activate(root, bundle, data_home):
-    current = root / 'current'
-    if current.exists() and not current.is_symlink():
-        raise ValueError('Install location is not managed by the SpriteDawg updater')
-    previous = os.readlink(current) if current.is_symlink() else None
-    files = {
-        data_home / 'applications' / (APP_ID + '.desktop'): desktop_text(current).encode(),
-        data_home / 'icons/hicolor/scalable/apps' / (APP_ID + '.svg'):
-            (bundle / ('share/icons/hicolor/scalable/apps/' + APP_ID + '.svg')).read_bytes(),
-        data_home / 'mime/packages' / (APP_ID + '.xml'):
-            (bundle / ('share/mime/packages/' + APP_ID + '.xml')).read_bytes(),
-    }
-    old = {}
-    for path in files:
-        if path.is_symlink() or (path.exists() and not path.is_file()):
-            raise ValueError('Refusing to replace a non-regular desktop registration file')
-        old[path] = path.read_bytes() if path.exists() else None
-    link = root / ('.current-' + uuid.uuid4().hex)
+def validate_target(target, arch, must_exist=False):
+    """Only replace an owned regular file in a private, writable directory."""
+    target = Path(target)
+    if not target.is_absolute() or target.resolve() != target or target.is_symlink():
+        raise ValueError('Use the real, absolute AppImage path, not a symlink')
+    parent = target.parent.stat()
+    if (parent.st_uid != os.getuid() or parent.st_mode & 0o022 or
+            not parent.st_mode & stat.S_IWUSR or not os.access(target.parent, os.W_OK)):
+        raise ValueError('AppImage folder is not writable/private: %s. For an owned shared folder, remove group/other write permission (chmod go-w), or save a new copy in your own private Applications folder; do not use sudo.' % target.parent)
+    if target.exists():
+        status = target.lstat()
+        if (not stat.S_ISREG(status.st_mode) or status.st_uid != os.getuid() or
+                status.st_mode & 0o022 or not status.st_mode & stat.S_IWUSR):
+            raise ValueError('AppImage is not an owned writable regular file. Save a new copy; do not use sudo.')
+        verify_appimage(target, arch)
+        return (status.st_dev, status.st_ino, status.st_size, status.st_mtime_ns)
+    if must_exist:
+        raise ValueError('Running AppImage has moved. Save a new copy and reopen it.')
+    return None
+
+
+def sync_directory(directory):
+    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
     try:
-        for path, data in files.items():
-            atomic_bytes(path, data)
-        link.symlink_to(bundle.relative_to(root))
-        os.replace(link, current)
-    except Exception:
-        # Restore registration even if publication failed halfway through.
-        for path, data in old.items():
-            if data is None:
-                path.unlink(missing_ok=True)
-            else:
-                atomic_bytes(path, data)
-        if previous is not None and (not current.is_symlink() or os.readlink(current) != previous):
-            link.unlink(missing_ok=True)
-            link.symlink_to(previous)
-            os.replace(link, current)
-        raise
+        os.fsync(descriptor)
     finally:
-        link.unlink(missing_ok=True)
+        os.close(descriptor)
 
 
-def install(info, data_home):
+def install(info, data_home, appimage=None, current_version=None):
+    """Publish one AppImage atomically. Never touch drawings or app-support data."""
     data_home = data_home.expanduser().absolute()
     desktop_quote(str(data_home))
-    root = data_home / 'spritedawg'
-    root.mkdir(parents=True, exist_ok=True)
-    with (root / '.update.lock').open('a') as lock:
+    managed = appimage is None
+    if managed:
+        root = data_home / 'spritedawg'
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        target = root / 'SpriteDawg.AppImage'
+    else:
+        target = Path(appimage)
+        if current_version is None:
+            raise ValueError('The running AppImage version is required')
+    identity = validate_target(target, info['arch'], must_exist=not managed)
+    # A stable sibling lock protects concurrent updaters even after inode replacement.
+    lock_path = target.with_name('.' + target.name + '.update.lock')
+    descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, 'a') as lock:
+        status = os.fstat(lock.fileno())
+        if (status.st_uid != os.getuid() or not stat.S_ISREG(status.st_mode) or
+                status.st_nlink != 1 or status.st_mode & 0o022):
+            raise ValueError('Update lock is not a private regular file owned by this user')
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise ValueError('Another SpriteDawg update is in progress') from error
-        installed = root / 'current/release-version.txt'
-        if installed.is_file() and version(installed.read_text().strip()) > version(info['tag']):
+        if validate_target(target, info['arch'], must_exist=not managed) != identity:
+            raise ValueError('AppImage changed while preparing update; check the current version')
+        version_file = target.with_name('.' + target.name + '.version')
+        if version_file.is_symlink() or (version_file.exists() and not version_file.is_file()):
+            raise ValueError('Unsafe version registration file')
+        recorded_versions = [current_version] if current_version else []
+        if version_file.is_file():
+            recorded_versions.append(version_file.read_text().strip())
+        legacy = data_home / 'spritedawg/current/release-version.txt'
+        if managed and legacy.is_file():
+            recorded_versions.append(legacy.read_text().strip())
+        if any(version(recorded) > version(info['tag']) for recorded in recorded_versions):
             raise ValueError('Refusing to downgrade the installed SpriteDawg')
-        (root / 'versions').mkdir(exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix='.download-', dir=root) as work:
+        # Same filesystem is essential for atomic replacement. No cross-device move.
+        with tempfile.TemporaryDirectory(prefix='.spritedawg-update-', dir=target.parent) as work:
             work = Path(work)
-            manifest = fetch(info['assets']['SHA256SUMS'])
-            digest = checksum(manifest, info['asset'])
-            archive = work / 'release.tar.gz'
-            fetch(info['assets'][info['asset']], archive, MAX_DOWNLOAD)
-            with archive.open('rb') as stream:
-                actual = hashlib.file_digest(stream, 'sha256').hexdigest() if hasattr(hashlib, 'file_digest') else hash_file(stream)
-            if actual != digest:
-                raise ValueError('Download checksum mismatch; installed app was not changed')
-            staged = work / 'bundle'
-            staged.mkdir()
-            unpack(archive, staged)
-            verify_bundle(staged, info)
-            # Unique directories retain old files while a running app still uses them.
-            target = root / 'versions' / (info['tag'] + '-' + uuid.uuid4().hex)
-            os.replace(staged, target)
+            digest = checksum(fetch(info['assets']['SHA256SUMS']), info['asset'])
+            staged = work / 'SpriteDawg.AppImage'
+            fetch(info['assets'][info['asset']], staged, MAX_DOWNLOAD)
+            with staged.open('rb') as stream:
+                if hash_file(stream) != digest:
+                    raise ValueError('Download checksum mismatch; installed app was not changed')
+                os.fsync(stream.fileno())
+            verify_appimage(staged, info['arch'])
+            staged.chmod(0o755)
+            with staged.open('rb') as stream:
+                os.fsync(stream.fileno())
+            files = {version_file: (info['tag'] + '\n').encode()}
+            if managed:
+                icon = data_home / 'icons/hicolor/scalable/apps' / (APP_ID + '.svg')
+                files.update({
+                    icon: ICON.encode(),
+                    data_home / 'mime/packages' / (APP_ID + '.xml'): MIME.encode(),
+                    data_home / 'applications' / (APP_ID + '.desktop'):
+                        desktop_text(target, icon).encode(),
+                })
+            old = {}
+            for path in files:
+                if (path.resolve() != path or path.is_symlink() or
+                        (path.exists() and (not path.is_file() or path.stat().st_uid != os.getuid()))):
+                    raise ValueError('Refusing a symlinked or unowned desktop registration path')
+                old[path] = path.read_bytes() if path.exists() else None
+            if validate_target(target, info['arch'], must_exist=not managed) != identity:
+                raise ValueError('AppImage changed during download; installed app was not changed')
+            backup = work / 'previous.AppImage'
+            if identity is not None:
+                os.link(target, backup)
+            published = False
             try:
-                activate(root, target, data_home)
+                for path, data in files.items():
+                    atomic_bytes(path, data)
+                os.replace(staged, target)
+                published = True
+                sync_directory(target.parent)
             except Exception:
-                shutil.rmtree(target)
+                if published:
+                    if backup.exists():
+                        os.replace(backup, target)
+                    else:
+                        target.unlink()
+                for path, data in old.items():
+                    if data is None:
+                        path.unlink(missing_ok=True)
+                    else:
+                        atomic_bytes(path, data)
                 raise
-        for command, directory in [('update-mime-database', data_home / 'mime'),
-                                   ('update-desktop-database', data_home / 'applications')]:
-            if shutil.which(command):
-                try:
-                    result = subprocess.run([command, str(directory)], capture_output=True, timeout=30)
-                    if result.returncode:
+        if managed:
+            for command, directory in [('update-mime-database', data_home / 'mime'),
+                                       ('update-desktop-database', data_home / 'applications')]:
+                if shutil.which(command):
+                    try:
+                        result = subprocess.run([command, str(directory)], capture_output=True, timeout=30)
+                        if result.returncode:
+                            print('Warning: refresh desktop caches at your next login.', file=sys.stderr)
+                    except (OSError, subprocess.TimeoutExpired):
                         print('Warning: refresh desktop caches at your next login.', file=sys.stderr)
-                except (OSError, subprocess.TimeoutExpired):
-                    print('Warning: refresh desktop caches at your next login.', file=sys.stderr)
-        return root / 'current/spritedawg'
+        return target
 
 
 def hash_file(stream):
@@ -307,6 +314,8 @@ def hash_file(stream):
 
 def main():
     parser = argparse.ArgumentParser(description='Install/update SpriteDawg for the current Linux user.')
+    parser.add_argument('--appimage', help='Replace this running AppImage in place, not its mounted AppDir')
+    parser.add_argument('--current-version', help='Version of the running AppImage')
     parser.add_argument('--check', action='store_true', help='Print latest stable release metadata, without installing')
     parser.add_argument('--version', help='Install exactly this stable vMAJOR.MINOR.PATCH release')
     args = parser.parse_args()
@@ -321,7 +330,7 @@ def main():
     data_home = Path(os.environ.get('XDG_DATA_HOME') or str(Path.home() / '.local/share'))
     if not data_home.is_absolute():
         raise ValueError('XDG_DATA_HOME must be an absolute path')
-    installed = install(info, data_home)
+    installed = install(info, data_home, args.appimage, args.current_version)
     print(json.dumps({'tag': info['tag'], 'executable': str(installed)}))
 
 

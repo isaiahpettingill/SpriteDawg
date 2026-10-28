@@ -2,6 +2,13 @@
 
 SpriteDawg is now a Flutter pixel-art editor for Android and Linux, focused on drawing on the go. Free, open source, offline: no accounts, ads, analytics, or Android internet permission.
 
+## Linux AppImages
+
+- Linux releases now provide x64 and ARM64 AppImages instead of tar bundles; Android APKs are unchanged.
+- Check for updates replaces the running AppImage itself with a checksum-verified atomic replacement. Save and reopen when ready; updates never close drawings or change app data.
+- The optional installer registers the launcher/icon/MIME types and provides the one-time migration from old tar installations without deleting old folders or drafts.
+- Use `--appimage-extract-and-run` if FUSE is unavailable. See `docs/LINUX_APPIMAGE.md` for runtime requirements and validation limits.
+
 ## Media exports
 
 - Compact export dialog for PNG, animated GIF/APNG/WebP, still QOI/AVIF, and PNG spritesheets with Aseprite-style JSON.

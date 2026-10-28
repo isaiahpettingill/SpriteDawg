@@ -2,7 +2,7 @@
 # Hosted runners already contain most tools. Don't refresh every APT source if
 # every required package is installed. Limit transient mirror waits and retries.
 set -euo pipefail
-packages=(clang cmake ninja-build meson nasm pkg-config libgtk-3-dev libstdc++-12-dev)
+packages=(clang cmake ninja-build meson nasm pkg-config libgtk-3-dev libstdc++-12-dev librsvg2-dev libgirepository1.0-dev desktop-file-utils shared-mime-info patchelf squashfs-tools xvfb xauth xdotool x11-utils dbus-x11)
 # Hosted images also provide tools outside dpkg (for example /usr/local/bin/cmake).
 # Reuse only commands that report a compatible version; development headers must
 # still be installed through their distro package.

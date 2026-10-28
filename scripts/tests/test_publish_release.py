@@ -26,7 +26,7 @@ class PublisherTests(unittest.TestCase):
         self.notes = self.root / 'notes.md'
         self.notes.write_text('Release notes')
         names = [f'spritedawg-{TAG}-android-{a}.apk' for a in ('armeabi-v7a', 'arm64-v8a', 'x86_64')]
-        names += [f'spritedawg-{TAG}-linux-{a}.tar.gz' for a in ('x64', 'arm64')]
+        names += [f'spritedawg-{TAG}-linux-{a}.AppImage' for a in ('x64', 'arm64')]
         names.append('install-spritedawg.sh')
         for name in names:
             (self.assets / name).write_bytes(name.encode())
