@@ -12,6 +12,62 @@ class DraftStoreTest {
     }
     private fun drawing(label: String) = Document.create(2, 2).also { it.data = UserData(text = label) }
 
+    private fun oldDraft(dir: File, title: String = "1936") {
+        val body = java.io.ByteArrayOutputStream()
+        java.io.DataOutputStream(body).use { out ->
+            out.writeInt(0x53444431); out.writeInt(2); out.writeLong(1234L)
+            out.writeUTF(title); out.writeUTF("content://downloads/document/1936")
+            val bytes = Aseprite.write(drawing("legacy artwork"))
+            out.writeInt(bytes.size); out.write(bytes)
+        }
+        val payload = body.toByteArray()
+        java.io.DataOutputStream(dir.resolve("draft-2.sdd").outputStream()).use { out ->
+            out.writeLong(java.util.zip.CRC32().apply { update(payload) }.value)
+            out.write(payload)
+        }
+    }
+
+    @Test fun legacyNameIsRefreshedInPickerAndRecoveryThenPersistedAcrossLostAccess() = directory { dir ->
+        oldDraft(dir)
+        val store = DraftStore(dir, resolveLegacyTitle = { source, title ->
+            assertEquals("content://downloads/document/1936", source)
+            assertEquals("1936", title)
+            "树叶 🌿.aseprite"
+        })
+        assertEquals("树叶 🌿.aseprite", store.summaries().single()["title"])
+        val recovered = store.read(2)
+        assertTrue(recovered.titleRefreshed)
+        assertFalse(recovered.titleNeedsRefresh)
+        assertEquals("legacy artwork", recovered.document.data!!.text)
+        assertEquals(1234L, recovered.updatedAt)
+        store.write(2, recovered.title, recovered.sourceUri, recovered.document, recovered.updatedAt, recovered.titleNeedsRefresh)
+        val restarted = DraftStore(dir, resolveLegacyTitle = { _, _ -> error("confirmed titles must not query") })
+        assertEquals("树叶 🌿.aseprite", restarted.summaries().single()["title"])
+        assertFalse(restarted.read(2).titleNeedsRefresh)
+        assertEquals("legacy artwork", restarted.read(2).document.data!!.text)
+    }
+
+    @Test fun unavailableLegacyNameRetainsArtworkAndRetriesAfterAnotherSnapshot() = directory { dir ->
+        oldDraft(dir)
+        val unavailable = DraftStore(dir, resolveLegacyTitle = { _, _ -> throw SecurityException("revoked") })
+        val recovered = unavailable.read(2)
+        assertEquals("1936", recovered.title)
+        assertTrue(recovered.titleNeedsRefresh)
+        assertFalse(recovered.titleRefreshed)
+        unavailable.write(2, recovered.title, recovered.sourceUri, recovered.document, titleNeedsRefresh = recovered.titleNeedsRefresh)
+        val accessible = DraftStore(dir, resolveLegacyTitle = { _, _ -> "Forest.aseprite" })
+        assertEquals("Forest.aseprite", accessible.read(2).title)
+        assertEquals("legacy artwork", accessible.read(2).document.data!!.text)
+    }
+
+    @Test fun newNamesIncludingNumericNamesAreNeverMistakenForLegacyIds() = directory { dir ->
+        val store = DraftStore(dir)
+        store.write(2, "1936", "content://downloads/document/1936", drawing("explicit numeric name"))
+        val restarted = DraftStore(dir, resolveLegacyTitle = { _, _ -> error("new names are authoritative") })
+        assertEquals("1936", restarted.read(2).title)
+        assertFalse(restarted.read(2).titleNeedsRefresh)
+    }
+
     @Test fun restartKeepsIndependentNamedDraftsAndSourceMetadata() = directory { dir ->
         val store = DraftStore(dir)
         store.write(2, "Untitled", null, drawing("new"), 10)

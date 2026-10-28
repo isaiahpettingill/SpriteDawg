@@ -28,9 +28,9 @@ internal class NativeEditorRuntime {
     val initialized get() = store != null
     val drafts get() = checkNotNull(store) { "Editor storage has not initialized" }
 
-    fun initialize(directory: File) {
+    fun initialize(directory: File, resolveLegacyTitle: (String?, String) -> String? = { _, _ -> null }) {
         if (initialized) return
-        val candidate = DraftStore(directory)
+        val candidate = DraftStore(directory, resolveLegacyTitle = resolveLegacyTitle)
         val saved = candidate.summaries()
         saved.forEach { item -> sessions.nextId = maxOf(sessions.nextId, (item["id"] as Int) + 1) }
         if (saved.isNotEmpty()) {
