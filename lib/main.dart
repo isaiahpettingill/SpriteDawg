@@ -976,7 +976,9 @@ class _EditorScreenState extends State<EditorScreen>
                               : tagPanel(),
                         ),
                       if (!hideDrawingStrips && !tightHeight) paletteStrip(),
-                      if (!hideDrawingStrips && !tightHeight && hasStrokeOptions)
+                      if (!hideDrawingStrips &&
+                          !tightHeight &&
+                          hasStrokeOptions)
                         strokeOptions(),
                       if (!hideDrawingStrips)
                         Wrap(
@@ -1267,7 +1269,8 @@ class _EditorScreenState extends State<EditorScreen>
             itemCount: e.palette.length,
             itemBuilder: (context, index) {
               final c = e.palette[index];
-              final selected = e.state['depth'] == 8 && selectedPaletteIndex != null
+              final selected =
+                  e.state['depth'] == 8 && selectedPaletteIndex != null
                   ? index == selectedPaletteIndex
                   : c == color;
               return Semantics(
@@ -1309,8 +1312,15 @@ class _EditorScreenState extends State<EditorScreen>
   );
 
   bool get hasStrokeOptions => const {
-    'rectangle', 'ellipse', 'fill', 'gradient', 'spray', 'blur', 'jumble',
-    'airbrush', 'ditherPaint',
+    'rectangle',
+    'ellipse',
+    'fill',
+    'gradient',
+    'spray',
+    'blur',
+    'jumble',
+    'airbrush',
+    'ditherPaint',
   }.contains(tool);
 
   Widget compactBrushMenu() => PopupMenuButton<String>(

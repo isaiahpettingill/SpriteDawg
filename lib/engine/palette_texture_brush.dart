@@ -294,8 +294,10 @@ Map<int, int> paletteTexturePixels({
   void stamp(int x, int y, double tx, double ty) {
     final left = x - size ~/ 2, top = y - size ~/ 2;
     final bounds = symmetry.sourceBounds;
-    if (left > bounds.$3 || top > bounds.$4 ||
-        left + size <= bounds.$1 || top + size <= bounds.$2) {
+    if (left > bounds.$3 ||
+        top > bounds.$4 ||
+        left + size <= bounds.$1 ||
+        top + size <= bounds.$2) {
       return;
     }
     final cell = math.max(2.0, size / 3);
@@ -305,16 +307,20 @@ Map<int, int> paletteTexturePixels({
         final radius = nx * nx + ny * ny;
         if (radius > 1) continue;
         final px = x - size ~/ 2 + ox, py = y - size ~/ 2 + oy;
-        if (px < bounds.$1 || py < bounds.$2 ||
-            px > bounds.$3 || py > bounds.$4) continue;
+        if (px < bounds.$1 ||
+            py < bounds.$2 ||
+            px > bounds.$3 ||
+            py > bounds.$4) {
+          continue;
+        }
         var shade = 2;
         if (tool == 'ditherPaint' || tool == 'ditherRetouch') {
           shade = 2;
         } else if (tool == 'cluster') {
-          shade = clusterCache.putIfAbsent(
-            (px, py),
-            () => cluster(px.toDouble(), py.toDouble(), cell),
-          );
+          shade = clusterCache.putIfAbsent((
+            px,
+            py,
+          ), () => cluster(px.toDouble(), py.toDouble(), cell));
         } else if (tool == 'bark') {
           shade = barkCache.putIfAbsent((px, py), () => bark(px, py));
         } else if (tool == 'leaves') {

@@ -668,9 +668,7 @@ class EditorEngine {
             if (i >= c.width) push(i - c.width);
             if (i < c.pixels.length - c.width) push(i + c.width);
           }
-          final denominator = horizontal
-                  ? maxX - minX
-                  : maxY - minY,
+          final denominator = horizontal ? maxX - minX : maxY - minY,
               mapped = <int, int>{};
           for (var n = 0; n < count; n++) {
             final i = region[n];

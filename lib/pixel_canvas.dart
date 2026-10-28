@@ -811,7 +811,10 @@ class _CanvasPainter extends CustomPainter {
         for (final transform in symmetry.transforms) {
           final a = transform.point(editor.width, editor.height, left, top);
           final b = transform.point(
-            editor.width, editor.height, left + size - 1, top + size - 1,
+            editor.width,
+            editor.height,
+            left + size - 1,
+            top + size - 1,
           );
           final cursor = Rect.fromLTRB(
             math.min(a.$1, b.$1).toDouble(),

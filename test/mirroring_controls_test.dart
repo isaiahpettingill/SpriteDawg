@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -18,28 +17,39 @@ void main() {
     'tablet': const Size(768, 1024),
     'desktop': const Size(1440, 900),
   }.entries) {
-    testWidgets('${entry.key}: two swatch rows and compact mirroring', (t) async {
+    testWidgets('${entry.key}: two swatch rows and compact mirroring', (
+      t,
+    ) async {
       t.view.physicalSize = entry.value;
       t.view.devicePixelRatio = 1;
       addTearDown(t.view.resetPhysicalSize);
       addTearDown(t.view.resetDevicePixelRatio);
       final calls = <(String, Map<String, dynamic>?)>[];
-      final palette = List.generate(64, (i) => HSLColor.fromAHSL(
-        1, (i * 47 % 360).toDouble(), .65, .30 + (i % 4) * .15,
-      ).toColor().toARGB32());
+      final palette = List.generate(
+        64,
+        (i) => HSLColor.fromAHSL(
+          1,
+          (i * 47 % 360).toDouble(),
+          .65,
+          .30 + (i % 4) * .15,
+        ).toColor().toARGB32(),
+      );
       // Duplicate palette entries must still select the exact tapped index.
       palette[1] = palette[0];
-      final editor = Editor(transport: (method, args) async {
-        calls.add((method, args));
-        return {...fixture.state(), 'depth': 8, 'palette': palette};
-      });
+      final editor = Editor(
+        transport: (method, args) async {
+          calls.add((method, args));
+          return {...fixture.state(), 'depth': 8, 'palette': palette};
+        },
+      );
       if (const bool.fromEnvironment('CAPTURE_UI')) {
         await t.runAsync(() async {
           const fontPath = String.fromEnvironment('CAPTURE_FONT');
           if (fontPath.isNotEmpty) {
             await (FontLoader('Roboto')..addFont(
                   File(fontPath).readAsBytes().then(ByteData.sublistView),
-                )).load();
+                ))
+                .load();
             await (FontLoader('MaterialIcons')
                   ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf')))
                 .load();
@@ -47,14 +57,19 @@ void main() {
         });
       }
       final boundaryKey = GlobalKey();
-      await t.pumpWidget(RepaintBoundary(
-        key: boundaryKey,
-        child: PocketPixelApp(editor: editor),
-      ));
+      await t.pumpWidget(
+        RepaintBoundary(
+          key: boundaryKey,
+          child: PocketPixelApp(editor: editor),
+        ),
+      );
       await t.pumpAndSettle();
       expect(find.text('Mirror X'), findsNothing);
       expect(find.text('Mirror Y'), findsNothing);
-      expect(find.byKey(const Key('mirroring-menu')).hitTestable(), findsOneWidget);
+      expect(
+        find.byKey(const Key('mirroring-menu')).hitTestable(),
+        findsOneWidget,
+      );
       final first = find.byKey(const Key('palette-color-0'));
       final second = find.byKey(const Key('palette-color-1'));
       final third = find.byKey(const Key('palette-color-2'));
@@ -69,7 +84,12 @@ void main() {
       expect(t.getSize(find.byKey(const Key('palette-strip'))).height, 96);
       await t.tap(second);
       await t.pump();
-      expect(t.widget<PixelCanvas>(find.byType(PixelCanvas)).previewOptions['paletteIndex'], 1);
+      expect(
+        t
+            .widget<PixelCanvas>(find.byType(PixelCanvas))
+            .previewOptions['paletteIndex'],
+        1,
+      );
       for (final option in ['x', 'y', 'diagonal', 'antiDiagonal']) {
         await t.tap(find.byKey(const Key('mirroring-menu')));
         await t.pumpAndSettle();
@@ -80,12 +100,22 @@ void main() {
       expect(canvas.tool, 'pencil');
       expect(canvas.mirrorX && canvas.mirrorY, isTrue);
       expect(canvas.mirrorDiagonal && canvas.mirrorAntiDiagonal, isTrue);
-      expect(t.widget<Badge>(find.byKey(const Key('mirroring-status'))).isLabelVisible, isTrue);
+      expect(
+        t
+            .widget<Badge>(find.byKey(const Key('mirroring-status')))
+            .isLabelVisible,
+        isTrue,
+      );
       expect(calls.where((call) => call.$1 == 'stroke'), isEmpty);
       await canvas.onStroke('pencil', const [Offset(3, 4)]);
       await t.pumpAndSettle();
       final args = calls.lastWhere((call) => call.$1 == 'stroke').$2!;
-      for (final key in ['mirrorX', 'mirrorY', 'mirrorDiagonal', 'mirrorAntiDiagonal']) {
+      for (final key in [
+        'mirrorX',
+        'mirrorY',
+        'mirrorDiagonal',
+        'mirrorAntiDiagonal',
+      ]) {
         expect(args[key], isTrue, reason: key);
       }
       expect(args['paletteIndex'], 1);
@@ -109,8 +139,19 @@ void main() {
       await t.tap(find.text('Turn off'));
       await t.pumpAndSettle();
       canvas = t.widget<PixelCanvas>(find.byType(PixelCanvas));
-      expect(canvas.mirrorX || canvas.mirrorY || canvas.mirrorDiagonal || canvas.mirrorAntiDiagonal, isFalse);
-      expect(t.widget<Badge>(find.byKey(const Key('mirroring-status'))).isLabelVisible, isFalse);
+      expect(
+        canvas.mirrorX ||
+            canvas.mirrorY ||
+            canvas.mirrorDiagonal ||
+            canvas.mirrorAntiDiagonal,
+        isFalse,
+      );
+      expect(
+        t
+            .widget<Badge>(find.byKey(const Key('mirroring-status')))
+            .isLabelVisible,
+        isFalse,
+      );
       expect(canvas.tool, 'eraser');
       expect(t.takeException(), isNull);
       await t.pumpWidget(const SizedBox());
@@ -128,7 +169,10 @@ void main() {
     await t.pumpAndSettle();
     await t.tap(find.byKey(const Key('mirror-diagonal')));
     await t.pumpAndSettle();
-    expect(t.widget<PixelCanvas>(find.byType(PixelCanvas)).mirrorDiagonal, isTrue);
+    expect(
+      t.widget<PixelCanvas>(find.byType(PixelCanvas)).mirrorDiagonal,
+      isTrue,
+    );
     expect(t.takeException(), isNull);
     await t.pumpWidget(const SizedBox());
   });
@@ -136,7 +180,8 @@ void main() {
 
 Future<void> _capture(WidgetTester t, GlobalKey key, String name) async {
   await t.runAsync(() async {
-    final boundary = key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+    final boundary =
+        key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
     final image = await boundary.toImage(pixelRatio: 1);
     final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
     await Directory('build/ui').create(recursive: true);

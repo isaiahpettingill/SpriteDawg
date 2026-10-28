@@ -60,9 +60,7 @@ class CanvasSymmetry {
   }
 
   final int width, height;
-  final List<MirrorTransform> transforms = [
-    const MirrorTransform(1, 0, 0, 1),
-  ];
+  final List<MirrorTransform> transforms = [const MirrorTransform(1, 0, 0, 1)];
 
   /// Inclusive source window containing every pixel that can reflect into the
   /// canvas. Bounds come from exact integer affine maps, including half-pixel
@@ -71,9 +69,8 @@ class CanvasSymmetry {
 
   (int, int, int, int) _sourceBounds() {
     var left = 0, top = 0, right = width - 1, bottom = height - 1;
-    (int, int) interval(int sign, int offset, int size) => sign > 0
-        ? (-offset, size - 1 - offset)
-        : (offset - size + 1, offset);
+    (int, int) interval(int sign, int offset, int size) =>
+        sign > 0 ? (-offset, size - 1 - offset) : (offset - size + 1, offset);
     for (final transform in transforms) {
       final (ox, oy) = transform.point(width, height, 0, 0);
       final xs = transform.xx != 0

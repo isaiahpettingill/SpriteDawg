@@ -51,8 +51,10 @@ Map<int, int> splatterPixels({
     if (!stamped.add((x, y))) return;
     final left = x - size ~/ 2, top = y - size ~/ 2;
     final bounds = symmetry.sourceBounds;
-    if (left > bounds.$3 || top > bounds.$4 ||
-        left + size <= bounds.$1 || top + size <= bounds.$2) {
+    if (left > bounds.$3 ||
+        top > bounds.$4 ||
+        left + size <= bounds.$1 ||
+        top + size <= bounds.$2) {
       return;
     }
     var state =

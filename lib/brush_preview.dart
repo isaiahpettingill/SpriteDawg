@@ -102,8 +102,16 @@ Uint8List previewStrokeMask({
         w = r - l + 1,
         h = b - t + 1;
     final bounds = symmetry.sourceBounds;
-    for (var y = math.max(bounds.$2 + originY, t); y <= math.min(bounds.$4 + originY, b); y++) {
-      for (var x = math.max(bounds.$1 + originX, l); x <= math.min(bounds.$3 + originX, r); x++) {
+    for (
+      var y = math.max(bounds.$2 + originY, t);
+      y <= math.min(bounds.$4 + originY, b);
+      y++
+    ) {
+      for (
+        var x = math.max(bounds.$1 + originX, l);
+        x <= math.min(bounds.$3 + originX, r);
+        x++
+      ) {
         final dx = 2 * x - l - r, dy = 2 * y - t - b;
         if (tool == 'rectangle' ||
             dx * dx * h * h + dy * dy * w * w <= w * w * h * h) {
@@ -228,7 +236,6 @@ List<Rect> previewStrokeRuns({
     }
     spans.insert(at, (start, end));
   }
-
 
   for (var y = 0; y < h; y++) {
     var x = 0;

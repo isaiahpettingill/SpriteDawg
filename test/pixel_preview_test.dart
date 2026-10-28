@@ -6,43 +6,65 @@ import 'package:spritedawg/editor.dart';
 import 'package:spritedawg/pixel_canvas.dart';
 
 void main() {
-  testWidgets('effect preview forwards all axes and changing them cancels safely', (t) async {
-    final calls = <Map<String, dynamic>>[];
-    var commits = 0;
-    final editor = Editor(transport: (method, args) async {
-      if (method == 'previewStroke') calls.add(args!);
-      return null;
-    });
-    Future<void> host(bool diagonal) => t.pumpWidget(MaterialApp(
-      home: PixelCanvas(
-        editor: editor, tool: 'blur', color: 0xff000000, brush: 5,
-        grid: false, onion: false, fitToken: 0,
-        mirrorX: true, mirrorY: true,
-        mirrorDiagonal: diagonal, mirrorAntiDiagonal: diagonal,
-        onPick: (_) {}, onStroke: (_, _) { commits++; },
-      ),
-    ));
-    await host(true);
-    final center = t.getCenter(find.byKey(const Key('pixel-canvas')));
-    final gesture = await t.startGesture(center);
-    await t.pump(const Duration(milliseconds: 80));
-    expect(calls, hasLength(1));
-    for (final key in ['mirrorX', 'mirrorY', 'mirrorDiagonal', 'mirrorAntiDiagonal']) {
-      expect(calls.single[key], isTrue);
-    }
-    await host(false);
-    await gesture.moveBy(const Offset(20, 20));
-    await gesture.up();
-    await t.pump();
-    expect(commits, 0);
-    final next = await t.startGesture(center);
-    await t.pump(const Duration(milliseconds: 80));
-    expect(calls.last['mirrorDiagonal'], isFalse);
-    expect(calls.last['mirrorAntiDiagonal'], isFalse);
-    await next.cancel();
-    await t.pumpWidget(const SizedBox());
-    editor.dispose();
-  });
+  testWidgets(
+    'effect preview forwards all axes and changing them cancels safely',
+    (t) async {
+      final calls = <Map<String, dynamic>>[];
+      var commits = 0;
+      final editor = Editor(
+        transport: (method, args) async {
+          if (method == 'previewStroke') calls.add(args!);
+          return null;
+        },
+      );
+      Future<void> host(bool diagonal) => t.pumpWidget(
+        MaterialApp(
+          home: PixelCanvas(
+            editor: editor,
+            tool: 'blur',
+            color: 0xff000000,
+            brush: 5,
+            grid: false,
+            onion: false,
+            fitToken: 0,
+            mirrorX: true,
+            mirrorY: true,
+            mirrorDiagonal: diagonal,
+            mirrorAntiDiagonal: diagonal,
+            onPick: (_) {},
+            onStroke: (_, _) {
+              commits++;
+            },
+          ),
+        ),
+      );
+      await host(true);
+      final center = t.getCenter(find.byKey(const Key('pixel-canvas')));
+      final gesture = await t.startGesture(center);
+      await t.pump(const Duration(milliseconds: 80));
+      expect(calls, hasLength(1));
+      for (final key in [
+        'mirrorX',
+        'mirrorY',
+        'mirrorDiagonal',
+        'mirrorAntiDiagonal',
+      ]) {
+        expect(calls.single[key], isTrue);
+      }
+      await host(false);
+      await gesture.moveBy(const Offset(20, 20));
+      await gesture.up();
+      await t.pump();
+      expect(commits, 0);
+      final next = await t.startGesture(center);
+      await t.pump(const Duration(milliseconds: 80));
+      expect(calls.last['mirrorDiagonal'], isFalse);
+      expect(calls.last['mirrorAntiDiagonal'], isFalse);
+      await next.cancel();
+      await t.pumpWidget(const SizedBox());
+      editor.dispose();
+    },
+  );
   testWidgets(
     'A held effect restarts preview after an older canceled request',
     (tester) async {

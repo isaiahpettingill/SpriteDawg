@@ -6,41 +6,81 @@ import 'package:spritedawg/engine/document.dart';
 void main() {
   for (final tool in ['rectangle', 'ellipse']) {
     for (final filled in [false, true]) {
-    test('$tool off-canvas filled=$filled source matches clipped diagonal commit', () {
-      final engine = EditorEngine()..document = SpriteDocument.create(5, 11);
-      const points = [Offset(-3, 2), Offset(3, 8)];
-      engine.stroke({
-        'tool': tool, 'points': [[-3, 2], [3, 8]], 'size': 1,
-        'color': 0x80ff0000, 'filled': filled,
-        'mirrorDiagonal': true, 'mirrorAntiDiagonal': true,
-      });
-      final expected = engine.document.composite(0).map((p) => p == 0 ? 0 : 1).toList();
-      expect(previewStrokeMask(
-        width: 5, height: 11, tool: tool, points: points, size: 1,
-        filled: filled, mirrorDiagonal: true, mirrorAntiDiagonal: true,
-      ), expected);
-      final actual = List<int>.filled(55, 0);
-      for (final run in previewStrokeRuns(
-        width: 5, height: 11, tool: tool, points: points, size: 1,
-        filled: filled, mirrorDiagonal: true, mirrorAntiDiagonal: true,
-      )) {
-        for (var x = run.left.toInt(); x < run.right.toInt(); x++) {
-          actual[run.top.toInt() * 5 + x]++;
-        }
-      }
-      expect(actual, expected);
-    });
+      test(
+        '$tool off-canvas filled=$filled source matches clipped diagonal commit',
+        () {
+          final engine = EditorEngine()
+            ..document = SpriteDocument.create(5, 11);
+          const points = [Offset(-3, 2), Offset(3, 8)];
+          engine.stroke({
+            'tool': tool,
+            'points': [
+              [-3, 2],
+              [3, 8],
+            ],
+            'size': 1,
+            'color': 0x80ff0000,
+            'filled': filled,
+            'mirrorDiagonal': true,
+            'mirrorAntiDiagonal': true,
+          });
+          final expected = engine.document
+              .composite(0)
+              .map((p) => p == 0 ? 0 : 1)
+              .toList();
+          expect(
+            previewStrokeMask(
+              width: 5,
+              height: 11,
+              tool: tool,
+              points: points,
+              size: 1,
+              filled: filled,
+              mirrorDiagonal: true,
+              mirrorAntiDiagonal: true,
+            ),
+            expected,
+          );
+          final actual = List<int>.filled(55, 0);
+          for (final run in previewStrokeRuns(
+            width: 5,
+            height: 11,
+            tool: tool,
+            points: points,
+            size: 1,
+            filled: filled,
+            mirrorDiagonal: true,
+            mirrorAntiDiagonal: true,
+          )) {
+            for (var x = run.left.toInt(); x < run.right.toInt(); x++) {
+              actual[run.top.toInt() * 5 + x]++;
+            }
+          }
+          expect(actual, expected);
+        },
+      );
     }
   }
-  test('extreme filled preview bounds allocation and emits one run per row', () {
-    final runs = previewStrokeRuns(
-      width: 32, height: 17, tool: 'rectangle',
-      points: const [Offset(-8192, -8192), Offset(8192, 8192)],
-      size: 1, filled: true, mirrorDiagonal: true, mirrorAntiDiagonal: true,
-    );
-    expect(runs.length, 17);
-    expect(runs.every((r) => r.left == 0 && r.width == 32 && r.height == 1), isTrue);
-  });
+  test(
+    'extreme filled preview bounds allocation and emits one run per row',
+    () {
+      final runs = previewStrokeRuns(
+        width: 32,
+        height: 17,
+        tool: 'rectangle',
+        points: const [Offset(-8192, -8192), Offset(8192, 8192)],
+        size: 1,
+        filled: true,
+        mirrorDiagonal: true,
+        mirrorAntiDiagonal: true,
+      );
+      expect(runs.length, 17);
+      expect(
+        runs.every((r) => r.left == 0 && r.width == 32 && r.height == 1),
+        isTrue,
+      );
+    },
+  );
   for (final dimensions in [(8, 8), (9, 9), (12, 8), (9, 6), (6, 9)]) {
     for (final flags in [
       (false, false, true, false),
@@ -52,8 +92,13 @@ void main() {
       for (final tool in ['pencil', 'line', 'rectangle', 'ellipse', 'spray']) {
         test('$dimensions $flags $tool diagonal preview matches commit', () {
           final (width, height) = dimensions;
-          final points = [Offset.zero, const Offset(3, 2), Offset(4, (height - 1).toDouble())];
-          final engine = EditorEngine()..document = SpriteDocument.create(width, height);
+          final points = [
+            Offset.zero,
+            const Offset(3, 2),
+            Offset(4, (height - 1).toDouble()),
+          ];
+          final engine = EditorEngine()
+            ..document = SpriteDocument.create(width, height);
           engine.stroke({
             'tool': tool,
             'points': points.map((p) => [p.dx.toInt(), p.dy.toInt()]).toList(),
@@ -65,17 +110,34 @@ void main() {
             'mirrorAntiDiagonal': flags.$4,
             'seed': 123,
           });
-          final expected = engine.document.composite(0).map((v) => v == 0 ? 0 : 1).toList();
+          final expected = engine.document
+              .composite(0)
+              .map((v) => v == 0 ? 0 : 1)
+              .toList();
           final mask = previewStrokeMask(
-            width: width, height: height, tool: tool, points: points, size: 4,
-            mirrorX: flags.$1, mirrorY: flags.$2,
-            mirrorDiagonal: flags.$3, mirrorAntiDiagonal: flags.$4, seed: 123,
+            width: width,
+            height: height,
+            tool: tool,
+            points: points,
+            size: 4,
+            mirrorX: flags.$1,
+            mirrorY: flags.$2,
+            mirrorDiagonal: flags.$3,
+            mirrorAntiDiagonal: flags.$4,
+            seed: 123,
           );
           expect(mask, expected);
           final runs = previewStrokeRuns(
-            width: width, height: height, tool: tool, points: points, size: 4,
-            mirrorX: flags.$1, mirrorY: flags.$2,
-            mirrorDiagonal: flags.$3, mirrorAntiDiagonal: flags.$4, seed: 123,
+            width: width,
+            height: height,
+            tool: tool,
+            points: points,
+            size: 4,
+            mirrorX: flags.$1,
+            mirrorY: flags.$2,
+            mirrorDiagonal: flags.$3,
+            mirrorAntiDiagonal: flags.$4,
+            seed: 123,
           );
           final sparse = List<int>.filled(width * height, 0);
           for (final run in runs) {
