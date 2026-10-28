@@ -18,7 +18,8 @@ android {
         versionName = flutter.versionName
     }
     sourceSets.getByName("test").resources.srcDir("../../app/src/test/resources")
-    testOptions.unitTests.isIncludeAndroidResources = true
+    // Provider metadata tests use Config.NONE and need no app resources/assets.
+    // Including them also pulls Flutter's assets into AGP's host-test packaging.
     testOptions.unitTests.all {
         it.jvmArgs(
             "--add-opens=java.base/java.lang=ALL-UNNAMED",
