@@ -31,6 +31,7 @@ class MainActivity : FlutterActivity() {
     private val worker get() = runtime.worker
     private val main = Handler(Looper.getMainLooper())
     private val exportFiles by lazy { ExportFiles(this, worker, main) }
+    private val documentNames by lazy { DocumentNames(applicationContext.contentResolver) }
     private val drafts get() = runtime.drafts
     private val pendingDrafts get() = runtime.pendingDrafts
     private var draftTask: ScheduledFuture<*>?
@@ -81,7 +82,7 @@ class MainActivity : FlutterActivity() {
                 while(true) {val n=stream.read(buffer);if(n<0)break;require(out.size()+n<=Aseprite.MAX_FILE) {"File exceeds the 64 MiB safety limit"};out.write(buffer,0,n)}
                 Aseprite.read(out.toByteArray())
             } ?: error("The provider could not read this project")
-            val opened=sessions.add(loaded, uri.lastPathSegment?.substringAfterLast('/') ?: "Opened document")
+            val opened=sessions.add(loaded, documentNames.resolve(uri))
             // VIEW commonly grants read-only access. Saving always asks for a destination.
             opened.path=null
             opened.sourceUri=uri.toString()
@@ -95,7 +96,7 @@ class MainActivity : FlutterActivity() {
         if(runtime.shouldEnqueueStartup(restoredActivity))enqueueExternal(intent)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger,"pocketpixel/editor").setMethodCallHandler(::handle)
     }
-    private fun initializeDrafts() = runtime.initialize(filesDir)
+    private fun initializeDrafts() = runtime.initialize(filesDir, documentNames::refreshLegacy)
     private fun closedDrafts(): List<Map<String,Any?>> {
         val open=sessions.documents.map {it.id}.toSet()
         return drafts.summaries().filter { it["id"] !in open }
@@ -125,14 +126,15 @@ class MainActivity : FlutterActivity() {
                 val draft=drafts.read(savedId)
                 val restored=sessions.restoreDecoded(listOf(savedId to draft.document)).single()
                 restored.title=draft.title
+                restored.titleNeedsRefresh=draft.titleNeedsRefresh
                 restored.sourceUri=draft.sourceUri
                 restored.path=null // Source metadata is never a restored write grant.
                 sessions.select(restored.id)
-                if(savedId!=restored.id) {
+                if(savedId!=restored.id || draft.titleRefreshed) {
                     // The decoded document is already open. If migration fails,
                     // report that in state rather than failing after replacing
                     // the visible session; the legacy copy remains untouched.
-                    if(persist(restored)) try { drafts.delete(savedId) }
+                    if(persist(restored) && savedId!=restored.id) try { drafts.delete(savedId) }
                     catch(e: Exception) { restored.recoveryError="Recovered draft is safe, but its old copy could not be removed: ${e.message}" }
                 }
                 if(draft.fallback && restored.recoveryError==null) restored.recoveryError="The latest draft was damaged; the previous good snapshot was recovered. Save a copy now."
@@ -151,7 +153,7 @@ class MainActivity : FlutterActivity() {
     }
     private fun persist(session: EditorSession = sessions.active): Boolean {
         return try {
-            drafts.write(session.id,session.title,session.sourceUri ?: session.path,session.engine.document)
+            drafts.write(session.id,session.title,session.sourceUri ?: session.path,session.engine.document,titleNeedsRefresh=session.titleNeedsRefresh)
             session.recoveryError=null
             true
         } catch(e: Exception) {
@@ -242,12 +244,19 @@ class MainActivity : FlutterActivity() {
         }
     }
     private object DeferredResult
+    private fun rememberSaveTarget(uri: Uri) {
+        val session = sessions.active
+        currentUri = uri
+        session.sourceUri = uri.toString()
+        session.title = documentNames.resolve(uri, if (session.titleNeedsRefresh) "Opened document" else session.title)
+        session.titleNeedsRefresh = false
+    }
     private fun writeDocument(uri: Uri) {
         val bytes=Aseprite.write(editor.document)
         Aseprite.read(bytes) // Validate before opening any destination for truncation.
         persist() // Best effort; a full draft store must not prevent manual Save.
         contentResolver.openOutputStream(uri,"wt")?.use { it.write(bytes); it.flush() } ?: error("The document provider refused this file. Use Save As.")
-        editor.saved(); currentUri=uri; sessions.active.sourceUri=uri.toString(); sessions.active.title=uri.lastPathSegment?.substringAfterLast('/') ?: sessions.active.title; clearDraft()
+        editor.saved(); rememberSaveTarget(uri); clearDraft()
     }
     private fun launchPicker(kind: String,result: MethodChannel.Result) {
         if(pending!=null) { result.error("busy","Finish the open file picker first",null); return }
@@ -291,12 +300,16 @@ class MainActivity : FlutterActivity() {
                         while(true) { val n=stream.read(buffer); if(n<0) break; require(out.size()+n<=Aseprite.MAX_FILE) { "File exceeds the 64 MiB safety limit" }; out.write(buffer,0,n) }
                         Aseprite.read(out.toByteArray())
                     } ?: error("The document provider could not read this file")
-                    val opened=sessions.add(loaded, uri.lastPathSegment?.substringAfterLast('/') ?: "Opened document")
+                    val opened=sessions.add(loaded, documentNames.resolve(uri))
                     opened.path=uri.toString();opened.sourceUri=uri.toString();changed()
                 } else {
                     requireNotNull(bytes)
                     contentResolver.openOutputStream(uri,"wt")?.use { it.write(bytes); it.flush() } ?: error("The document provider refused this file")
-                    if(kind=="saveAs") { currentUri=uri;sessions.active.sourceUri=uri.toString();sessions.active.title=uri.lastPathSegment?.substringAfterLast('/') ?: sessions.active.title; if(revision==snapshotRevision) { editor.saved(); clearDraft() } }
+                    if(kind=="saveAs") {
+                        rememberSaveTarget(uri)
+                        if(revision==snapshotRevision) { editor.saved(); clearDraft() }
+                        else scheduleDraft() // Include the new name/source in the newer unsaved draft.
+                    }
                 }
             }
             state()
