@@ -123,7 +123,7 @@ void main() {
       final gesture = await tester.startGesture(
         tester.getCenter(find.byKey(const Key('tag-start-handle'))),
       );
-      await gesture.moveBy(const Offset(-76, 0));
+      await gesture.moveBy(const Offset(-68, 0));
       await tester.pump();
       expect(engine.document.tags[0].from, 1);
       expect(calls.where((m) => m == 'edit'), isEmpty);
@@ -165,7 +165,7 @@ void main() {
     var gesture = await tester.startGesture(
       tester.getCenter(find.byKey(const Key('tag-start-handle'))),
     );
-    await gesture.moveBy(const Offset(-76, 0));
+    await gesture.moveBy(const Offset(-68, 0));
     await gesture.cancel();
     await tester.pumpAndSettle();
     expect(engine.document.tags[0].from, 1);
@@ -173,7 +173,7 @@ void main() {
     gesture = await tester.startGesture(
       tester.getCenter(find.byKey(const Key('tag-start-handle'))),
     );
-    await gesture.moveBy(const Offset(-76, 0));
+    await gesture.moveBy(const Offset(-68, 0));
     await editor.call('undo');
     await tester.pumpAndSettle();
     await gesture.up();
@@ -248,7 +248,7 @@ void main() {
       expect(engine.document.tags, hasLength(1));
       await tester.drag(
         find.byKey(const Key('tag-end-handle')),
-        const Offset(76, 0),
+        const Offset(68, 0),
       );
       await tester.pumpAndSettle();
       expect(engine.document.tags, hasLength(1));
@@ -391,7 +391,7 @@ void main() {
     final strip = tester.widget<ListView>(
       find.byKey(const Key('tag-frame-strip')),
     );
-    strip.controller!.jumpTo(76);
+    strip.controller!.jumpTo(68);
     await tester.pump();
     calls.clear();
     final gesture = await tester.startGesture(

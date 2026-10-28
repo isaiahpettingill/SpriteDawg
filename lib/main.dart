@@ -490,6 +490,7 @@ class _EditorScreenState extends State<EditorScreen>
     strokeSeed = (strokeSeed + 1) & 0xffffffff;
     await e.call('stroke', {
       'tool': value,
+      'wrap': canvasViewMode == CanvasViewMode.tiled,
       'points': points.map((p) => [p.dx.floor(), p.dy.floor()]).toList(),
       'color': color,
       'size': brush,
@@ -830,13 +831,22 @@ class _EditorScreenState extends State<EditorScreen>
                     enabled: !e.busy,
                     onSelected: menu,
                     itemBuilder: (context) => [
-                      const PopupMenuItem(value: 'new', child: Text('New canvas')),
-                      const PopupMenuItem(value: 'saveAs', child: Text('Save as…')),
+                      const PopupMenuItem(
+                        value: 'new',
+                        child: Text('New canvas'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'saveAs',
+                        child: Text('Save as…'),
+                      ),
                       const PopupMenuItem(
                         value: 'drafts',
                         child: Text('Internal drafts…'),
                       ),
-                      const PopupMenuItem(value: 'exportPng', child: Text('Export…')),
+                      const PopupMenuItem(
+                        value: 'exportPng',
+                        child: Text('Export…'),
+                      ),
                       const PopupMenuDivider(),
                       CheckedPopupMenuItem(
                         value: 'grid',
@@ -863,7 +873,10 @@ class _EditorScreenState extends State<EditorScreen>
                         checked: canvasViewMode == CanvasViewMode.slide,
                         child: const Text('View · Slide'),
                       ),
-                      const PopupMenuItem(value: 'fit', child: Text('Fit canvas')),
+                      const PopupMenuItem(
+                        value: 'fit',
+                        child: Text('Fit canvas'),
+                      ),
                       const PopupMenuItem(
                         value: 'flipHorizontal',
                         child: Text('Flip active cel horizontally'),
@@ -880,7 +893,10 @@ class _EditorScreenState extends State<EditorScreen>
                         value: 'defaultUserData',
                         child: Text('Default user data'),
                       ),
-                      const PopupMenuItem(value: 'help', child: Text('Drawing help')),
+                      const PopupMenuItem(
+                        value: 'help',
+                        child: Text('Drawing help'),
+                      ),
                       if (LinuxUpdater.supported)
                         const PopupMenuItem(
                           value: 'updates',
@@ -1242,6 +1258,8 @@ class _EditorScreenState extends State<EditorScreen>
     seed: strokeSeed,
     strength: effectStrength,
     previewOptions: {
+      'gradient': gradientFill,
+      'gradientDirection': gradientDirection,
       'secondaryColor': secondaryColor,
       if (e.state['depth'] == 8 && selectedPaletteIndex != null)
         'paletteIndex': selectedPaletteIndex,

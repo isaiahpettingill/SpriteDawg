@@ -35,7 +35,7 @@ class VisualTagEditor extends StatefulWidget {
 }
 
 class VisualTagEditorState extends State<VisualTagEditor> {
-  static const _frameWidth = 76.0, _gutter = 22.0;
+  static const _frameWidth = 68.0, _gutter = 22.0;
   final _name = TextEditingController();
   final _nameFocus = FocusNode(), _keyboardFocus = FocusNode();
   final _frames = ScrollController(), _chips = ScrollController();

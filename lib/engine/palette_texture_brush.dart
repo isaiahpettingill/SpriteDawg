@@ -118,6 +118,7 @@ Map<int, int> paletteTexturePixels({
   required int size,
   required List<int> ramp,
   int seed = 1,
+  bool wrap = false,
   bool mirrorX = false,
   bool mirrorY = false,
   bool mirrorDiagonal = false,
@@ -127,6 +128,7 @@ Map<int, int> paletteTexturePixels({
   final symmetry = CanvasSymmetry(
     width: width,
     height: height,
+    wrap: wrap,
     mirrorX: mirrorX,
     mirrorY: mirrorY,
     mirrorDiagonal: mirrorDiagonal,
@@ -294,10 +296,11 @@ Map<int, int> paletteTexturePixels({
   void stamp(int x, int y, double tx, double ty) {
     final left = x - size ~/ 2, top = y - size ~/ 2;
     final bounds = symmetry.sourceBounds;
-    if (left > bounds.$3 ||
-        top > bounds.$4 ||
-        left + size <= bounds.$1 ||
-        top + size <= bounds.$2) {
+    if (!wrap &&
+        (left > bounds.$3 ||
+            top > bounds.$4 ||
+            left + size <= bounds.$1 ||
+            top + size <= bounds.$2)) {
       return;
     }
     final cell = math.max(2.0, size / 3);
@@ -307,27 +310,37 @@ Map<int, int> paletteTexturePixels({
         final radius = nx * nx + ny * ny;
         if (radius > 1) continue;
         final px = x - size ~/ 2 + ox, py = y - size ~/ 2 + oy;
-        if (px < bounds.$1 ||
-            py < bounds.$2 ||
-            px > bounds.$3 ||
-            py > bounds.$4) {
+        if (!wrap &&
+            (px < bounds.$1 ||
+                py < bounds.$2 ||
+                px > bounds.$3 ||
+                py > bounds.$4)) {
           continue;
         }
+        final sampleX = wrap ? px % width : px,
+            sampleY = wrap ? py % height : py;
         var shade = 2;
         if (tool == 'ditherPaint' || tool == 'ditherRetouch') {
           shade = 2;
         } else if (tool == 'cluster') {
           shade = clusterCache.putIfAbsent((
-            px,
-            py,
-          ), () => cluster(px.toDouble(), py.toDouble(), cell));
+            sampleX,
+            sampleY,
+          ), () => cluster(sampleX.toDouble(), sampleY.toDouble(), cell));
         } else if (tool == 'bark') {
-          shade = barkCache.putIfAbsent((px, py), () => bark(px, py));
+          shade = barkCache.putIfAbsent((
+            sampleX,
+            sampleY,
+          ), () => bark(sampleX, sampleY));
         } else if (tool == 'leaves') {
           // Destination-anchored canonical sampling happens in emit.
           shade = 2;
         } else if (tool == 'stripes') {
-          shade = cluster((px * tx + py * ty) / 4, -px * ty + py * tx, cell);
+          shade = cluster(
+            (sampleX * tx + sampleY * ty) / 4,
+            -sampleX * ty + sampleY * tx,
+            cell,
+          );
         } else if (tool == 'sphere') {
           final light =
               (.62 * math.sqrt(math.max(0, 1 - radius)) - .70 * ny - .18 * nx)
