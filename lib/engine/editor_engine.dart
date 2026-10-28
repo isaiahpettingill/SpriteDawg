@@ -653,7 +653,11 @@ class EditorEngine {
         final visited = Uint8List(c.pixels.length),
             region = Uint32List(d.width * d.height);
         for (final transform in symmetry.transforms) {
-          final (x, y) = symmetry.transformedPoint(transform, first.$1, first.$2);
+          final (x, y) = symmetry.transformedPoint(
+            transform,
+            first.$1,
+            first.$2,
+          );
           final (dx, dy) = direction == 'horizontal'
               ? transform.vector(1, 0)
               : transform.vector(0, 1);
@@ -685,9 +689,8 @@ class EditorEngine {
 
             if (wrap) {
               final x = c.x + i % c.width, y = c.y + i ~/ c.width;
-              void neighbour(int xx, int yy) => push(
-                ((yy % d.height) - c.y) * c.width + xx % d.width - c.x,
-              );
+              void neighbour(int xx, int yy) =>
+                  push(((yy % d.height) - c.y) * c.width + xx % d.width - c.x);
               neighbour(x - 1, y);
               neighbour(x + 1, y);
               neighbour(x, y - 1);
@@ -745,8 +748,12 @@ class EditorEngine {
             x <= (wrap ? d.width - 1 : math.min(bounds.$3, right));
             x++
           ) {
-            final sx = wrap ? periodicRepresentative(left, right, x, d.width) : x,
-                sy = wrap ? periodicRepresentative(top, bottom, y, d.height) : y;
+            final sx = wrap
+                    ? periodicRepresentative(left, right, x, d.width)
+                    : x,
+                sy = wrap
+                    ? periodicRepresentative(top, bottom, y, d.height)
+                    : y;
             if (sx == null || sy == null) continue;
             final dx = 2 * sx - left - right, dy = 2 * sy - top - bottom;
             if (tool == 'rectangle' ||
@@ -863,7 +870,8 @@ class EditorEngine {
               final nx = wrap ? xx % d.width : xx,
                   ny = wrap ? yy % d.height : yy;
               final j = (ny - c.y) * c.width + nx - c.x;
-              if (j != i && c.pixels[j] != c.pixels[i] &&
+              if (j != i &&
+                  c.pixels[j] != c.pixels[i] &&
                   !neighbours.contains(j)) {
                 neighbours.add(j);
               }

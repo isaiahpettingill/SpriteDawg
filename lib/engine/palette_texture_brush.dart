@@ -296,10 +296,11 @@ Map<int, int> paletteTexturePixels({
   void stamp(int x, int y, double tx, double ty) {
     final left = x - size ~/ 2, top = y - size ~/ 2;
     final bounds = symmetry.sourceBounds;
-    if (!wrap && (left > bounds.$3 ||
-        top > bounds.$4 ||
-        left + size <= bounds.$1 ||
-        top + size <= bounds.$2)) {
+    if (!wrap &&
+        (left > bounds.$3 ||
+            top > bounds.$4 ||
+            left + size <= bounds.$1 ||
+            top + size <= bounds.$2)) {
       return;
     }
     final cell = math.max(2.0, size / 3);
@@ -309,10 +310,11 @@ Map<int, int> paletteTexturePixels({
         final radius = nx * nx + ny * ny;
         if (radius > 1) continue;
         final px = x - size ~/ 2 + ox, py = y - size ~/ 2 + oy;
-        if (!wrap && (px < bounds.$1 ||
-            py < bounds.$2 ||
-            px > bounds.$3 ||
-            py > bounds.$4)) {
+        if (!wrap &&
+            (px < bounds.$1 ||
+                py < bounds.$2 ||
+                px > bounds.$3 ||
+                py > bounds.$4)) {
           continue;
         }
         final sampleX = wrap ? px % width : px,
@@ -321,17 +323,24 @@ Map<int, int> paletteTexturePixels({
         if (tool == 'ditherPaint' || tool == 'ditherRetouch') {
           shade = 2;
         } else if (tool == 'cluster') {
-          shade = clusterCache.putIfAbsent(
-            (sampleX, sampleY),
-            () => cluster(sampleX.toDouble(), sampleY.toDouble(), cell),
-          );
+          shade = clusterCache.putIfAbsent((
+            sampleX,
+            sampleY,
+          ), () => cluster(sampleX.toDouble(), sampleY.toDouble(), cell));
         } else if (tool == 'bark') {
-          shade = barkCache.putIfAbsent((sampleX, sampleY), () => bark(sampleX, sampleY));
+          shade = barkCache.putIfAbsent((
+            sampleX,
+            sampleY,
+          ), () => bark(sampleX, sampleY));
         } else if (tool == 'leaves') {
           // Destination-anchored canonical sampling happens in emit.
           shade = 2;
         } else if (tool == 'stripes') {
-          shade = cluster((sampleX * tx + sampleY * ty) / 4, -sampleX * ty + sampleY * tx, cell);
+          shade = cluster(
+            (sampleX * tx + sampleY * ty) / 4,
+            -sampleX * ty + sampleY * tx,
+            cell,
+          );
         } else if (tool == 'sphere') {
           final light =
               (.62 * math.sqrt(math.max(0, 1 - radius)) - .70 * ny - .18 * nx)

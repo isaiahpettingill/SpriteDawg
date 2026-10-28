@@ -138,23 +138,25 @@ class _PixelCanvasState extends State<PixelCanvas> {
   int _previewEpoch = 0, _pointVersion = 0;
   bool get _usesPreview =>
       (widget.viewMode == CanvasViewMode.tiled &&
-          widget.tool != 'pan' && widget.tool != 'eyedropper') || const {
-    'spray',
-    'airbrush',
-    'blur',
-    'jumble',
-    'gradient',
-    'metal',
-    'cluster',
-    'stripes',
-    'sphere',
-    'knife',
-    'bark',
-    'leaves',
-    'splatter',
-    'ditherPaint',
-    'ditherRetouch',
-  }.contains(widget.tool);
+          widget.tool != 'pan' &&
+          widget.tool != 'eyedropper') ||
+      const {
+        'spray',
+        'airbrush',
+        'blur',
+        'jumble',
+        'gradient',
+        'metal',
+        'cluster',
+        'stripes',
+        'sphere',
+        'knife',
+        'bark',
+        'leaves',
+        'splatter',
+        'ditherPaint',
+        'ditherRetouch',
+      }.contains(widget.tool);
   void _clearPreview() {
     _previewEpoch++;
     _previewTimer?.cancel();
@@ -355,8 +357,11 @@ class _PixelCanvasState extends State<PixelCanvas> {
         // The margin outside the bounded 3x3 view is not another hidden tile.
         // Ignore one-finger drags started there rather than silently panning.
         if (widget.viewMode == CanvasViewMode.tiled &&
-            !isTiledCanvasPoint(_pixel(e.localPosition),
-                widget.editor.width, widget.editor.height)) {
+            !isTiledCanvasPoint(
+              _pixel(e.localPosition),
+              widget.editor.width,
+              widget.editor.height,
+            )) {
           stroke.clear();
           return;
         }
@@ -378,7 +383,10 @@ class _PixelCanvasState extends State<PixelCanvas> {
         // A remaining finger waits for the navigation gesture to finish. It
         // neither pans nor resumes a partially committed tiled stroke.
         if (widget.viewMode == CanvasViewMode.tiled &&
-            pointers.length < 2 && !_explicitPan) return;
+            pointers.length < 2 &&
+            !_explicitPan) {
+          return;
+        }
         final newCenter = centroid;
         final next =
             (scale *
@@ -393,7 +401,11 @@ class _PixelCanvasState extends State<PixelCanvas> {
         if (stroke.isEmpty) return;
         final raw = _pixel(e.localPosition);
         final p = widget.viewMode == CanvasViewMode.tiled
-            ? clampTiledCanvasPoint(raw, widget.editor.width, widget.editor.height)
+            ? clampTiledCanvasPoint(
+                raw,
+                widget.editor.width,
+                widget.editor.height,
+              )
             : raw;
         if (widget.viewMode == CanvasViewMode.slide &&
             !isEditableCanvasPoint(
@@ -438,9 +450,11 @@ class _PixelCanvasState extends State<PixelCanvas> {
     if (widget.tool == 'eyedropper') {
       final p = points.last, bytes = widget.editor.state['pixels'];
       final x = widget.viewMode == CanvasViewMode.tiled
-          ? p.dx.floor() % widget.editor.width : p.dx.floor();
+          ? p.dx.floor() % widget.editor.width
+          : p.dx.floor();
       final y = widget.viewMode == CanvasViewMode.tiled
-          ? p.dy.floor() % widget.editor.height : p.dy.floor();
+          ? p.dy.floor() % widget.editor.height
+          : p.dy.floor();
       if (x >= 0 &&
           y >= 0 &&
           x < widget.editor.width &&
@@ -821,8 +835,11 @@ class _CanvasPainter extends CustomPainter {
       }.contains(tool)) {
         final raw = tool == 'fill' ? points.first : points.last;
         final point = viewMode == CanvasViewMode.tiled
-            ? Offset((raw.dx.floor() % editor.width).toDouble(),
-                (raw.dy.floor() % editor.height).toDouble()) : raw;
+            ? Offset(
+                (raw.dx.floor() % editor.width).toDouble(),
+                (raw.dy.floor() % editor.height).toDouble(),
+              )
+            : raw;
         final p = Paint()
           ..color = Colors.white
           ..style = PaintingStyle.stroke
@@ -875,7 +892,8 @@ class _CanvasPainter extends CustomPainter {
           ..color = tool == 'eraser' ? const Color(0x99ffffff) : Color(color)
           ..isAntiAlias = false
           ..blendMode = tool == 'eraser' && viewMode == CanvasViewMode.tiled
-              ? BlendMode.clear : BlendMode.srcOver;
+              ? BlendMode.clear
+              : BlendMode.srcOver;
         for (final run in runs) {
           canvas.drawRect(run, p);
         }

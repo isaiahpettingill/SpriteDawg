@@ -27,8 +27,10 @@ bool isEditableCanvasPoint(Offset point, int width, int height) =>
 /// coordinates continuous until rasterization; wrapping pointer endpoints first
 /// would turn a short seam crossing into a line through the entire original.
 bool isTiledCanvasPoint(Offset point, int width, int height) =>
-    point.dx >= -width && point.dy >= -height &&
-    point.dx < width * 2 && point.dy < height * 2;
+    point.dx >= -width &&
+    point.dy >= -height &&
+    point.dx < width * 2 &&
+    point.dy < height * 2;
 
 Offset clampTiledCanvasPoint(Offset point, int width, int height) => Offset(
   point.dx.clamp(-width.toDouble(), width * 2 - .000001).toDouble(),

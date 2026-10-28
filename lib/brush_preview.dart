@@ -34,7 +34,9 @@ Uint8List previewStrokeMask({
     final start = points.first;
     final dx = start.dx.floor() - start.dx.floor() % width;
     final dy = start.dy.floor() - start.dy.floor() % height;
-    points = points.map((p) => p - Offset(dx.toDouble(), dy.toDouble())).toList();
+    points = points
+        .map((p) => p - Offset(dx.toDouble(), dy.toDouble()))
+        .toList();
   }
   var randomState = seed & 0xffffffff;
   int random() {
@@ -234,8 +236,14 @@ List<Rect> previewStrokeRuns({
         while (x < width && mask[y * width + x] != 0) {
           x++;
         }
-        runs.add(Rect.fromLTWH(start.toDouble(), y.toDouble(),
-            (x - start).toDouble(), 1));
+        runs.add(
+          Rect.fromLTWH(
+            start.toDouble(),
+            y.toDouble(),
+            (x - start).toDouble(),
+            1,
+          ),
+        );
       }
     }
     return runs;
