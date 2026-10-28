@@ -87,11 +87,15 @@ class Harness {
       Offset(_origin + (x + .5) * _scale, _origin + (y + .5) * _scale);
 
   Future<void> flush(WidgetTester t) async {
-    await t.runAsync(() async {
-      for (var i = 0; editor.busy && i < 100; i++) {
+    // Transport completes in the widget test's fake-async zone, while image
+    // decoding is real asynchronous work. Pump both, not only wall-clock time.
+    await t.pump();
+    for (var i = 0; editor.busy && i < 100; i++) {
+      await t.runAsync(() async {
         await Future<void>.delayed(const Duration(milliseconds: 10));
-      }
-    });
+      });
+      await t.pump();
+    }
     expect(editor.busy, isFalse);
     await t.pump();
   }

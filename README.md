@@ -266,6 +266,8 @@ finger lifts, the remaining finger waits until both lift. The explicit Hand tool
 and desktop right-drag still pan. Drags begun in the margin outside the 3×3 area
 do nothing; a stroke leaving that area stops at its outer edge, never starts a pan.
 Bucket regions and blur/jumble neighborhoods connect across opposite edges.
+Bucket gradients keep their original-tile horizontal/vertical coordinates; they
+do not bend into a circular gradient across the seam.
 Mirroring operates on the original tile, deduplicating overlapping ink; indexed
 colors and alpha retain the normal tool rules. The whole-layer Gradient still
 paints one linear field (not necessarily a seamless texture): its first point is
