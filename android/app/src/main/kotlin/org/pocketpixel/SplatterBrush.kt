@@ -5,9 +5,9 @@ import kotlin.math.*
 /** Spaced seeded droplet bursts. Strongest coverage wins; blend once per gesture. */
 internal fun splatterPixels(points: List<Pair<Int,Int>>, width: Int, height: Int, size: Int,
     seed: Long = 1L, mirrorX: Boolean = false, mirrorY: Boolean = false,
-    mirrorDiagonal: Boolean = false, mirrorAntiDiagonal: Boolean = false): Map<Int,Int> {
+    mirrorDiagonal: Boolean = false, mirrorAntiDiagonal: Boolean = false, wrap: Boolean = false): Map<Int,Int> {
     val out = linkedMapOf<Int,Int>()
-    val symmetry=StrokeSymmetry(width,height,mirrorX,mirrorY,mirrorDiagonal,mirrorAntiDiagonal)
+    val symmetry=StrokeSymmetry(width,height,mirrorX,mirrorY,mirrorDiagonal,mirrorAntiDiagonal,wrap)
     val bounds=symmetry.sourceBounds
     if (points.isEmpty()) return out
     val path = mutableListOf<Pair<Int,Int>>()
@@ -30,10 +30,12 @@ internal fun splatterPixels(points: List<Pair<Int,Int>>, width: Int, height: Int
     }
     val stamped = mutableSetOf<Pair<Int,Int>>()
     fun stamp(x: Int, y: Int) {
-        if (!stamped.add(Pair(x,y))) return
+        val seedX=if(wrap) Math.floorMod(x,width) else x
+        val seedY=if(wrap) Math.floorMod(y,height) else y
+        if (!stamped.add(Pair(seedX,seedY))) return
         val left = x-size/2; val top = y-size/2
-        if (left > bounds.right || top > bounds.bottom || left+size <= bounds.left || top+size <= bounds.top) return
-        var state = (x*374761393L+y*668265263L+(seed and 0xffffffffL)*69069L) and 0xffffffffL
+        if (!wrap && (left > bounds.right || top > bounds.bottom || left+size <= bounds.left || top+size <= bounds.top)) return
+        var state = (seedX*374761393L+seedY*668265263L+(seed and 0xffffffffL)*69069L) and 0xffffffffL
         fun random(): Int {
             state = (state*1664525L+1013904223L) and 0xffffffffL
             return (state ushr 16).toInt()

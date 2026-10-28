@@ -40,6 +40,7 @@ class CanvasSymmetry {
   CanvasSymmetry({
     required this.width,
     required this.height,
+    this.wrap = false,
     bool mirrorX = false,
     bool mirrorY = false,
     bool mirrorDiagonal = false,
@@ -60,6 +61,7 @@ class CanvasSymmetry {
   }
 
   final int width, height;
+  final bool wrap;
   final List<MirrorTransform> transforms = [const MirrorTransform(1, 0, 0, 1)];
 
   /// Inclusive source window containing every pixel that can reflect into the
@@ -90,7 +92,7 @@ class CanvasSymmetry {
   Iterable<(int, int)> points(int x, int y) sync* {
     final seen = <(int, int)>{};
     for (final transform in transforms) {
-      final point = transform.point(width, height, x, y);
+      final point = transformedPoint(transform, x, y);
       if (point.$1 >= 0 &&
           point.$2 >= 0 &&
           point.$1 < width &&
@@ -101,13 +103,42 @@ class CanvasSymmetry {
     }
   }
 
+  /// In tiled mode mirrors belong to the canonical tile, not whichever repeat
+  /// the pointer happens to occupy. Wrap again after a rectangular reflection.
+  (int, int) transformedPoint(MirrorTransform transform, int x, int y) {
+    if (wrap) {
+      x %= width;
+      y %= height;
+    }
+    final p = transform.point(width, height, x, y);
+    return wrap ? (p.$1 % width, p.$2 % height) : p;
+  }
+
   /// Stable texture sampling representative; clipping does not change the field.
   (int, int) canonicalPoint(int x, int y) {
+    if (wrap) {
+      x %= width;
+      y %= height;
+    }
     var best = (x, y);
     for (final transform in transforms) {
-      final p = transform.point(width, height, x, y);
+      final p = transformedPoint(transform, x, y);
       if (p.$1 < best.$1 || p.$1 == best.$1 && p.$2 < best.$2) best = p;
     }
     return best;
   }
+}
+
+/// The point in [start,end] congruent to [coordinate] modulo [period] nearest
+/// the interval center. For a filled ellipse, minimizing each axis separately
+/// tells whether any periodic copy covers a pixel, in at most one canvas pass.
+int? periodicRepresentative(int start, int end, int coordinate, int period) {
+  final first = start + (coordinate - start) % period;
+  if (first > end) return null;
+  final steps = (end - first) ~/ period;
+  final nearest = ((start + end - 2 * first + period) ~/ (2 * period)).clamp(
+    0,
+    steps,
+  );
+  return first + nearest * period;
 }

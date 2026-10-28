@@ -22,7 +22,8 @@ internal data class SymmetryBounds(val left: Int,val top: Int,val right: Int,val
 internal class StrokeSymmetry(
     private val width: Int, private val height: Int,
     mirrorX: Boolean=false, mirrorY: Boolean=false,
-    mirrorDiagonal: Boolean=false, mirrorAntiDiagonal: Boolean=false
+    mirrorDiagonal: Boolean=false, mirrorAntiDiagonal: Boolean=false,
+    private val wrap: Boolean=false
 ) {
     val transforms: List<SymmetryTransform>
     val sourceBounds: SymmetryBounds
@@ -65,12 +66,27 @@ internal class StrokeSymmetry(
     fun points(x: Int,y: Int): Set<Pair<Int,Int>> {
         val out=linkedSetOf<Pair<Int,Int>>()
         for(t in transforms) {
-            val p=t.point(x,y,width,height)
+            val p=transformedPoint(t,x,y)
             if(p.first in 0 until width && p.second in 0 until height) out.add(p)
         }
         return out
     }
-    fun canonical(x: Int,y: Int): Pair<Int,Int> = transforms.map { it.point(x,y,width,height) }.minWithOrNull(
+    fun transformedPoint(t: SymmetryTransform,x: Int,y: Int): Pair<Int,Int> {
+        val sx=if(wrap) Math.floorMod(x,width) else x
+        val sy=if(wrap) Math.floorMod(y,height) else y
+        val p=t.point(sx,sy,width,height)
+        return if(wrap) Math.floorMod(p.first,width) to Math.floorMod(p.second,height) else p
+    }
+    fun canonical(x: Int,y: Int): Pair<Int,Int> = transforms.map { transformedPoint(it,x,y) }.minWithOrNull(
         compareBy<Pair<Int,Int>> { it.first }.thenBy { it.second }
     ) ?: Pair(x,y)
+}
+
+/** Closest periodic representative to an interval center, or null if absent. */
+internal fun periodicRepresentative(start: Int,end: Int,coordinate: Int,period: Int): Int? {
+    val first=start+Math.floorMod(coordinate-start,period)
+    if(first>end) return null
+    val steps=(end-first)/period
+    val nearest=((start+end-2*first+period)/(2*period)).coerceIn(0,steps)
+    return first+nearest*period
 }

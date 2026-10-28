@@ -490,6 +490,7 @@ class _EditorScreenState extends State<EditorScreen>
     strokeSeed = (strokeSeed + 1) & 0xffffffff;
     await e.call('stroke', {
       'tool': value,
+      'wrap': canvasViewMode == CanvasViewMode.tiled,
       'points': points.map((p) => [p.dx.floor(), p.dy.floor()]).toList(),
       'color': color,
       'size': brush,
@@ -1201,6 +1202,8 @@ class _EditorScreenState extends State<EditorScreen>
     seed: strokeSeed,
     strength: effectStrength,
     previewOptions: {
+      'gradient': gradientFill,
+      'gradientDirection': gradientDirection,
       'secondaryColor': secondaryColor,
       if (e.state['depth'] == 8 && selectedPaletteIndex != null)
         'paletteIndex': selectedPaletteIndex,

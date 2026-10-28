@@ -298,4 +298,47 @@ void main(List<String> arguments) {
     }
   }
 
+  for (final (width, height) in [(8, 5), (7, 7), (1, 1), (1, 7)]) {
+    for (final depth in [8, 16, 32]) {
+      for (final tool in [
+        'pencil', 'eraser', 'line', 'rectangle', 'ellipse', 'fill', 'gradient',
+        'spray', 'airbrush', 'blur', 'jumble', 'splatter', ...paletteTextureTools,
+      ]) {
+        final e = EditorEngine();
+        e.invoke('new', {'width': width, 'height': height});
+        final d = e.document;
+        d.depth = depth;
+        d.frames[0].palette = [
+          0, 0x80241c0b, 0x80654b16, 0x80ae852a, 0x80e0bd55, 0x80ffefae,
+          0xff1255ff,
+        ];
+        final c = d.editable(0, 0);
+        for (var y = 0; y < height; y++) {
+          for (var x = 0; x < width; x++) {
+            c.pixels[y * width + x] = depth == 8
+                ? 1 + (x + 2 * y) % 6
+                : d.drawingColor(
+                    0x80000000 | (x * 23 % 256) << 16 | (y * 31 % 256) << 8 | 47,
+                    0,
+                  );
+          }
+        }
+        e.stroke({
+          'tool': tool, 'wrap': true,
+          'points': [[-1, -1], [1, 1], [width + 1, 1], [width + 1, 1]],
+          'size': 5, 'seed': 42, 'density': 12, 'strength': 50,
+          'color': 0x80ae852a, 'paletteIndex': 3,
+          'filled': depth != 16, 'gradient': true,
+          'gradientDirection': 'horizontal', 'secondaryColor': 0x20808080,
+          'mirrorDiagonal': true, 'mirrorAntiDiagonal': height.isOdd,
+          'mirrorX': width.isEven, 'mirrorY': depth == 16,
+        });
+        final name = 'wrap-${width}x$height-$depth-$tool';
+        File('${root.path}/$name.rgba').writeAsBytesSync(
+          e.state()['pixels'] as Uint8List,
+        );
+      }
+    }
+  }
+
 }

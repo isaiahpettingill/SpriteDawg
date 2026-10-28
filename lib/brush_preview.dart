@@ -15,17 +15,27 @@ Uint8List previewStrokeMask({
   required List<Offset> points,
   required int size,
   bool filled = false,
+  bool wrap = false,
   bool mirrorX = false,
   bool mirrorY = false,
   bool mirrorDiagonal = false,
   bool mirrorAntiDiagonal = false,
   int originX = 0,
   int originY = 0,
+  Set<int>? touchedRows,
   int seed = 1,
   int density = 12,
 }) {
   final out = Uint8List(width * height);
   if (points.isEmpty) return out;
+  if (wrap) {
+    // Translate the whole path by its starting tile, not each point separately.
+    // This preserves seam crossings and negative-half ellipse rounding parity.
+    final start = points.first;
+    final dx = start.dx.floor() - start.dx.floor() % width;
+    final dy = start.dy.floor() - start.dy.floor() % height;
+    points = points.map((p) => p - Offset(dx.toDouble(), dy.toDouble())).toList();
+  }
   var randomState = seed & 0xffffffff;
   int random() {
     randomState = (1664525 * randomState + 1013904223) & 0xffffffff;
@@ -39,10 +49,12 @@ Uint8List previewStrokeMask({
     mirrorY: mirrorY,
     mirrorDiagonal: mirrorDiagonal,
     mirrorAntiDiagonal: mirrorAntiDiagonal,
+    wrap: wrap,
   );
   void pixel(int x, int y) {
     for (final point in symmetry.points(x - originX, y - originY)) {
       out[point.$2 * width + point.$1] = 1;
+      touchedRows?.add(point.$2);
     }
   }
 
@@ -101,21 +113,37 @@ Uint8List previewStrokeMask({
         b = math.max(first.$2, last.$2),
         w = r - l + 1,
         h = b - t + 1;
-    final bounds = symmetry.sourceBounds;
-    for (
-      var y = math.max(bounds.$2 + originY, t);
-      y <= math.min(bounds.$4 + originY, b);
-      y++
-    ) {
+    if (wrap) {
+      for (var yy = 0; yy < height; yy++) {
+        final y = periodicRepresentative(t, b, yy, height);
+        if (y == null) continue;
+        for (var xx = 0; xx < width; xx++) {
+          final x = periodicRepresentative(l, r, xx, width);
+          if (x == null) continue;
+          final dx = 2 * x - l - r, dy = 2 * y - t - b;
+          if (tool == 'rectangle' ||
+              dx * dx * h * h + dy * dy * w * w <= w * w * h * h) {
+            pixel(xx, yy);
+          }
+        }
+      }
+    } else {
+      final bounds = symmetry.sourceBounds;
       for (
-        var x = math.max(bounds.$1 + originX, l);
-        x <= math.min(bounds.$3 + originX, r);
-        x++
+        var y = math.max(bounds.$2 + originY, t);
+        y <= math.min(bounds.$4 + originY, b);
+        y++
       ) {
-        final dx = 2 * x - l - r, dy = 2 * y - t - b;
-        if (tool == 'rectangle' ||
-            dx * dx * h * h + dy * dy * w * w <= w * w * h * h) {
-          pixel(x, y);
+        for (
+          var x = math.max(bounds.$1 + originX, l);
+          x <= math.min(bounds.$3 + originX, r);
+          x++
+        ) {
+          final dx = 2 * x - l - r, dy = 2 * y - t - b;
+          if (tool == 'rectangle' ||
+              dx * dx * h * h + dy * dy * w * w <= w * w * h * h) {
+            pixel(x, y);
+          }
         }
       }
     }
@@ -165,6 +193,7 @@ List<Rect> previewStrokeRuns({
   required List<Offset> points,
   required int size,
   bool filled = false,
+  bool wrap = false,
   bool mirrorX = false,
   bool mirrorY = false,
   bool mirrorDiagonal = false,
@@ -173,6 +202,44 @@ List<Rect> previewStrokeRuns({
   int density = 12,
 }) {
   if (points.isEmpty) return [];
+  if (wrap) {
+    // Tiled output is always bounded by one original canvas, not by the
+    // world-space distance between pointer samples or the nine visible copies.
+    final rows = <int>{};
+    final mask = previewStrokeMask(
+      touchedRows: rows,
+      width: width,
+      height: height,
+      tool: tool,
+      points: points,
+      size: size,
+      filled: filled,
+      wrap: true,
+      mirrorX: mirrorX,
+      mirrorY: mirrorY,
+      mirrorDiagonal: mirrorDiagonal,
+      mirrorAntiDiagonal: mirrorAntiDiagonal,
+      seed: seed,
+      density: density,
+    );
+    final runs = <Rect>[];
+    for (final y in rows) {
+      var x = 0;
+      while (x < width) {
+        if (mask[y * width + x] == 0) {
+          x++;
+          continue;
+        }
+        final start = x;
+        while (x < width && mask[y * width + x] != 0) {
+          x++;
+        }
+        runs.add(Rect.fromLTWH(start.toDouble(), y.toDouble(),
+            (x - start).toDouble(), 1));
+      }
+    }
+    return runs;
+  }
   final relevant = const {'line', 'rectangle', 'ellipse'}.contains(tool)
       ? [points.first, points.last]
       : points;
@@ -193,6 +260,7 @@ List<Rect> previewStrokeRuns({
     mirrorY: mirrorY,
     mirrorDiagonal: mirrorDiagonal,
     mirrorAntiDiagonal: mirrorAntiDiagonal,
+    wrap: wrap,
   );
   final margin = size ~/ 2 + 1, bounds = symmetry.sourceBounds;
   // Preserve off-canvas source pixels that reflect into a rectangular canvas,

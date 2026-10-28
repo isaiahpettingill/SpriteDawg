@@ -115,4 +115,29 @@ class BrushInteropTest {
     }
 }
 
+@Test fun wrappedToolsMatchDartIncludingNarrowAndMixedParityTiles() {
+    val path=System.getenv("SPRITEDAWG_BRUSH_INTEROP_DIR")
+    assumeTrue("Set SPRITEDAWG_BRUSH_INTEROP_DIR to Dart fixtures",path != null)
+    val out=File(path!!)
+    val palette=intArrayOf(0,0x80241c0b.toInt(),0x80654b16.toInt(),0x80ae852a.toInt(),
+        0x80e0bd55.toInt(),0x80ffefae.toInt(),0xff1255ff.toInt())
+    val tools=listOf("pencil","eraser","line","rectangle","ellipse","fill","gradient",
+        "spray","airbrush","blur","jumble","splatter")+paletteTextureTools
+    for((width,height) in listOf(8 to 5,7 to 7,1 to 1,1 to 7)) for(depth in listOf(8,16,32)) for(tool in tools) {
+        val d=Document.create(width,height);d.depth=depth;d.frames[0].palette=palette.copyOf()
+        val c=d.editable(0,0)
+        for(y in 0 until height) for(x in 0 until width) c.pixels[y*width+x]=if(depth==8) 1+(x+2*y)%6
+            else d.drawingColor(0x80000000.toInt() or (((x*23)%256) shl 16) or (((y*31)%256) shl 8) or 47,0)
+        val e=EditorEngine().apply { replace(d) }
+        e.stroke(mapOf("tool" to tool,"wrap" to true,"points" to listOf(listOf(-1,-1),listOf(1,1),
+            listOf(width+1,1),listOf(width+1,1)),"size" to 5,"seed" to 42,"density" to 12,
+            "strength" to 50,"color" to 0x80ae852aL,"paletteIndex" to 3,"filled" to (depth!=16),
+            "gradient" to true,"gradientDirection" to "horizontal","secondaryColor" to 0x20808080L,
+            "mirrorDiagonal" to true,"mirrorAntiDiagonal" to (height%2!=0),
+            "mirrorX" to (width%2==0),"mirrorY" to (depth==16)))
+        val name="wrap-${width}x${height}-$depth-$tool"
+        assertArrayEquals(name,File(out,"$name.rgba").readBytes(),e.state(false)["pixels"] as ByteArray)
+    }
+}
+
 }

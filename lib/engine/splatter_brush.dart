@@ -12,6 +12,7 @@ Map<int, int> splatterPixels({
   required int height,
   required int size,
   int seed = 1,
+  bool wrap = false,
   bool mirrorX = false,
   bool mirrorY = false,
   bool mirrorDiagonal = false,
@@ -21,6 +22,7 @@ Map<int, int> splatterPixels({
   final symmetry = CanvasSymmetry(
     width: width,
     height: height,
+    wrap: wrap,
     mirrorX: mirrorX,
     mirrorY: mirrorY,
     mirrorDiagonal: mirrorDiagonal,
@@ -48,17 +50,18 @@ Map<int, int> splatterPixels({
 
   final stamped = <(int, int)>{};
   void stamp(int x, int y) {
-    if (!stamped.add((x, y))) return;
+    final seedX = wrap ? x % width : x, seedY = wrap ? y % height : y;
+    if (!stamped.add((seedX, seedY))) return;
     final left = x - size ~/ 2, top = y - size ~/ 2;
     final bounds = symmetry.sourceBounds;
-    if (left > bounds.$3 ||
+    if (!wrap && (left > bounds.$3 ||
         top > bounds.$4 ||
         left + size <= bounds.$1 ||
-        top + size <= bounds.$2) {
+        top + size <= bounds.$2)) {
       return;
     }
     var state =
-        (x * 374761393 + y * 668265263 + (seed & 0xffffffff) * 69069) &
+        (seedX * 374761393 + seedY * 668265263 + (seed & 0xffffffff) * 69069) &
         0xffffffff;
     int random() {
       state = (state * 1664525 + 1013904223) & 0xffffffff;

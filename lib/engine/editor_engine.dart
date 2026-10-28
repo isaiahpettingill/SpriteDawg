@@ -275,6 +275,17 @@ class EditorEngine {
           points.every((p) => p.$1.abs() <= 8192 && p.$2.abs() <= 8192),
       'Stroke exceeds safe limits',
     );
+    final wrap = a['wrap'] == true;
+    if (wrap) {
+      // Translate the entire continuous path, never modulo its endpoints: a
+      // seam crossing must not become a line across the middle of the tile.
+      // This also makes half-pixel ellipse rounding independent of repeat.
+      final offsetX = points.first.$1 - points.first.$1 % document.width,
+          offsetY = points.first.$2 - points.first.$2 % document.height;
+      for (var i = 0; i < points.length; i++) {
+        points[i] = (points[i].$1 - offsetX, points[i].$2 - offsetY);
+      }
+    }
     // A tap has no direction and must not create an undo entry.
     if (tool == 'gradient' && points.first == points.last) return;
     final size = _n(
@@ -311,6 +322,7 @@ class EditorEngine {
     final symmetry = CanvasSymmetry(
       width: document.width,
       height: document.height,
+      wrap: wrap,
       mirrorX: mirrorX,
       mirrorY: mirrorY,
       mirrorDiagonal: mirrorDiagonal,
@@ -341,6 +353,7 @@ class EditorEngine {
         height: d.height,
         size: size,
         seed: _n(a, 'seed', 1),
+        wrap: wrap,
         mirrorX: mirrorX,
         mirrorY: mirrorY,
         mirrorDiagonal: mirrorDiagonal,
@@ -402,6 +415,7 @@ class EditorEngine {
         size: size,
         ramp: ramp,
         seed: _n(a, 'seed', 1),
+        wrap: wrap,
         mirrorX: mirrorX,
         mirrorY: mirrorY,
         mirrorDiagonal: mirrorDiagonal,
@@ -505,6 +519,10 @@ class EditorEngine {
       }
 
       int sourceColor(int x, int y) {
+        if (wrap) {
+          x %= d.width;
+          y %= d.height;
+        }
         final cx = x - c.x, cy = y - c.y;
         if (x < 0 ||
             y < 0 ||
@@ -602,10 +620,12 @@ class EditorEngine {
         // One canvas-wide field, independent of brush size and symmetry. Use
         // integer projection/interpolation for exact native/Dart parity.
         final dx = last.$1 - first.$1, dy = last.$2 - first.$2;
+        final originX = wrap ? first.$1 % d.width : first.$1,
+            originY = wrap ? first.$2 % d.height : first.$2;
         final denominator = dx * dx + dy * dy;
         for (var y = 0; y < d.height; y++) {
           for (var x = 0; x < d.width; x++) {
-            final position = ((x - first.$1) * dx + (y - first.$2) * dy).clamp(
+            final position = ((x - originX) * dx + (y - originY) * dy).clamp(
               0,
               denominator,
             );
@@ -633,7 +653,7 @@ class EditorEngine {
         final visited = Uint8List(c.pixels.length),
             region = Uint32List(d.width * d.height);
         for (final transform in symmetry.transforms) {
-          final (x, y) = transform.point(d.width, d.height, first.$1, first.$2);
+          final (x, y) = symmetry.transformedPoint(transform, first.$1, first.$2);
           final (dx, dy) = direction == 'horizontal'
               ? transform.vector(1, 0)
               : transform.vector(0, 1);
@@ -663,10 +683,21 @@ class EditorEngine {
               }
             }
 
-            if (i % c.width > 0) push(i - 1);
-            if (i % c.width < c.width - 1) push(i + 1);
-            if (i >= c.width) push(i - c.width);
-            if (i < c.pixels.length - c.width) push(i + c.width);
+            if (wrap) {
+              final x = c.x + i % c.width, y = c.y + i ~/ c.width;
+              void neighbour(int xx, int yy) => push(
+                ((yy % d.height) - c.y) * c.width + xx % d.width - c.x,
+              );
+              neighbour(x - 1, y);
+              neighbour(x + 1, y);
+              neighbour(x, y - 1);
+              neighbour(x, y + 1);
+            } else {
+              if (i % c.width > 0) push(i - 1);
+              if (i % c.width < c.width - 1) push(i + 1);
+              if (i >= c.width) push(i - c.width);
+              if (i < c.pixels.length - c.width) push(i + c.width);
+            }
           }
           final denominator = horizontal ? maxX - minX : maxY - minY,
               mapped = <int, int>{};
@@ -705,16 +736,19 @@ class EditorEngine {
             h = bottom - top + 1;
         final bounds = symmetry.sourceBounds;
         for (
-          var y = math.max(bounds.$2, top);
-          y <= math.min(bounds.$4, bottom);
+          var y = wrap ? 0 : math.max(bounds.$2, top);
+          y <= (wrap ? d.height - 1 : math.min(bounds.$4, bottom));
           y++
         ) {
           for (
-            var x = math.max(bounds.$1, left);
-            x <= math.min(bounds.$3, right);
+            var x = wrap ? 0 : math.max(bounds.$1, left);
+            x <= (wrap ? d.width - 1 : math.min(bounds.$3, right));
             x++
           ) {
-            final dx = 2 * x - left - right, dy = 2 * y - top - bottom;
+            final sx = wrap ? periodicRepresentative(left, right, x, d.width) : x,
+                sy = wrap ? periodicRepresentative(top, bottom, y, d.height) : y;
+            if (sx == null || sy == null) continue;
+            final dx = 2 * sx - left - right, dy = 2 * sy - top - bottom;
             if (tool == 'rectangle' ||
                 dx * dx * h * h + dy * dy * w * w <= w * w * h * h) {
               pixel(x, y, v);
@@ -771,13 +805,13 @@ class EditorEngine {
               base = sourceColor(x, y);
           var count = 0, sumA = 0, sumR = 0, sumG = 0, sumB = 0;
           for (
-            var yy = math.max(0, y - 1);
-            yy <= math.min(d.height - 1, y + 1);
+            var yy = wrap ? y - 1 : math.max(0, y - 1);
+            yy <= (wrap ? y + 1 : math.min(d.height - 1, y + 1));
             yy++
           ) {
             for (
-              var xx = math.max(0, x - 1);
-              xx <= math.min(d.width - 1, x + 1);
+              var xx = wrap ? x - 1 : math.max(0, x - 1);
+              xx <= (wrap ? x + 1 : math.min(d.width - 1, x + 1));
               xx++
             ) {
               final p = sourceColor(xx, yy), alpha = p >> 24;
@@ -817,17 +851,22 @@ class EditorEngine {
           final x = c.x + i % c.width, y = c.y + i ~/ c.width;
           final neighbours = <int>[];
           for (
-            var yy = math.max(0, y - 1);
-            yy <= math.min(d.height - 1, y + 1);
+            var yy = wrap ? y - 1 : math.max(0, y - 1);
+            yy <= (wrap ? y + 1 : math.min(d.height - 1, y + 1));
             yy++
           ) {
             for (
-              var xx = math.max(0, x - 1);
-              xx <= math.min(d.width - 1, x + 1);
+              var xx = wrap ? x - 1 : math.max(0, x - 1);
+              xx <= (wrap ? x + 1 : math.min(d.width - 1, x + 1));
               xx++
             ) {
-              final j = (yy - c.y) * c.width + xx - c.x;
-              if (j != i && c.pixels[j] != c.pixels[i]) neighbours.add(j);
+              final nx = wrap ? xx % d.width : xx,
+                  ny = wrap ? yy % d.height : yy;
+              final j = (ny - c.y) * c.width + nx - c.x;
+              if (j != i && c.pixels[j] != c.pixels[i] &&
+                  !neighbours.contains(j)) {
+                neighbours.add(j);
+              }
             }
           }
           if (neighbours.isEmpty) continue;

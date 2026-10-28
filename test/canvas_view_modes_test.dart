@@ -64,7 +64,7 @@ List<int> pixel(Uint8List bytes, int x, int y) =>
 
 void main() {
   test(
-    'Tiled geometry is bounded and central hit bounds exclude neighbors',
+    'Tiled hit geometry accepts all nine cells and excludes the margin',
     () {
       expect(canvasContextOffsets(CanvasViewMode.normal), isEmpty);
       expect(canvasContextOffsets(CanvasViewMode.tiled), hasLength(8));
@@ -76,6 +76,11 @@ void main() {
         const Offset(-1, 0),
         const Offset(1, 0),
       ]);
+      expect(isTiledCanvasPoint(const Offset(-8, -8), 8, 8), isTrue);
+      expect(isTiledCanvasPoint(const Offset(15.99, 15.99), 8, 8), isTrue);
+      expect(isTiledCanvasPoint(const Offset(-8.01, 0), 8, 8), isFalse);
+      expect(isTiledCanvasPoint(const Offset(16, 0), 8, 8), isFalse);
+      expect(isTiledCanvasPoint(const Offset(0, 16), 8, 8), isFalse);
       expect(isEditableCanvasPoint(const Offset(0, 0), 8, 8), isTrue);
       expect(isEditableCanvasPoint(const Offset(7.99, 7.99), 8, 8), isTrue);
       for (final p in [
@@ -89,7 +94,7 @@ void main() {
   );
 
   testWidgets(
-    'Tiled repeats cached image in nine cells; neighbors never draw',
+    'Tiled repeats cached image in nine editable cells',
     (tester) async {
       final strokes = <List<Offset>>[];
       final editor = Editor(
@@ -115,24 +120,22 @@ void main() {
       }
       final top = tester.getTopLeft(find.byKey(const Key('pixel-canvas')));
       await tester.tapAt(top + const Offset(66, 160));
-      expect(strokes, isEmpty);
-      await tester.tapAt(top + const Offset(160, 160));
       expect(strokes, hasLength(1));
-      expect(
-        strokes.single.every((p) => isEditableCanvasPoint(p, 8, 8)),
-        isTrue,
-      );
+      expect(strokes.single.single.dx, lessThan(0));
+      await tester.tapAt(top + const Offset(160, 160));
+      expect(strokes, hasLength(2));
+      expect(strokes.last.single.dx, closeTo(4, .01));
       final gesture = await tester.startGesture(top + const Offset(160, 160));
       await gesture.moveTo(top + const Offset(175, 160));
       await gesture.moveTo(top + const Offset(253, 160));
       await gesture.up();
       expect(
         strokes,
-        hasLength(2),
-        reason:
-            'Leaving the center commits once, not into the neighboring tile',
+        hasLength(3),
+        reason: 'Crossing a seam is still one continuous undoable stroke',
       );
-      expect(strokes.last.every((p) => isEditableCanvasPoint(p, 8, 8)), isTrue);
+      expect(strokes.last.first.dx, closeTo(4, .01));
+      expect(strokes.last.last.dx, greaterThan(8));
       await tester.pumpWidget(const SizedBox());
       editor.dispose();
     },
@@ -219,7 +222,7 @@ void main() {
     },
   );
   testWidgets(
-    'Neighbor drag pans and wheel zoom preserves central edit mapping',
+    'Neighbor drag draws without panning; wheel zoom preserves mapping',
     (tester) async {
       final strokes = <List<Offset>>[];
       final editor = Editor(
@@ -237,9 +240,10 @@ void main() {
       await pan.moveBy(const Offset(40, 0));
       await pan.up();
       await tester.pump();
-      expect(strokes, isEmpty);
+      expect(strokes, hasLength(1));
+      expect(strokes.single.length, greaterThan(1));
       await tester.tapAt(top + const Offset(160, 160));
-      expect(strokes.single.single.dx, closeTo(4 - 40 / (280 / 24), .01));
+      expect(strokes.last.single.dx, closeTo(4, .01));
       await tester.sendEventToBinding(
         PointerScrollEvent(
           position: top + const Offset(160, 160),
@@ -250,7 +254,7 @@ void main() {
       await tester.tapAt(top + const Offset(180, 160));
       expect(
         strokes.last.single.dx,
-        closeTo(strokes.first.single.dx + 20 / (2 * 280 / 24), .01),
+        closeTo(4 + 20 / (2 * 280 / 24), .01),
       );
       await tester.pumpWidget(const SizedBox());
       editor.dispose();
