@@ -687,6 +687,10 @@ class VisualTagEditorState extends State<VisualTagEditor> {
     ),
   );
 
+  int _endpoint(bool start, int delta) => start
+      ? (_from + delta).clamp(0, _to)
+      : (_to + delta).clamp(_from, count - 1);
+
   Widget _handle(bool start, double center) => Positioned(
     left: center - 22,
     top: 0,
@@ -694,7 +698,9 @@ class VisualTagEditorState extends State<VisualTagEditor> {
     height: 44,
     child: Semantics(
       label: start ? 'Range start' : 'Range end',
-      value: '${(start ? _from : _to) + 1}',
+      value: '${_endpoint(start, 0) + 1}',
+      increasedValue: '${_endpoint(start, 1) + 1}',
+      decreasedValue: '${_endpoint(start, -1) + 1}',
       onIncrease: blocked ? null : () => _nudge(start, 1),
       onDecrease: blocked ? null : () => _nudge(start, -1),
       child: Focus(
