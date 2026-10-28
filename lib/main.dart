@@ -759,6 +759,10 @@ class _EditorScreenState extends State<EditorScreen>
             MediaQuery.viewInsetsOf(context).bottom <
         430;
     final compactTags = panel == 'tags' && compactHeight;
+    final tightTagKeyboard =
+        panel == 'tags' &&
+        tightHeight &&
+        MediaQuery.viewInsetsOf(context).bottom > 0;
     final hideDrawingStrips =
         (compactHeight && panel != null) || panel == 'tags';
     final layers = e.maps('layers');
@@ -786,104 +790,106 @@ class _EditorScreenState extends State<EditorScreen>
       },
       child: Scaffold(
         resizeToAvoidBottomInset: panel == 'tags',
-        appBar: AppBar(
-          title: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'SpriteDawg${e.dirty ? ' •' : ''}',
-                style: const TextStyle(
-                  fontSize: 19,
-                  fontWeight: FontWeight.w700,
+        appBar: tightTagKeyboard
+            ? null
+            : AppBar(
+                title: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'SpriteDawg${e.dirty ? ' •' : ''}',
+                      style: const TextStyle(
+                        fontSize: 19,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      '${e.width} × ${e.height} · ${e.state['depth'] ?? 32}-bit',
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
+                  ],
                 ),
-              ),
-              Text(
-                '${e.width} × ${e.height} · ${e.state['depth'] ?? 32}-bit',
-                style: Theme.of(context).textTheme.labelSmall,
-              ),
-            ],
-          ),
-          actions: [
-            IconButton(
-              tooltip: 'Open Aseprite',
-              onPressed: e.busy ? null : open,
-              icon: const Icon(Icons.folder_open),
-            ),
-            IconButton(
-              tooltip: 'Save Aseprite',
-              onPressed: e.busy
-                  ? null
-                  : () {
-                      stop();
-                      fileAction('save');
-                    },
-              icon: const Icon(Icons.save_outlined),
-            ),
-            PopupMenuButton<String>(
-              tooltip: 'Project and view options',
-              enabled: !e.busy,
-              onSelected: menu,
-              itemBuilder: (context) => [
-                const PopupMenuItem(value: 'new', child: Text('New canvas')),
-                const PopupMenuItem(value: 'saveAs', child: Text('Save as…')),
-                const PopupMenuItem(
-                  value: 'drafts',
-                  child: Text('Internal drafts…'),
-                ),
-                const PopupMenuItem(value: 'exportPng', child: Text('Export…')),
-                const PopupMenuDivider(),
-                CheckedPopupMenuItem(
-                  value: 'grid',
-                  checked: grid,
-                  child: const Text('Pixel grid'),
-                ),
-                CheckedPopupMenuItem(
-                  value: 'onion',
-                  checked: onion,
-                  child: const Text('Onion skin'),
-                ),
-                CheckedPopupMenuItem(
-                  value: 'viewNormal',
-                  checked: canvasViewMode == CanvasViewMode.normal,
-                  child: const Text('View · Normal'),
-                ),
-                CheckedPopupMenuItem(
-                  value: 'viewTiled',
-                  checked: canvasViewMode == CanvasViewMode.tiled,
-                  child: const Text('View · Tiled (3×3)'),
-                ),
-                CheckedPopupMenuItem(
-                  value: 'viewSlide',
-                  checked: canvasViewMode == CanvasViewMode.slide,
-                  child: const Text('View · Slide'),
-                ),
-                const PopupMenuItem(value: 'fit', child: Text('Fit canvas')),
-                const PopupMenuItem(
-                  value: 'flipHorizontal',
-                  child: Text('Flip active cel horizontally'),
-                ),
-                const PopupMenuItem(
-                  value: 'flipVertical',
-                  child: Text('Flip active cel vertically'),
-                ),
-                const PopupMenuItem(
-                  value: 'metadata',
-                  child: Text('User data'),
-                ),
-                const PopupMenuItem(
-                  value: 'defaultUserData',
-                  child: Text('Default user data'),
-                ),
-                const PopupMenuItem(value: 'help', child: Text('Drawing help')),
-                if (LinuxUpdater.supported)
-                  const PopupMenuItem(
-                    value: 'updates',
-                    child: Text('Check for updates…'),
+                actions: [
+                  IconButton(
+                    tooltip: 'Open Aseprite',
+                    onPressed: e.busy ? null : open,
+                    icon: const Icon(Icons.folder_open),
                   ),
-              ],
-            ),
-          ],
-        ),
+                  IconButton(
+                    tooltip: 'Save Aseprite',
+                    onPressed: e.busy
+                        ? null
+                        : () {
+                            stop();
+                            fileAction('save');
+                          },
+                    icon: const Icon(Icons.save_outlined),
+                  ),
+                  PopupMenuButton<String>(
+                    tooltip: 'Project and view options',
+                    enabled: !e.busy,
+                    onSelected: menu,
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(value: 'new', child: Text('New canvas')),
+                      const PopupMenuItem(value: 'saveAs', child: Text('Save as…')),
+                      const PopupMenuItem(
+                        value: 'drafts',
+                        child: Text('Internal drafts…'),
+                      ),
+                      const PopupMenuItem(value: 'exportPng', child: Text('Export…')),
+                      const PopupMenuDivider(),
+                      CheckedPopupMenuItem(
+                        value: 'grid',
+                        checked: grid,
+                        child: const Text('Pixel grid'),
+                      ),
+                      CheckedPopupMenuItem(
+                        value: 'onion',
+                        checked: onion,
+                        child: const Text('Onion skin'),
+                      ),
+                      CheckedPopupMenuItem(
+                        value: 'viewNormal',
+                        checked: canvasViewMode == CanvasViewMode.normal,
+                        child: const Text('View · Normal'),
+                      ),
+                      CheckedPopupMenuItem(
+                        value: 'viewTiled',
+                        checked: canvasViewMode == CanvasViewMode.tiled,
+                        child: const Text('View · Tiled (3×3)'),
+                      ),
+                      CheckedPopupMenuItem(
+                        value: 'viewSlide',
+                        checked: canvasViewMode == CanvasViewMode.slide,
+                        child: const Text('View · Slide'),
+                      ),
+                      const PopupMenuItem(value: 'fit', child: Text('Fit canvas')),
+                      const PopupMenuItem(
+                        value: 'flipHorizontal',
+                        child: Text('Flip active cel horizontally'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'flipVertical',
+                        child: Text('Flip active cel vertically'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'metadata',
+                        child: Text('User data'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'defaultUserData',
+                        child: Text('Default user data'),
+                      ),
+                      const PopupMenuItem(value: 'help', child: Text('Drawing help')),
+                      if (LinuxUpdater.supported)
+                        const PopupMenuItem(
+                          value: 'updates',
+                          child: Text('Check for updates…'),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
         body: SafeArea(
           top: false,
           child: Column(
@@ -976,7 +982,7 @@ class _EditorScreenState extends State<EditorScreen>
                           builder: (context, box) {
                             final tagHeight = (box.maxHeight * .78).clamp(
                               0.0,
-                              248.0,
+                              tightTagKeyboard ? 132.0 : 248.0,
                             );
                             final panelHeight = panel == 'tags'
                                 ? tagHeight

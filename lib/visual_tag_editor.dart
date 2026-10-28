@@ -37,7 +37,7 @@ class VisualTagEditor extends StatefulWidget {
 class VisualTagEditorState extends State<VisualTagEditor> {
   static const _frameWidth = 76.0, _gutter = 22.0;
   final _name = TextEditingController();
-  final _nameFocus = FocusNode();
+  final _nameFocus = FocusNode(), _keyboardFocus = FocusNode();
   final _frames = ScrollController(), _chips = ScrollController();
   final _startFocus = FocusNode(), _endFocus = FocusNode();
   final _stripKey = GlobalKey();
@@ -133,15 +133,19 @@ class VisualTagEditorState extends State<VisualTagEditor> {
         (!oldWidget.active && widget.active) ||
         changedSelection) {
       _lastFrame = widget.editor.frame;
-      _scheduleReveal(chips: changedSelection || !oldWidget.active);
+      _scheduleReveal(
+        chips: changedSelection || !oldWidget.active,
+        focus: !oldWidget.active,
+      );
     }
   }
 
-  void _scheduleReveal({bool chips = true}) {
+  void _scheduleReveal({bool chips = true, bool focus = false}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !widget.active) return;
       _reveal(widget.editor.frame);
       if (chips) _revealTag();
+      if (focus) _keyboardFocus.requestFocus();
     });
   }
 
@@ -151,6 +155,7 @@ class VisualTagEditorState extends State<VisualTagEditor> {
     _nameFocus.removeListener(_focusChanged);
     _name.dispose();
     _nameFocus.dispose();
+    _keyboardFocus.dispose();
     _startFocus.dispose();
     _endFocus.dispose();
     _frames.dispose();
@@ -200,6 +205,11 @@ class VisualTagEditorState extends State<VisualTagEditor> {
     context,
   ).showSnackBar(SnackBar(content: Text(value)));
 
+  void _leaveName() {
+    _nameFocus.unfocus();
+    if (widget.active) _keyboardFocus.requestFocus();
+  }
+
   Future<bool> savePending() async {
     if (_drag != null || blocked) return false;
     if (!_naming) return true;
@@ -215,7 +225,7 @@ class VisualTagEditorState extends State<VisualTagEditor> {
     if (!_creating && selected < 0) return false;
     if (!_creating && _name.text == tags[selected]['name']) {
       setState(() => _naming = false);
-      _nameFocus.unfocus();
+      _leaveName();
       return true;
     }
     setState(() => _working = true);
@@ -237,7 +247,7 @@ class VisualTagEditorState extends State<VisualTagEditor> {
       }
     });
     if (ok) {
-      _nameFocus.unfocus();
+      _leaveName();
       if (creating) widget.onSelected(tags.length - 1);
     }
     return ok;
@@ -246,7 +256,7 @@ class VisualTagEditorState extends State<VisualTagEditor> {
   Future<void> _selectTag(int index) async {
     if (!await savePending() || !mounted) return;
     widget.onStop();
-    _nameFocus.unfocus();
+    _leaveName();
     widget.onSelected(index);
     if (index >= 0) {
       await widget.editor.call('select', {'frame': tags[index]['from']});
@@ -288,14 +298,14 @@ class VisualTagEditorState extends State<VisualTagEditor> {
   void _cancelName() {
     if (blocked) return;
     _cancelDrag();
-    _nameFocus.unfocus();
+    _leaveName();
     setState(_load);
   }
 
   Future<void> _tapFrame(int frame) async {
     if (blocked || _drag != null) return;
     widget.onStop();
-    _nameFocus.unfocus();
+    _leaveName();
     if (hasRange && HardwareKeyboard.instance.isShiftPressed) {
       final anchor = widget.editor.frame;
       await _setRange(
@@ -582,6 +592,7 @@ class VisualTagEditorState extends State<VisualTagEditor> {
   }
 
   Widget _header() => SizedBox(
+    key: const Key('tag-header-row'),
     height: 48,
     child: Row(
       children: [
@@ -648,6 +659,7 @@ class VisualTagEditorState extends State<VisualTagEditor> {
   );
 
   Widget _nameRow() => SizedBox(
+    key: const Key('tag-name-row'),
     height: 48,
     child: Padding(
       padding: const EdgeInsets.only(left: 8),
@@ -830,23 +842,27 @@ class VisualTagEditorState extends State<VisualTagEditor> {
   );
 
   @override
-  Widget build(BuildContext context) => Material(
-    color: const Color(0xff1c2331),
-    child: LayoutBuilder(
-      builder: (context, constraints) {
-        // Hidden panels stay mounted with zero height to retain pending names.
-        if (constraints.maxHeight < 1 || !widget.active) {
-          return const SizedBox.shrink();
-        }
-        final compact = constraints.maxHeight < 200;
-        return Column(
-          children: [
-            if (!_naming || !compact) _header(),
-            if (_naming) _nameRow(),
-            Expanded(child: _strip()),
-          ],
-        );
-      },
+  Widget build(BuildContext context) => Focus(
+    focusNode: _keyboardFocus,
+    canRequestFocus: widget.active,
+    child: Material(
+      color: const Color(0xff1c2331),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // Hidden panels stay mounted with zero height to retain pending names.
+          if (constraints.maxHeight < 1 || !widget.active) {
+            return const SizedBox.shrink();
+          }
+          final compact = constraints.maxHeight < 200;
+          return Column(
+            children: [
+              if (!_naming || !compact) _header(),
+              if (_naming) _nameRow(),
+              Expanded(child: _strip()),
+            ],
+          );
+        },
+      ),
     ),
   );
 }

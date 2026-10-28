@@ -221,11 +221,11 @@ void main() {
         await tester.pumpAndSettle();
         expect(
           tester.getSize(find.byType(PixelCanvas)).height,
-          greaterThan(20),
+          greaterThan(60),
         );
         expect(
           tester.getSize(find.byKey(const Key('tag-frame-strip'))).height,
-          greaterThan(24),
+          greaterThanOrEqualTo(40),
         );
         expect(find.byKey(const Key('tag-name')).hitTestable(), findsOneWidget);
         expect(find.byKey(const Key('save-tag')).hitTestable(), findsOneWidget);
