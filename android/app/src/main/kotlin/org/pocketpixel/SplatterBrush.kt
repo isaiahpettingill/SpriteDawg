@@ -4,8 +4,11 @@ import kotlin.math.*
 
 /** Spaced seeded droplet bursts. Strongest coverage wins; blend once per gesture. */
 internal fun splatterPixels(points: List<Pair<Int,Int>>, width: Int, height: Int, size: Int,
-    seed: Long = 1L, mirrorX: Boolean = false, mirrorY: Boolean = false): Map<Int,Int> {
+    seed: Long = 1L, mirrorX: Boolean = false, mirrorY: Boolean = false,
+    mirrorDiagonal: Boolean = false, mirrorAntiDiagonal: Boolean = false): Map<Int,Int> {
     val out = linkedMapOf<Int,Int>()
+    val symmetry=StrokeSymmetry(width,height,mirrorX,mirrorY,mirrorDiagonal,mirrorAntiDiagonal)
+    val bounds=symmetry.sourceBounds
     if (points.isEmpty()) return out
     val path = mutableListOf<Pair<Int,Int>>()
     for (point in points) {
@@ -20,11 +23,7 @@ internal fun splatterPixels(points: List<Pair<Int,Int>>, width: Int, height: Int
         path.add(point)
     }
     fun emit(x: Int, y: Int, coverage: Int) {
-        val xs = linkedSetOf(x); val ys = linkedSetOf(y)
-        if (mirrorX) xs.add(width-1-x)
-        if (mirrorY) ys.add(height-1-y)
-        for (yy in ys) for (xx in xs) {
-            if (xx !in 0 until width || yy !in 0 until height) continue
+        for ((xx,yy) in symmetry.points(x,y)) {
             val key = yy*width+xx
             out[key] = max(out[key] ?: 0, coverage)
         }
@@ -33,7 +32,7 @@ internal fun splatterPixels(points: List<Pair<Int,Int>>, width: Int, height: Int
     fun stamp(x: Int, y: Int) {
         if (!stamped.add(Pair(x,y))) return
         val left = x-size/2; val top = y-size/2
-        if (left >= width || top >= height || left+size <= 0 || top+size <= 0) return
+        if (left > bounds.right || top > bounds.bottom || left+size <= bounds.left || top+size <= bounds.top) return
         var state = (x*374761393L+y*668265263L+(seed and 0xffffffffL)*69069L) and 0xffffffffL
         fun random(): Int {
             state = (state*1664525L+1013904223L) and 0xffffffffL
