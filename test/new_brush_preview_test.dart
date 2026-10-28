@@ -50,7 +50,11 @@ void main() {
           pointer: 2,
         );
         await tester.pump(const Duration(milliseconds: 80));
-        expect(calls, hasLength(1), reason: 'Only one preview may be in flight');
+        expect(
+          calls,
+          hasLength(1),
+          reason: 'Only one preview may be in flight',
+        );
         first.complete(null);
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 80));

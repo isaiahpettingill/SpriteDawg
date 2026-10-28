@@ -66,7 +66,10 @@ Map<int, int> splatterPixels({
           final px = cx - diameter ~/ 2 + ox;
           final py = cy - diameter ~/ 2 + oy;
           final bx = 2 * px - size + 1, by = 2 * py - size + 1;
-          if (px < 0 || py < 0 || px >= size || py >= size ||
+          if (px < 0 ||
+              py < 0 ||
+              px >= size ||
+              py >= size ||
               bx * bx + by * by > size * size) {
             continue;
           }
@@ -87,8 +90,14 @@ Map<int, int> splatterPixels({
     var error = dx + dy;
     while (x != to.$1 || y != to.$2) {
       final twice = error * 2;
-      if (twice >= dy) { error += dy; x += sx; }
-      if (twice <= dx) { error += dx; y += sy; }
+      if (twice >= dy) {
+        error += dy;
+        x += sx;
+      }
+      if (twice <= dx) {
+        error += dx;
+        y += sy;
+      }
       travelled++;
       if (travelled % spacing == 0) stamp(x, y);
     }

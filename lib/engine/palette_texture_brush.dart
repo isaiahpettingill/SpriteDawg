@@ -298,7 +298,10 @@ Map<int, int> paletteTexturePixels({
         } else if (tool == 'bark') {
           shade = barkCache.putIfAbsent(py * width + px, () => bark(px, py));
         } else if (tool == 'leaves') {
-          shade = leavesCache.putIfAbsent(py * width + px, () => leaves(px, py));
+          shade = leavesCache.putIfAbsent(
+            py * width + px,
+            () => leaves(px, py),
+          );
         } else if (tool == 'stripes') {
           shade = cluster((px * tx + py * ty) / 4, -px * ty + py * tx, cell);
         } else if (tool == 'sphere') {

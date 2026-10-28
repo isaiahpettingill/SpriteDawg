@@ -338,10 +338,15 @@ class EditorEngine {
         final x = entry.key % d.width, y = entry.key ~/ d.width;
         final sx = x - (source?.x ?? 0), sy = y - (source?.y ?? 0);
         final original =
-            source != null && sx >= 0 && sy >= 0 &&
-                sx < source.width && sy < source.height
+            source != null &&
+                sx >= 0 &&
+                sy >= 0 &&
+                sx < source.width &&
+                sy < source.height
             ? source.pixels[sy * source.width + sx]
-            : d.depth == 8 ? d.transparentIndex : 0;
+            : d.depth == 8
+            ? d.transparentIndex
+            : 0;
         // Indexed paint uses the exact selected entry, including its alpha.
         // Only RGB/grayscale paint varies opacity; never synthesize indices.
         final alpha = ((color >> 24) * entry.value + 127) ~/ 255;
