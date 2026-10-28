@@ -33,9 +33,11 @@ class Editor extends ChangeNotifier {
            (transport == null
                ? DefaultUserDataStore.shared
                : DefaultUserDataStore.memory()),
-       _backend = transport == null &&
-           (kIsWeb || defaultTargetPlatform == TargetPlatform.linux)
-           ? DesktopBackend() : null {
+       _backend =
+           transport == null &&
+               (kIsWeb || defaultTargetPlatform == TargetPlatform.linux)
+           ? DesktopBackend()
+           : null {
     this.transport = transport ?? _backend?.invoke ?? _native;
   }
   final DesktopBackend? _backend;
@@ -89,11 +91,20 @@ class Editor extends ChangeNotifier {
       final activeId = state['documentId'];
       state = {
         ...state,
-        if (reports.containsKey(activeId)) 'recoveryError': reports[activeId] ?? (result['documentId'] == activeId ? result['recoveryError'] : null),
+        if (reports.containsKey(activeId))
+          'recoveryError':
+              reports[activeId] ??
+              (result['documentId'] == activeId
+                  ? result['recoveryError']
+                  : null),
         if (result['drafts'] != null) 'drafts': result['drafts'],
         'documents': [
           for (final doc in maps('documents'))
-            {...doc, if (reports.containsKey(doc['id'])) 'recoveryError': reports[doc['id']]},
+            {
+              ...doc,
+              if (reports.containsKey(doc['id']))
+                'recoveryError': reports[doc['id']],
+            },
         ],
       };
       notifyListeners();
@@ -258,7 +269,17 @@ class Editor extends ChangeNotifier {
           documentChanged = true;
         }
       }
-      if (state.containsKey('drafts') && const {'new', 'open', 'openExternal', 'stroke', 'edit', 'undo', 'redo', 'pasteTag'}.contains(method)) {
+      if (state.containsKey('drafts') &&
+          const {
+            'new',
+            'open',
+            'openExternal',
+            'stroke',
+            'edit',
+            'undo',
+            'redo',
+            'pasteTag',
+          }.contains(method)) {
         _draftStatusTimer?.cancel();
         _draftStatusTimer = Timer(const Duration(milliseconds: 800), () {
           unawaited(flushDrafts());
@@ -348,7 +369,10 @@ class Editor extends ChangeNotifier {
   @override
   void dispose() {
     _draftStatusTimer?.cancel();
-    _backend?.dispose();
+    final backend = _backend;
+    if (backend != null) {
+      unawaited(backend.dispose().catchError((Object _) {}));
+    }
     _disposed = true;
     _slideEpoch++;
     next?.dispose();

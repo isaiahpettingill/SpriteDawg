@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:spritedawg/drafts/draft_repository.dart';
 import 'package:spritedawg/drafts/draft_storage.dart';
 import 'package:spritedawg/engine/aseprite.dart';
 import 'package:spritedawg/engine/document.dart';
@@ -236,10 +237,59 @@ void registerBrowserDraftTests() {
     await backend.invoke('stroke', _stroke(0, 0xff123456));
     web.window.dispatchEvent(web.Event('pagehide'));
     await backend.invoke('state', null);
+    expect(
+      (await DraftRepository(storage).load(id)).document.composite(0)[0],
+      0xff123456,
+      reason: 'The pagehide handler must flush before disposal itself runs.',
+    );
     await backend.dispose();
     await restarted.invoke('init', null);
     await restarted.invoke('recover', {'id': id});
     expect(restarted.engine.document.composite(0)[0], 0xff123456);
+  });
+
+  testWidgets('browser disposal drains accepted edits before releasing ownership', (
+    tester,
+  ) async {
+    final storage = browserTestDraftStorage();
+    final downloadEntered = Completer<void>();
+    final releaseDownload = Completer<void>();
+    final backend = DesktopBackend(
+      draftStorage: storage,
+      download: (_, _) async {
+        downloadEntered.complete();
+        await releaseDownload.future;
+      },
+    );
+    final restartedStorage = IndexedDbDraftStorage(databaseName: storage.databaseName);
+    final restarted = DesktopBackend(draftStorage: restartedStorage);
+    addTearDown(() async {
+      if (!releaseDownload.isCompleted) releaseDownload.complete();
+      await backend.dispose();
+      await restarted.dispose();
+      await removeBrowserTestDraftStorage(storage);
+    });
+    await backend.invoke('new', {'width': 8, 'height': 8});
+    final id = backend.sessions.activeId;
+    final held = backend.invoke('save', null);
+    await downloadEntered.future;
+    final accepted = backend.invoke('stroke', _stroke(0, 0xff123456));
+    final disposing = backend.dispose();
+    expect(identical(backend.dispose(), disposing), true);
+    await expectLater(
+      backend.invoke('stroke', _stroke(1, 0xffff0000)),
+      throwsStateError,
+    );
+    releaseDownload.complete();
+    await held;
+    await accepted;
+    await disposing;
+    expect(backend.engine.document.composite(0)[0], 0xff123456);
+    expect(backend.engine.document.composite(0)[1], 0);
+    await restarted.invoke('init', null);
+    await restarted.invoke('recover', {'id': id});
+    expect(restarted.engine.document.composite(0)[0], 0xff123456);
+    expect(restarted.engine.document.composite(0)[1], 0);
   });
 
   testWidgets('queued flush cannot resurrect discarded browser documents', (

@@ -282,7 +282,20 @@ void main() {
     final editor = Editor(
       transport: (method, args) async {
         calls.add(method);
-        return {...state(), 'recoveryAvailable': method == 'init', 'drafts': [{'id': 7, 'title': 'Hero draft', 'updatedAt': 0, 'width': 16, 'height': 16, 'frames': 1}]};
+        return {
+          ...state(),
+          'recoveryAvailable': method == 'init',
+          'drafts': [
+            {
+              'id': 7,
+              'title': 'Hero draft',
+              'updatedAt': 0,
+              'width': 16,
+              'height': 16,
+              'frames': 1,
+            },
+          ],
+        };
       },
     );
     await tester.pumpWidget(PocketPixelApp(editor: editor));

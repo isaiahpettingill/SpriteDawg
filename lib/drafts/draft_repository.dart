@@ -4,8 +4,7 @@ import 'dart:typed_data';
 import '../engine/aseprite.dart';
 import '../engine/document.dart';
 import 'draft_storage.dart';
-import 'draft_worker.dart'
-    if (dart.library.js_interop) 'draft_worker_web.dart';
+import 'draft_worker.dart' if (dart.library.js_interop) 'draft_worker_web.dart';
 
 class DraftInfo {
   const DraftInfo({
@@ -38,6 +37,7 @@ class DraftSnapshot {
   const DraftSnapshot(this.info, this.document, this.source);
   final DraftInfo info;
   final SpriteDocument document;
+
   /// Provenance only. It never restores a writable path or URI permission.
   final String? source;
 }
@@ -73,6 +73,9 @@ class DraftRepository {
   }
 
   static DraftSnapshot _decode(int id, Uint8List bytes, bool fallback) {
+    if (bytes.length > maxRecordBytes) {
+      throw const FormatException('Draft exceeds the safety limit');
+    }
     var title = 'Recovered $id';
     String? source;
     var updated = 0;
@@ -137,12 +140,15 @@ class DraftRepository {
       try {
         result.add((await load(id)).info);
       } catch (_) {
-        result.add(DraftInfo(
-          id: id,
-          title: 'Unreadable draft $id',
-          updatedAt: 0,
-          error: 'Stored copies could not be read; other drafts are unaffected.',
-        ));
+        result.add(
+          DraftInfo(
+            id: id,
+            title: 'Unreadable draft $id',
+            updatedAt: 0,
+            error:
+                'Stored copies could not be read; other drafts are unaffected.',
+          ),
+        );
       }
     }
     result.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
@@ -159,27 +165,39 @@ class DraftRepository {
     final bytes = await draftWork(() {
       final encoded = AsepriteCodec.encode(document);
       AsepriteCodec.decode(encoded);
-      final metadata = utf8.encode(jsonEncode({
-        'version': 1,
-        'id': id,
-        'title': title,
-        'source': source,
-        'updatedAt': updated,
-      }));
+      final metadata = utf8.encode(
+        jsonEncode({
+          'version': 1,
+          'id': id,
+          'title': title,
+          'source': source,
+          'updatedAt': updated,
+        }),
+      );
       if (metadata.length > 16372) {
         throw const FormatException('Draft metadata exceeds the safety limit');
       }
-      final body = (BytesBuilder(copy: false)..add(metadata)..add(encoded)).takeBytes();
+      final body =
+          (BytesBuilder(copy: false)
+                ..add(metadata)
+                ..add(encoded))
+              .takeBytes();
       return (BytesBuilder(copy: false)
             ..add(_magic)
-            ..add((ByteData(4)..setUint32(0, metadata.length)).buffer.asUint8List())
-            ..add((ByteData(4)..setUint32(0, _checksum(body))).buffer.asUint8List())
+            ..add(
+              (ByteData(4)..setUint32(0, metadata.length)).buffer.asUint8List(),
+            )
+            ..add(
+              (ByteData(4)..setUint32(0, _checksum(body))).buffer.asUint8List(),
+            )
             ..add(body))
           .takeBytes();
     });
     final ids = await storage.ids();
     if (!ids.contains(id) && ids.length >= maxDrafts) {
-      throw StateError('Draft storage is full. Save or discard an older draft.');
+      throw StateError(
+        'Draft storage is full. Save or discard an older draft.',
+      );
     }
     Uint8List? previous;
     for (final candidate in await storage.read(id)) {
@@ -203,7 +221,9 @@ class DraftRepository {
     }
     final size = occupied + bytes.length + (previous?.length ?? 0);
     if (size > maxBytes) {
-      throw StateError('Draft storage is full. Save or discard an older draft.');
+      throw StateError(
+        'Draft storage is full. Save or discard an older draft.',
+      );
     }
     await storage.write(id, bytes, previous: previous);
     return DraftInfo(

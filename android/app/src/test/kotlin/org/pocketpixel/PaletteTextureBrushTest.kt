@@ -4,7 +4,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PaletteTextureBrushTest {
-    private val tools = listOf("metal", "cluster", "stripes", "sphere", "knife", "bark")
+    private val tools = listOf("metal", "cluster", "stripes", "sphere", "knife", "bark", "leaves")
     private val palette = intArrayOf(0, 0xff241c0b.toInt(), 0xff654b16.toInt(), 0xffae852a.toInt(), 0xffe0bd55.toInt(), 0xffffefae.toInt(), 0xff1255ff.toInt())
     private fun canvas(depth: Int = 32): EditorEngine {
         val d = Document.create(32, 32)
@@ -219,6 +219,43 @@ class PaletteTextureBrushTest {
         assertEquals(1, pixels[69*96+61])
         assertEquals(3, pixels[72*96+61])
         assertEquals(0, pixels[75*96+61])
+    }
+
+    @Test fun leavesAreStableAcrossRevisitsAndPreviewExtensions() {
+        fun raster(points: List<Pair<Int,Int>>, seed: Long = 421L) =
+            paletteTexturePixels("leaves", points, 96, 96, 24, listOf(0,1,2,3,4), seed)
+        val first = raster(listOf(16 to 24, 64 to 24))
+        val extended = raster(listOf(16 to 24, 64 to 24, 64 to 64, 16 to 64, 16 to 24))
+        assertEquals(first, raster(listOf(16 to 24, 16 to 24, 32 to 24, 48 to 24, 64 to 24)))
+        assertEquals(first, raster(listOf(64 to 24, 16 to 24)))
+        for ((pixel, shade) in first) assertEquals("Preview must not repaint earlier leaves", shade, extended[pixel])
+        assertNotEquals(first, raster(listOf(16 to 24, 64 to 24), 422L))
+        assertEquals(setOf(0,1,2,3,4), first.values.toSet())
+    }
+
+    @Test fun leavesHaveCoherentDarkInteriorsAndLitRims() {
+        val points = (0..96 step 16).flatMap { y ->
+            if (y % 32 == 0) listOf(0 to y, 95 to y) else listOf(95 to y, 0 to y)
+        }
+        val pixels = paletteTexturePixels("leaves", points, 96, 96, 32, listOf(0,1,2,3,4), 421L)
+        assertNotEquals(pixels, paletteTexturePixels("cluster", points, 96, 96, 32, listOf(0,1,2,3,4), 421L))
+        var coherent = 0; var litRims = 0
+        for (y in 8 until 88) for (x in 8 until 88) {
+            val shade = pixels[y*96+x]!!; val right = pixels[y*96+x+1]!!
+            if (shade == right) coherent++
+            if (shade <= 2 && right >= 3) litRims++
+        }
+        assertTrue(coherent > 3000)
+        assertTrue(litRims > 100)
+    }
+
+    @Test fun mirroredLeavesKeepTheSameFieldAcrossOverlappingDabs() {
+        val path = listOf(8 to 8, 72 to 8, 72 to 72, 16 to 48)
+        fun raster(p: List<Pair<Int,Int>>) = paletteTexturePixels("leaves", p,
+            96, 96, 12, listOf(0,1,2,3,4), 421L, true, true)
+        val full = raster(path)
+        assertEquals(full, raster(path.reversed()))
+        for ((pixel, shade) in raster(path.take(3))) assertEquals(shade, full[pixel])
     }
 
 }

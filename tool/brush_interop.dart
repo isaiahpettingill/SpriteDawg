@@ -86,6 +86,24 @@ void main(List<String> arguments) {
     'mirrorY': true,
     'color': 0x80c86432,
   });
+  for (final indexed in [false, true]) {
+    run(
+      indexed ? 'splatter-indexed' : 'splatter',
+      !indexed,
+      {
+        'tool': 'splatter',
+        'points': [[-3, 5], [18, 19], [18, 19], [20, 19]],
+        'size': 20,
+        'seed': 42,
+        'mirrorX': true,
+        'mirrorY': true,
+        'color': 0x80c86432,
+        if (indexed) 'paletteIndex': 2,
+      },
+      indexed: indexed,
+      palette: indexed ? [0, 0x80c86432, 0x80c86432] : null,
+    );
+  }
   run('airbrush', true, {
     'tool': 'airbrush',
     'points': [
@@ -158,6 +176,7 @@ void main(List<String> arguments) {
     'sphere',
     'knife',
     'bark',
+    'leaves',
     'ditherPaint',
     'ditherRetouch',
   ]) {

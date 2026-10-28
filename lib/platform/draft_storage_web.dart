@@ -44,30 +44,38 @@ class IndexedDbDraftStorage implements SizedDraftStorage {
     final acquired = Completer<void>();
     final release = Completer<JSAny?>();
     _release = release;
-    _held = manager.request(
-      '$databaseName.writer',
-      web.LockOptions(mode: 'exclusive', ifAvailable: true),
-      ((web.Lock? lock) {
-        if (lock == null) {
-          acquired.completeError(
-            StateError('Draft storage is open in another tab. Close that tab and retry.'),
-          );
-          return null;
-        }
-        acquired.complete();
-        return release.future.toJS;
-      }).toJS,
-    ).toDart;
-    unawaited(_held!.then<void>(
-      (_) {
-        if (!acquired.isCompleted) {
-          acquired.completeError(StateError('Browser draft ownership was not granted'));
-        }
-      },
-      onError: (Object error) {
-        if (!acquired.isCompleted) acquired.completeError(error);
-      },
-    ));
+    _held = manager
+        .request(
+          '$databaseName.writer',
+          web.LockOptions(mode: 'exclusive', ifAvailable: true),
+          ((web.Lock? lock) {
+            if (lock == null) {
+              acquired.completeError(
+                StateError(
+                  'Draft storage is open in another tab. Close that tab and retry.',
+                ),
+              );
+              return null;
+            }
+            acquired.complete();
+            return release.future.toJS;
+          }).toJS,
+        )
+        .toDart;
+    unawaited(
+      _held!.then<void>(
+        (_) {
+          if (!acquired.isCompleted) {
+            acquired.completeError(
+              StateError('Browser draft ownership was not granted'),
+            );
+          }
+        },
+        onError: (Object error) {
+          if (!acquired.isCompleted) acquired.completeError(error);
+        },
+      ),
+    );
     await acquired.future;
   }
 
@@ -131,7 +139,9 @@ class IndexedDbDraftStorage implements SizedDraftStorage {
     request.addEventListener(
       'blocked',
       ((web.Event _) {
-        fail('Another browser tab is blocking draft storage. Close it and retry.');
+        fail(
+          'Another browser tab is blocking draft storage. Close it and retry.',
+        );
       }).toJS,
     );
     return done.future;
@@ -213,17 +223,12 @@ class IndexedDbDraftStorage implements SizedDraftStorage {
     ];
     return [
       for (final value in await Future.wait(requests))
-        if (value != null)
-          Uint8List.fromList((value as JSUint8Array).toDart),
+        if (value != null) Uint8List.fromList((value as JSUint8Array).toDart),
     ];
   }
 
   @override
-  Future<void> write(
-    int id,
-    Uint8List bytes, {
-    Uint8List? previous,
-  }) async {
+  Future<void> write(int id, Uint8List bytes, {Uint8List? previous}) async {
     final database = await _open();
     final transaction = database.transaction(
       [_current.toJS, _previous.toJS, _sizes.toJS].toJS,
@@ -237,10 +242,9 @@ class IndexedDbDraftStorage implements SizedDraftStorage {
     } else {
       transaction.objectStore(_previous).put(previous.toJS, id.toJS);
     }
-    transaction.objectStore(_sizes).put(
-      (bytes.length + (previous?.length ?? 0)).toJS,
-      id.toJS,
-    );
+    transaction
+        .objectStore(_sizes)
+        .put((bytes.length + (previous?.length ?? 0)).toJS, id.toJS);
     await committed;
   }
 

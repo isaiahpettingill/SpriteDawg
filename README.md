@@ -19,6 +19,17 @@ MIT licensed, no ads, accounts, tracking, networking or broad Android storage pe
   Its grain is canvas-anchored throughout a gesture, including bends and repeated
   dabs; brush size scales the grain. It shares the texture tools' live preview,
   symmetry, exact indexed-color handling and single-step undo.
+- **Leaves** in the texture group paints overlapping pointed leaves with dark
+  interiors and lighter rims, using related colors from the current palette.
+  Its seeded canopy stays anchored across overlapping dabs and bends; brush size
+  scales the leaves. Like Bark it preserves exact indexed colors and palette alpha.
+- **Splatter** in the ink/brush group scatters differently sized paint droplets.
+  RGB droplets use the current color with varied opacity up to its selected alpha,
+  blended source-over once per stroke. Unlike Spray, holding still does not build
+  up. Indexed mode uses the exact selected palette entry and its alpha instead
+  of synthesizing off-palette transparency. Both new brushes support live preview,
+  mirrored strokes, per-tool sizes and single-step undo.
+  See [rendered examples and verification](docs/BRUSHES.md).
 - The dedicated **Gradient** subtool paints a linear gradient across the **whole active
   layer's canvas area**. Choose Start and End colors (including alpha), then drag to set
   direction and endpoint positions; outside the endpoints the respective color is clamped.

@@ -32,7 +32,7 @@ class DesktopBackend {
        _drafts = DraftRepository(draftStorage ?? IndexedDbDraftStorage()) {
     _autosave = DraftAutosave(
       flush: () async {
-        if (!_disposed) await invoke('flushDrafts', null);
+        if (!_closing) await invoke('flushDrafts', null);
       },
     );
     _beforeUnload = ((web.Event event) {
@@ -60,7 +60,8 @@ class DesktopBackend {
   final Set<int> _failed = {};
   List<DraftInfo> _catalog = [];
   String? _storageIssue;
-  bool _initialized = false, _disposed = false;
+  bool _initialized = false, _closing = false;
+  Future<void>? _disposeFuture;
   int _untitled = 1;
   final _random = math.Random.secure();
 
@@ -71,16 +72,14 @@ class DesktopBackend {
     };
     do {
       sessions.nextId =
-          _random.nextInt(1 << 26) * (1 << 26) +
-          _random.nextInt(1 << 26) +
-          2;
+          _random.nextInt(1 << 26) * (1 << 26) + _random.nextInt(1 << 26) + 2;
     } while (used.contains(sessions.nextId));
   }
 
   void _flushInBackground() {
     // Browsers need not wait for asynchronous pagehide handlers. Frequent
     // foreground snapshots are the primary protection, not this last chance.
-    if (!_disposed) {
+    if (!_closing) {
       unawaited(
         invoke('flushDrafts', null).then<void>(
           (_) {},
@@ -177,17 +176,39 @@ class DesktopBackend {
     sessions.select(restored.id);
   }
 
-  /// Stops listeners/timers for an abandoned adapter; callers explicitly flush
-  /// before disposal when they want the latest edits persisted.
-  Future<void> dispose() async {
-    _disposed = true;
+  /// Reject new input, but finish every command already accepted by [invoke].
+  /// The final snapshot completes before another tab can acquire ownership.
+  /// Disposal never throws asynchronously: Flutter's dispose cannot await it.
+  Future<void> dispose() {
+    final pending = _disposeFuture;
+    if (pending != null) return pending;
+    _closing = true;
     _autosave.dispose();
-    web.window.removeEventListener('beforeunload', _beforeUnload);
     web.document.removeEventListener('visibilitychange', _visibility);
     web.window.removeEventListener('pagehide', _pageHide);
-    await _queue;
-    final storage = _drafts.storage;
-    if (storage is IndexedDbDraftStorage) await storage.close();
+    return _disposeFuture = _finishDispose();
+  }
+
+  Future<void> _finishDispose() async {
+    try {
+      await _queue;
+      await _flush();
+    } catch (error) {
+      _storageIssue = 'Browser drafts could not be flushed while closing: $error';
+    } finally {
+      // Keep the close warning until accepted work has had its final flush.
+      web.window.removeEventListener('beforeunload', _beforeUnload);
+      // Drained commands may have marked another pending debounce timer.
+      _autosave.dispose();
+      final storage = _drafts.storage;
+      if (storage is IndexedDbDraftStorage) {
+        try {
+          await storage.close();
+        } catch (error) {
+          _storageIssue = 'Browser draft storage could not close safely: $error';
+        }
+      }
+    }
   }
 
   static Future<picker.XFile?> _pickOpen() => picker.openFile(
@@ -209,6 +230,11 @@ class DesktopBackend {
     String method,
     Map<String, dynamic>? arguments,
   ) {
+    if (_closing) {
+      return Future.error(
+        StateError('The editor is closing; no new commands were accepted.'),
+      );
+    }
     final result = _queue.then((_) => _invoke(method, arguments ?? {}));
     _queue = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
     return result;
@@ -218,7 +244,6 @@ class DesktopBackend {
     String method,
     Map<String, dynamic> args,
   ) async {
-    if (_disposed) return _state();
     await _init();
     final defaultText = const {'init', 'new', 'closeDocument'}.contains(method)
         ? defaultUserData(args)
@@ -236,6 +261,8 @@ class DesktopBackend {
             'Close a document before opening another (8 maximum).',
           );
         }
+        // The picker can remain open indefinitely while blocking this queue.
+        await _flush();
         final chosen = await _openFile();
         if (chosen == null) break;
         if (await chosen.length() > AsepriteCodec.maxFile) {
@@ -251,6 +278,7 @@ class DesktopBackend {
         throw UnsupportedError('Use Open to choose a local Aseprite file.');
       case 'save':
       case 'saveAs':
+        await _flush();
         final bytes = engine.encode();
         AsepriteCodec.decode(bytes);
         var name = sessions.active.title;
@@ -263,6 +291,7 @@ class DesktopBackend {
       // Browsers cannot confirm that the user kept a download. Keep dirty so
       // closing the tab still warns; do not falsely claim filesystem saving.
       case 'exportPng':
+        await _flush();
         await _download(
           'sprite.png',
           encodeRgbaPng(
@@ -274,6 +303,7 @@ class DesktopBackend {
       case 'exportSnapshot':
         return exportSnapshot(engine.document, engine.frame, args);
       case 'saveExport':
+        await _flush();
         final files = Map<String, Uint8List>.from(args['files'] as Map);
         final name = args['name'] as String;
         if (files.isEmpty ||

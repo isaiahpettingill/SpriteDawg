@@ -16,38 +16,53 @@ class FileDraftStorage implements SizedDraftStorage {
     await directory.create(recursive: true);
     final key = directory.absolute.path;
     if (!_ownedPaths.add(key)) {
-      throw StateError('Internal drafts are open in another SpriteDawg editor.');
+      throw StateError(
+        'Internal drafts are open in another SpriteDawg editor. Close it, then reopen this editor.',
+      );
     }
     _ownsPath = true;
     RandomAccessFile? lock;
     try {
-      lock = await File('${directory.path}/drafts.lock').open(mode: FileMode.append);
+      lock = await File(
+        '${directory.path}/drafts.lock',
+      ).open(mode: FileMode.append);
       await lock.lock(FileLock.exclusive);
       _lock = lock;
       await for (final file in directory.list()) {
-        if (file is File && RegExp(r'^draft-[0-9]+\.(?:sdd|previous)\.[0-9]+\.tmp$').hasMatch(file.path.split(Platform.pathSeparator).last)) {
+        if (file is File &&
+            RegExp(
+              r'^draft-[0-9]+\.(?:sdd|previous)\.[0-9]+\.tmp$',
+            ).hasMatch(file.path.split(Platform.pathSeparator).last)) {
           await file.delete();
         }
       }
     } catch (_) {
       await lock?.close();
+      _lock = null;
       _ownedPaths.remove(key);
       _ownsPath = false;
-      throw StateError('Internal drafts are open in another SpriteDawg process, or storage is unavailable. Save a copy.');
+      throw StateError(
+        'Internal drafts are open in another SpriteDawg process, or storage is unavailable. Save a copy, then reopen SpriteDawg after closing the other process.',
+      );
     }
   }();
 
   Future<void> close() async {
     if (_opening != null) {
-      try { await _opening; } catch (_) {}
+      try {
+        await _opening;
+      } catch (_) {}
     }
     final lock = _lock;
     _lock = null;
-    if (_ownsPath) _ownedPaths.remove(directory.absolute.path);
-    _ownsPath = false;
-    if (lock != null) {
-      await lock.unlock();
-      await lock.close();
+    try {
+      if (lock != null) {
+        await lock.unlock();
+        await lock.close();
+      }
+    } finally {
+      if (_ownsPath) _ownedPaths.remove(directory.absolute.path);
+      _ownsPath = false;
     }
   }
 
@@ -56,17 +71,20 @@ class FileDraftStorage implements SizedDraftStorage {
     await _open();
     var total = 0;
     await for (final file in directory.list()) {
-      if (file is File && RegExp(r'^(?:draft-[0-9]+\.|recovery(?:-[0-9]+)?\.aseprite)').hasMatch(file.path.split(Platform.pathSeparator).last)) {
+      if (file is File &&
+          RegExp(
+            r'^(?:draft-[0-9]+\.|recovery(?:-[0-9]+)?\.aseprite)',
+          ).hasMatch(file.path.split(Platform.pathSeparator).last)) {
         total += await file.length();
       }
     }
     return total;
   }
+
   File _current(int id) => File('${directory.path}/draft-$id.sdd');
   File _previous(int id) => File('${directory.path}/draft-$id.previous');
-  File _legacy(int id) => File(
-    '${directory.path}/recovery${id == 0 ? '' : '-$id'}.aseprite',
-  );
+  File _legacy(int id) =>
+      File('${directory.path}/recovery${id == 0 ? '' : '-$id'}.aseprite');
 
   @override
   Future<List<int>> ids() async {
@@ -75,10 +93,18 @@ class FileDraftStorage implements SizedDraftStorage {
     await for (final file in directory.list()) {
       if (file is! File) continue;
       final name = file.path.split(Platform.pathSeparator).last;
-      final draft = RegExp(r'^draft-([0-9]+)\.(?:sdd|previous)$').firstMatch(name);
-      final old = RegExp(r'^recovery(?:-([0-9]+))?\.aseprite$').firstMatch(name);
-      if (draft != null) ids.add(int.parse(draft.group(1)!));
-      if (old != null) ids.add(int.parse(old.group(1) ?? '0'));
+      final draft = RegExp(
+        r'^draft-([0-9]+)\.(?:sdd|previous)$',
+      ).firstMatch(name);
+      final old = RegExp(
+        r'^recovery(?:-([0-9]+))?\.aseprite$',
+      ).firstMatch(name);
+      final id = draft != null
+          ? int.tryParse(draft.group(1)!)
+          : old != null
+          ? int.tryParse(old.group(1) ?? '0')
+          : null;
+      if (id != null && id >= 0 && id < 0x1fffffffffffff) ids.add(id);
     }
     return ids.toList()..sort();
   }
@@ -87,14 +113,22 @@ class FileDraftStorage implements SizedDraftStorage {
   Future<List<Uint8List>> read(int id) async {
     await _open();
     final result = <Uint8List>[];
-    for (final file in [_current(id), _previous(id), _legacy(id)]) {
-      if (!await file.exists()) continue;
-      if (await file.length() > DraftRepository.maxRecordBytes) {
-        // Keep its position so fallback status remains accurate; refuse to load
-        // unbounded bytes into memory. A corrupt draft never blocks another.
+    final current = _current(id), previous = _previous(id), legacy = _legacy(id);
+    final hasModern = await current.exists() || await previous.exists();
+    for (final file in hasModern ? [current, previous, legacy] : [legacy]) {
+      if (!await file.exists()) {
+        if (file.path == current.path) result.add(Uint8List(0));
+        continue;
+      }
+      try {
+        if (await file.length() > DraftRepository.maxRecordBytes) {
+          result.add(Uint8List(0));
+        } else {
+          result.add(await file.readAsBytes());
+        }
+      } on FileSystemException {
+        // Preserve candidate position and try the independent last-good copy.
         result.add(Uint8List(0));
-      } else {
-        result.add(await file.readAsBytes());
       }
     }
     return result;

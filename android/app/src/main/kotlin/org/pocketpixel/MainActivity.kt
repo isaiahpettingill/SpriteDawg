@@ -2,34 +2,44 @@ package org.pocketpixel
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
-import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
 /** SAF and the tested Aseprite implementation are the only Android-specific parts. */
 class MainActivity : FlutterActivity() {
-    private val sessions = EditorSessions()
-    private val editor get() = sessions.active.engine
-    private val worker = ScheduledThreadPoolExecutor(1).apply {
-        removeOnCancelPolicy = true
-        setExecuteExistingDelayedTasksAfterShutdownPolicy(false)
+    companion object {
+        // Activity recreation must never create a second writer or reset ID
+        // allocation while the previous Activity's final flush is still queued.
+        private val runtime = NativeEditorRuntime()
+        // Retain requests not yet drained by Flutter when an Activity recreates.
+        private val externalUris = java.util.concurrent.ConcurrentLinkedQueue<Uri>()
     }
+    private var restoredActivity = false
+    override fun onCreate(savedInstanceState: Bundle?) {
+        restoredActivity = savedInstanceState != null
+        super.onCreate(savedInstanceState)
+    }
+    private val sessions get() = runtime.sessions
+    private val editor get() = sessions.active.engine
+    private val worker get() = runtime.worker
     private val main = Handler(Looper.getMainLooper())
     private val exportFiles by lazy { ExportFiles(this, worker, main) }
-    private val drafts by lazy { DraftStore(filesDir) }
-    private val pendingDrafts = DraftPending()
-    private var draftTask: ScheduledFuture<*>? = null
-    private var draftsInitialized = false
+    private val drafts get() = runtime.drafts
+    private val pendingDrafts get() = runtime.pendingDrafts
+    private var draftTask: ScheduledFuture<*>?
+        get() = runtime.draftTask
+        set(value) { runtime.draftTask = value }
+    private val draftsInitialized get() = runtime.initialized
     private var currentUri: Uri?
         get() = sessions.active.path?.let(Uri::parse)
         set(value) { sessions.active.path=value?.toString() }
-    private var startupRecovery = false
     private var pending: MethodChannel.Result? = null
     private var pendingKind = ""
     private var pendingBytes: ByteArray? = null
@@ -38,7 +48,6 @@ class MainActivity : FlutterActivity() {
         get() = sessions.active.revision
         set(value) { sessions.active.revision=value }
     private var pendingDocument = 0
-    private val externalUris = java.util.concurrent.ConcurrentLinkedQueue<Uri>()
     private var externalChannel: MethodChannel? = null
     private var externalOpenError: String? = null
     @Volatile private var externalQueueError: String? = null
@@ -83,21 +92,10 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         externalChannel=MethodChannel(flutterEngine.dartExecutor.binaryMessenger,"pocketpixel/external")
-        enqueueExternal(intent)
+        if(runtime.shouldEnqueueStartup(restoredActivity))enqueueExternal(intent)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger,"pocketpixel/editor").setMethodCallHandler(::handle)
     }
-    private fun initializeDrafts() {
-        if (draftsInitialized) return
-        val saved=drafts.summaries()
-        saved.forEach { item -> sessions.nextId=maxOf(sessions.nextId,(item["id"] as Int)+1) }
-        if(saved.isNotEmpty()) {
-            sessions.documents.clear()
-            val blank=EditorSession(sessions.nextId++)
-            sessions.configure(blank);sessions.documents.add(blank);sessions.activeId=blank.id
-        }
-        startupRecovery=saved.isNotEmpty()
-        draftsInitialized=true
-    }
+    private fun initializeDrafts() = runtime.initialize(filesDir)
     private fun closedDrafts(): List<Map<String,Any?>> {
         val open=sessions.documents.map {it.id}.toSet()
         return drafts.summaries().filter { it["id"] !in open }
@@ -144,7 +142,6 @@ class MainActivity : FlutterActivity() {
                 // stay in the picker; one bad document never consumes the others.
             }
         }
-        startupRecovery=closedDrafts().isNotEmpty()
     }
     private fun execute(result: MethodChannel.Result, block: () -> Any?) {
         worker.execute {
@@ -208,7 +205,7 @@ class MainActivity : FlutterActivity() {
         execute(result) {
             val defaultText = if(call.method in listOf("init","new","closeDocument")) defaultUserData(args) else ""
             when(call.method) {
-                "init" -> sessions.initializePlaceholder(defaultText, allow = !startupRecovery)
+                "init" -> sessions.initializePlaceholder(defaultText, allow = closedDrafts().isEmpty())
                 "state", "listDrafts" -> Unit
                 "flushDrafts" -> flushDrafts()
                 "openExternal" -> openExternal()
@@ -233,7 +230,6 @@ class MainActivity : FlutterActivity() {
                     val targets=closedDrafts().filter {id==null || it["id"]==id}
                     require(id==null || targets.isNotEmpty()) { "Draft is already open or no longer available" }
                     targets.forEach {drafts.delete(it["id"] as Int)}
-                    startupRecovery=closedDrafts().isNotEmpty()
                 }
                 "save" -> {
                     val uri=currentUri
@@ -262,6 +258,7 @@ class MainActivity : FlutterActivity() {
         } else {
             worker.execute {
                 try {
+                    initializeDrafts()
                     pendingBytes=if(kind=="exportPng") {
                         val d=editor.document
                         Png.encode(d.width,d.height,d.composite(editor.frame))
@@ -315,7 +312,8 @@ class MainActivity : FlutterActivity() {
     }
     override fun onDestroy() {
         if(!worker.isShutdown)worker.execute { if(draftsInitialized)flushDrafts() }
-        worker.shutdown()
+        // The worker/model belong to the application process, not this Activity.
+        // A replacement Activity reuses the queue, including this final flush.
         super.onDestroy()
     }
 }

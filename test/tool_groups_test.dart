@@ -52,6 +52,8 @@ void main() {
     for (final choice in [
       ('texture', 'Knife', 'knife'),
       ('texture', 'Bark', 'bark'),
+      ('texture', 'Leaves', 'leaves'),
+      ('ink', 'Splatter', 'splatter'),
       ('ink', 'Dither Paint', 'ditherPaint'),
       ('effect', 'Dither Retouch', 'ditherRetouch'),
     ]) {

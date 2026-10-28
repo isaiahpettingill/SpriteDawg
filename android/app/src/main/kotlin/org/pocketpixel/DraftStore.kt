@@ -157,10 +157,17 @@ internal class DraftStore(
  * documents or relying on whichever tab happens to be selected when it runs. */
 internal class DraftPending {
     private val ids = linkedSetOf<Int>()
-    private var firstChange = 0L
-    fun mark(id: Int, now: Long) { if (ids.isEmpty()) firstChange = now; ids.add(id) }
-    fun delay(now: Long): Long = minOf(600L, (2000L - (now - firstChange)).coerceAtLeast(0))
-    fun forget(id: Int) { ids.remove(id) }
+    private var firstChange: Long? = null
+    fun mark(id: Int, now: Long) { if (firstChange == null) firstChange = now; ids.add(id) }
+    fun delay(now: Long): Long = minOf(600L, (2000L - (now - (firstChange ?: now))).coerceAtLeast(0))
+    fun forget(id: Int) { ids.remove(id); if (ids.isEmpty()) firstChange = null }
     fun contains(id: Int) = id in ids
-    fun flush(write: (Int) -> Boolean) { ids.toList().forEach { if (write(it)) ids.remove(it) } }
+    fun flush(write: (Int) -> Boolean) {
+        try { ids.toList().forEach { if (write(it)) ids.remove(it) } }
+        finally {
+            // Failed IDs stay retryable, but the next edit starts a fresh bounded
+            // debounce window instead of retrying expensive encoding every stroke.
+            firstChange = null
+        }
+    }
 }

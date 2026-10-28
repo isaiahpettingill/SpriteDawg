@@ -112,6 +112,7 @@ class _EditorScreenState extends State<EditorScreen>
     'rectangle': (Icons.crop_square, 'Rectangle'),
     'ellipse': (Icons.circle_outlined, 'Ellipse'),
     'spray': (Icons.grain, 'Spray'),
+    'splatter': (Icons.bubble_chart, 'Splatter'),
     'airbrush': (Icons.blur_circular, 'Airbrush'),
     'blur': (Icons.blur_on, 'Blur'),
     'jumble': (Icons.shuffle, 'Jumble'),
@@ -121,6 +122,7 @@ class _EditorScreenState extends State<EditorScreen>
     'sphere': (Icons.circle, 'Sphere'),
     'knife': (Icons.architecture, 'Knife'),
     'bark': (Icons.forest, 'Bark'),
+    'leaves': (Icons.eco, 'Leaves'),
     'ditherPaint': (Icons.gradient, 'Dither Paint'),
     'ditherRetouch': (Icons.grid_4x4, 'Dither Retouch'),
     'pan': (Icons.pan_tool_alt, 'Pan'),
@@ -421,6 +423,7 @@ class _EditorScreenState extends State<EditorScreen>
 
   final _brushSizes = <String, int>{
     'spray': 12,
+    'splatter': 20,
     'airbrush': 12,
     'blur': 5,
     'jumble': 5,
@@ -430,6 +433,7 @@ class _EditorScreenState extends State<EditorScreen>
     'sphere': 12,
     'knife': 12,
     'bark': 12,
+    'leaves': 16,
     'ditherPaint': 12,
     'ditherRetouch': 12,
   };
@@ -805,7 +809,10 @@ class _EditorScreenState extends State<EditorScreen>
               itemBuilder: (context) => [
                 const PopupMenuItem(value: 'new', child: Text('New canvas')),
                 const PopupMenuItem(value: 'saveAs', child: Text('Save as…')),
-                const PopupMenuItem(value: 'drafts', child: Text('Internal drafts…')),
+                const PopupMenuItem(
+                  value: 'drafts',
+                  child: Text('Internal drafts…'),
+                ),
                 const PopupMenuItem(value: 'exportPng', child: Text('Export…')),
                 const PopupMenuDivider(),
                 CheckedPopupMenuItem(

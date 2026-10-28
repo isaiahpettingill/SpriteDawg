@@ -151,4 +151,20 @@ class DraftStoreTest {
         pending.mark(3, 5000)
         assertEquals(600L, pending.delay(5000))
     }
+    @Test fun failedFlushStartsFreshDebounceWindowForContinuedEditing() {
+        val pending = DraftPending()
+        pending.mark(2, 100)
+        assertEquals(0L, pending.delay(2100))
+        pending.flush { false }
+        assertTrue(pending.contains(2))
+        pending.mark(2, 3000)
+        assertEquals(600L, pending.delay(3000))
+        pending.mark(3, 4500)
+        assertEquals(500L, pending.delay(4500))
+        pending.flush { false }
+        pending.mark(2, 7000)
+        assertEquals(600L, pending.delay(7000))
+        assertTrue(pending.contains(3))
+    }
+
 }

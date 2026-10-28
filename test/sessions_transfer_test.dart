@@ -169,14 +169,8 @@ void main() {
       savePath = '${dir.path}/saved.aseprite';
       await b.invoke('save', null);
       await b.invoke('flushDrafts', null);
-      expect(
-        await File('${dir.path}/draft-$first.sdd').exists(),
-        false,
-      );
-      expect(
-        await File('${dir.path}/draft-$second.sdd').exists(),
-        true,
-      );
+      expect(await File('${dir.path}/draft-$first.sdd').exists(), false);
+      expect(await File('${dir.path}/draft-$second.sdd').exists(), true);
       await b.dispose();
       final reopened = backend();
       expect((await reopened.invoke('init', null))!['recoveryAvailable'], true);
@@ -234,7 +228,7 @@ void main() {
     expect(s.active.id, a.id);
   });
   test(
-    'too many recovery files refused before decoding any corrupt bytes',
+    'many corrupt drafts remain individually visible without replacing work',
     () async {
       final dir = await Directory.systemTemp.createTemp(
         'spritedawg-recovery-cap-',
@@ -252,10 +246,12 @@ void main() {
       final before = b.engine.encode();
       await expectLater(
         b.invoke('recover', null),
-        throwsA(predicate((e) => e.toString().contains('8 maximum'))),
+        throwsA(predicate((e) => e.toString().contains('No readable draft'))),
       );
       expect(b.engine.encode(), before);
-      expect(await dir.list().length, 9);
+      expect((await b.invoke('listDrafts', null))!['drafts'], hasLength(9));
+      expect(await dir.list().where((f) => f.path.endsWith('.aseprite')).length, 9);
+      await b.dispose();
     },
   );
   test('recovery stages growing and shrinking documents atomically', () {

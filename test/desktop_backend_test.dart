@@ -33,10 +33,10 @@ void main() {
         ],
         'color': 0xffff0000,
       })
-      .then((_) => backend.invoke('flushDrafts', null)).then((_) {});
-  File recovery() => File(
-    '${base.path}/support/draft-${backend.sessions.activeId}.sdd',
-  );
+      .then((_) => backend.invoke('flushDrafts', null))
+      .then((_) {});
+  File recovery() =>
+      File('${base.path}/support/draft-${backend.sessions.activeId}.sdd');
   test(
     'new and fresh placeholders get defaults but late init never stamps imports',
     () async {
@@ -127,7 +127,9 @@ void main() {
     expect(backend.engine.dirty, true);
     expect(backend.engine.encode(), before);
     expect(
-      (await backend.drafts.load(backend.sessions.activeId)).document.composite(0)[66],
+      (await backend.drafts.load(
+        backend.sessions.activeId,
+      )).document.composite(0)[66],
       0xffff0000,
     );
     expect(await File(savePath!).exists(), false);
@@ -146,10 +148,7 @@ void main() {
         'color': 0xffff0000,
       });
       final state = await backend.invoke('flushDrafts', null);
-      expect(
-        state!['recoveryError'],
-        contains('Draft could not be written'),
-      );
+      expect(state!['recoveryError'], contains('Draft could not be written'));
       expect(backend.engine.dirty, true);
       expect(backend.engine.document.composite(0)[66], 0xffff0000);
     },
@@ -197,7 +196,10 @@ void main() {
     await draw();
     final before = backend.engine.encode();
     await recovery().writeAsBytes(Uint8List(10));
-    await expectLater(backend.invoke('recover', {'id': backend.sessions.activeId}), throwsFormatException);
+    await expectLater(
+      backend.invoke('recover', {'id': backend.sessions.activeId}),
+      throwsFormatException,
+    );
     expect(backend.engine.encode(), before);
   });
   test(

@@ -37,9 +37,12 @@ class DesktopBackend {
   final Future<Directory> Function() _supportDirectory;
   final DraftStorage? _providedStorage;
   late DraftRepository drafts;
+  bool _storeReady = false;
   List<DraftInfo> _catalog = [];
   late final _autosave = DraftAutosave(
-    flush: () => invoke('flushDrafts', null).then((_) {}),
+    flush: () async {
+      if (!_disposed) await invoke('flushDrafts', null);
+    },
   );
   bool _disposed = false;
   Future<void> dispose() async {
@@ -47,11 +50,13 @@ class DesktopBackend {
     _disposed = true;
     _autosave.dispose();
     await _queue;
-    if (_base != null) await _flush();
-    if (_base != null && drafts.storage is FileDraftStorage) {
+    if (_storeReady) await _flush();
+    _autosave.dispose();
+    if (_storeReady && drafts.storage is FileDraftStorage) {
       await (drafts.storage as FileDraftStorage).close();
     }
   }
+
   Future<void> _queue = Future<void>.value();
   static Future<String?> _pickOpen() async =>
       (await openFile(acceptedTypeGroups: [_ase]))?.path;
@@ -85,7 +90,8 @@ class DesktopBackend {
     try {
       _catalog = await drafts.list();
     } catch (error) {
-      _recoveryError = 'Draft storage could not be read: $error. Save a copy now.';
+      _recoveryError =
+          'Draft storage could not be read: $error. Save a copy now.';
     }
   }
 
@@ -94,6 +100,7 @@ class DesktopBackend {
     _base = await _supportDirectory();
     await _base!.create(recursive: true);
     drafts = DraftRepository(_providedStorage ?? FileDraftStorage(_base!));
+    _storeReady = true;
     await _refreshDrafts();
     for (final draft in _catalog) {
       if (draft.id >= sessions.nextId) sessions.nextId = draft.id + 1;
@@ -148,7 +155,8 @@ class DesktopBackend {
       session.engine.recoveryAvailable = true;
       session.recoveryError = null;
     } catch (error) {
-      session.recoveryError = 'Draft could not be written: $error. Save a copy now.';
+      session.recoveryError =
+          'Draft could not be written: $error. Save a copy now.';
     }
   }
 
@@ -170,7 +178,8 @@ class DesktopBackend {
       engine.recoveryAvailable = false;
       _recoveryError = null;
     } catch (error) {
-      _recoveryError = 'Project is safe, but its old draft could not be removed: $error';
+      _recoveryError =
+          'Project is safe, but its old draft could not be removed: $error';
     }
   }
 
@@ -197,6 +206,7 @@ class DesktopBackend {
       case 'init':
         sessions.initializePlaceholder(defaultText);
       case 'saveExport':
+        await _flush();
         return ExportFiles().save(args);
       case 'exportSnapshot':
         // Isolate message transfer detaches the model; avoid a second deep copy.
@@ -209,6 +219,8 @@ class DesktopBackend {
         return engine.invoke(method, args);
       case 'open':
       case 'openExternal':
+        // A modal picker blocks this command queue; protect pending edits first.
+        await _flush();
         final chosen = method == 'openExternal'
             ? args['path'] as String?
             : await _openPath();
@@ -237,6 +249,7 @@ class DesktopBackend {
       case 'saveAs':
         var path = method == 'save' ? _path : null;
         if (path == null) {
+          await _flush();
           final chosen = await _savePath(false);
           if (chosen == null) break;
           path = chosen;
@@ -245,10 +258,12 @@ class DesktopBackend {
         await _persist(sessions.active);
         await _atomic(File(path), bytes);
         _path = path;
+        sessions.active.source = path;
         sessions.active.title = path.split('/').last;
         engine.saved();
         await _clearRecovery();
       case 'exportPng':
+        await _flush();
         final chosen = await _savePath(true);
         if (chosen == null) break;
         final state = engine.state();
@@ -267,27 +282,49 @@ class DesktopBackend {
         await _refreshDrafts();
         final requested = (args['id'] as num?)?.toInt();
         final opened = sessions.documents.map((s) => s.id).toSet();
-        final candidates = _catalog.where((d) =>
-          requested == null ? !opened.contains(d.id) && d.error == null : d.id == requested,
-        ).toList();
-        require(candidates.isNotEmpty, 'No readable draft was selected. Stored drafts were kept.');
+        final candidates = _catalog
+            .where(
+              (d) => requested == null
+                  ? !opened.contains(d.id) && d.error == null
+                  : d.id == requested,
+            )
+            .toList();
+        require(
+          candidates.isNotEmpty,
+          'No readable draft was selected. Stored drafts were kept.',
+        );
+        String? remainingIssue;
         for (final candidate in candidates) {
-          require(!opened.contains(candidate.id), 'This draft is already open.');
-          final snapshot = await drafts.load(candidate.id);
-          final restored = sessions.restoreDecoded([
-            MapEntry(candidate.id, snapshot.document),
-          ]).single;
-          restored.title = snapshot.info.title;
-          restored.source = snapshot.source;
-          restored.engine.recoveryAvailable = true;
-          sessions.select(restored.id);
+          try {
+            require(
+              !opened.contains(candidate.id),
+              'This draft is already open.',
+            );
+            final snapshot = await drafts.load(candidate.id);
+            final restored = sessions.restoreDecoded([
+              MapEntry(candidate.id, snapshot.document),
+            ]).single;
+            restored.title = snapshot.info.title;
+            restored.source = snapshot.source;
+            restored.engine.recoveryAvailable = true;
+            sessions.select(restored.id);
+          } catch (error) {
+            if (requested != null) rethrow;
+            remainingIssue =
+                'Some drafts could not be opened and were kept: $error';
+          }
         }
+        if (remainingIssue != null) _recoveryError = remainingIssue;
       case 'discardRecovery':
         final requested = (args['id'] as num?)?.toInt();
         final opened = sessions.documents.map((s) => s.id).toSet();
-        require(requested == null || !opened.contains(requested), 'Close the open document before discarding its draft.');
+        require(
+          requested == null || !opened.contains(requested),
+          'Close the open document before discarding its draft.',
+        );
         for (final candidate in _catalog.toList()) {
-          if (!opened.contains(candidate.id) && (requested == null || candidate.id == requested)) {
+          if (!opened.contains(candidate.id) &&
+              (requested == null || candidate.id == requested)) {
             await drafts.delete(candidate.id);
             _catalog.removeWhere((d) => d.id == candidate.id);
           }
@@ -300,12 +337,17 @@ class DesktopBackend {
         require(matches.isNotEmpty, 'Document is no longer open');
         final session = matches.first;
         final keep = args['keepDraft'] == true;
-        require(!session.engine.dirty || args['discard'] == true || keep,
-          'Save this document, keep its draft, or confirm discarding changes.');
+        require(
+          !session.engine.dirty || args['discard'] == true || keep,
+          'Save this document, keep its draft, or confirm discarding changes.',
+        );
         _autosave.forget(id);
         if (keep) {
           await _persist(session);
-          require(session.recoveryError == null, 'Draft could not be kept. This document remains open. Save a copy first.');
+          require(
+            session.recoveryError == null,
+            'Draft could not be kept. This document remains open. Save a copy first.',
+          );
         } else {
           await drafts.delete(id);
           _catalog.removeWhere((d) => d.id == id);
