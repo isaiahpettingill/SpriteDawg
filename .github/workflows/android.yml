@@ -121,6 +121,15 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           overwrite: true
+      - name: Capture tiled drawing and gesture transitions
+        run: flutter test test/tiled_canvas_drawing_test.dart --dart-define=CAPTURE_UI=true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tiled-drawing-ui
+          path: build/ui/tiled-*.png
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
       - name: Verify exports with independent Pillow decoders
         run: |
           python3 -m pip install --disable-pip-version-check Pillow==12.3.0

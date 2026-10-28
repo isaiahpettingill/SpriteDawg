@@ -55,7 +55,7 @@ class _PixelCanvasState extends State<PixelCanvas> {
   double scale = 1;
   Offset origin = Offset.zero;
   Size viewport = Size.zero;
-  bool fitted = false, navigating = false;
+  bool fitted = false, navigating = false, _explicitPan = false;
   Timer? _spraying, _previewTimer;
   Duration _startedAt = Duration.zero;
   ui.Image? _preview;
@@ -109,6 +109,7 @@ class _PixelCanvasState extends State<PixelCanvas> {
         _strokeSeed,
         widget.strength,
         preview,
+        viewMode: widget.viewMode,
       );
 
   void _commit(List<Offset> points) {
@@ -135,23 +136,27 @@ class _PixelCanvasState extends State<PixelCanvas> {
 
   bool _previewRunning = false;
   int _previewEpoch = 0, _pointVersion = 0;
-  bool get _usesPreview => const {
-    'spray',
-    'airbrush',
-    'blur',
-    'jumble',
-    'gradient',
-    'metal',
-    'cluster',
-    'stripes',
-    'sphere',
-    'knife',
-    'bark',
-    'leaves',
-    'splatter',
-    'ditherPaint',
-    'ditherRetouch',
-  }.contains(widget.tool);
+  bool get _usesPreview =>
+      (widget.viewMode == CanvasViewMode.tiled &&
+          widget.tool != 'pan' &&
+          widget.tool != 'eyedropper') ||
+      const {
+        'spray',
+        'airbrush',
+        'blur',
+        'jumble',
+        'gradient',
+        'metal',
+        'cluster',
+        'stripes',
+        'sphere',
+        'knife',
+        'bark',
+        'leaves',
+        'splatter',
+        'ditherPaint',
+        'ditherRetouch',
+      }.contains(widget.tool);
   void _clearPreview() {
     _previewEpoch++;
     _previewTimer?.cancel();
@@ -185,6 +190,8 @@ class _PixelCanvasState extends State<PixelCanvas> {
       final result = await widget.editor.transport('previewStroke', {
         ...widget.previewOptions,
         'tool': widget.tool,
+        'wrap': widget.viewMode == CanvasViewMode.tiled,
+        'filled': widget.filled,
         'color': widget.color,
         'size': widget.brush,
         'points': stroke.map((p) => [p.dx.floor(), p.dy.floor()]).toList(),
@@ -321,17 +328,21 @@ class _PixelCanvasState extends State<PixelCanvas> {
         pointers.length == 1 &&
             !navigating &&
             stroke.isNotEmpty &&
-            (stroke.length > 1 ||
+            (widget.viewMode == CanvasViewMode.tiled ||
+                stroke.length > 1 ||
                 e.timeStamp - _startedAt > const Duration(milliseconds: 150))
         ? List<Offset>.of(stroke)
         : null;
     if (pending != null && widget.tool != 'eyedropper') _commit(pending);
     setState(() {
+      if (pointers.isEmpty) {
+        _explicitPan = widget.tool == 'pan' || e.buttons == 2;
+      }
       pointers[e.pointer] = e.localPosition;
       if (pointers.length > 1 ||
           widget.tool == 'pan' ||
           e.buttons == 2 ||
-          (widget.viewMode != CanvasViewMode.normal &&
+          (widget.viewMode == CanvasViewMode.slide &&
               !isEditableCanvasPoint(
                 _pixel(e.localPosition),
                 widget.editor.width,
@@ -343,6 +354,17 @@ class _PixelCanvasState extends State<PixelCanvas> {
         stroke.clear();
       } else {
         navigating = false;
+        // The margin outside the bounded 3x3 view is not another hidden tile.
+        // Ignore one-finger drags started there rather than silently panning.
+        if (widget.viewMode == CanvasViewMode.tiled &&
+            !isTiledCanvasPoint(
+              _pixel(e.localPosition),
+              widget.editor.width,
+              widget.editor.height,
+            )) {
+          stroke.clear();
+          return;
+        }
         _startedAt = e.timeStamp;
         stroke = [_pixel(e.localPosition)];
         _strokeSeed = _nextSeed;
@@ -358,6 +380,13 @@ class _PixelCanvasState extends State<PixelCanvas> {
       final oldCenter = centroid, oldDistance = distance;
       pointers[e.pointer] = e.localPosition;
       if (navigating) {
+        // A remaining finger waits for the navigation gesture to finish. It
+        // neither pans nor resumes a partially committed tiled stroke.
+        if (widget.viewMode == CanvasViewMode.tiled &&
+            pointers.length < 2 &&
+            !_explicitPan) {
+          return;
+        }
         final newCenter = centroid;
         final next =
             (scale *
@@ -369,8 +398,16 @@ class _PixelCanvasState extends State<PixelCanvas> {
         origin = newCenter - (oldCenter - origin) * (next / scale);
         scale = next;
       } else {
-        final p = _pixel(e.localPosition);
-        if (widget.viewMode != CanvasViewMode.normal &&
+        if (stroke.isEmpty) return;
+        final raw = _pixel(e.localPosition);
+        final p = widget.viewMode == CanvasViewMode.tiled
+            ? clampTiledCanvasPoint(
+                raw,
+                widget.editor.width,
+                widget.editor.height,
+              )
+            : raw;
+        if (widget.viewMode == CanvasViewMode.slide &&
             !isEditableCanvasPoint(
               p,
               widget.editor.width,
@@ -412,7 +449,12 @@ class _PixelCanvasState extends State<PixelCanvas> {
     if (!commit) return;
     if (widget.tool == 'eyedropper') {
       final p = points.last, bytes = widget.editor.state['pixels'];
-      final x = p.dx.floor(), y = p.dy.floor();
+      final x = widget.viewMode == CanvasViewMode.tiled
+          ? p.dx.floor() % widget.editor.width
+          : p.dx.floor();
+      final y = widget.viewMode == CanvasViewMode.tiled
+          ? p.dy.floor() % widget.editor.height
+          : p.dy.floor();
       if (x >= 0 &&
           y >= 0 &&
           x < widget.editor.width &&
@@ -704,7 +746,20 @@ class _CanvasPainter extends CustomPainter {
       editor.height.toDouble(),
     );
     canvas.saveLayer(bounds, Paint());
-    final image = editor.image;
+    final visuals = [...committing, this];
+    var image = editor.image;
+    var firstOverlay = 0;
+    for (var i = 0; i < visuals.length; i++) {
+      final replacement = visuals[i].preview;
+      if (replacement != null) {
+        image = replacement;
+        firstOverlay = i + 1;
+      }
+    }
+    // A preview is a complete composited frame, not an ink overlay. Draw the
+    // latest one exactly like a committed image. Drawing it with BlendMode.src
+    // over stale pixels leaves antialiased edge residue at fractional zoom,
+    // especially where an eraser makes a tile boundary transparent.
     if (image != null) {
       canvas.drawImage(
         image,
@@ -712,10 +767,9 @@ class _CanvasPainter extends CustomPainter {
         Paint()..filterQuality = FilterQuality.none,
       );
     }
-    for (final visual in committing) {
-      visual.paintStroke(canvas);
+    for (var i = firstOverlay; i < visuals.length; i++) {
+      visuals[i].paintStroke(canvas);
     }
-    paintStroke(canvas);
     canvas.restore();
   }
 
@@ -750,18 +804,6 @@ class _CanvasPainter extends CustomPainter {
   }
 
   void paintStroke(Canvas canvas) {
-    if (preview != null) {
-      // Effect previews contain the complete composited frame, including its
-      // transparency. Replace the prior frame rather than alpha-blending it
-      // twice. The checkerboard remains outside this isolated pixel layer.
-      canvas.drawImage(
-        preview!,
-        Offset.zero,
-        Paint()
-          ..filterQuality = FilterQuality.none
-          ..blendMode = BlendMode.src,
-      );
-    }
     if (preview == null &&
         points.isNotEmpty &&
         tool != 'pan' &&
@@ -791,7 +833,13 @@ class _CanvasPainter extends CustomPainter {
         'ditherPaint',
         'ditherRetouch',
       }.contains(tool)) {
-        final point = tool == 'fill' ? points.first : points.last;
+        final raw = tool == 'fill' ? points.first : points.last;
+        final point = viewMode == CanvasViewMode.tiled
+            ? Offset(
+                (raw.dx.floor() % editor.width).toDouble(),
+                (raw.dy.floor() % editor.height).toDouble(),
+              )
+            : raw;
         final p = Paint()
           ..color = Colors.white
           ..style = PaintingStyle.stroke
@@ -838,10 +886,14 @@ class _CanvasPainter extends CustomPainter {
           mirrorAntiDiagonal: mirrorAntiDiagonal,
           seed: seed,
           density: density,
+          wrap: viewMode == CanvasViewMode.tiled,
         );
         final p = Paint()
           ..color = tool == 'eraser' ? const Color(0x99ffffff) : Color(color)
-          ..isAntiAlias = false;
+          ..isAntiAlias = false
+          ..blendMode = tool == 'eraser' && viewMode == CanvasViewMode.tiled
+              ? BlendMode.clear
+              : BlendMode.srcOver;
         for (final run in runs) {
           canvas.drawRect(run, p);
         }

@@ -257,11 +257,26 @@ Android registers narrow Aseprite MIME/extension handlers; Linux bundles include
 
 ### Canvas view modes
 
-The overflow menu's **View · Tiled (3×3)** repeats the current frame seamlessly
-in eight read-only neighbors. **View · Slide** shows the previous and next frame
-beside the active frame instead of onion-skin overlays. Normal is the default;
-these modes do not change exports or document data. Only the outlined central
-canvas is editable; dragging a neighbor pans. Frame ends stay blank (no wrap).
+The overflow menu's **View · Tiled (3×3)** repeats the current frame in nine
+**editable** cells. Draw in any repeat: one finger/stylus paints, strokes and
+whole brush footprints wrap across seams into the original tile, and all copies
+update together. Crossing a seam remains one stroke/undo, not a line across the
+middle. Two fingers pan/pinch and keep the segment already drawn; after one
+finger lifts, the remaining finger waits until both lift. The explicit Hand tool
+and desktop right-drag still pan. Drags begun in the margin outside the 3×3 area
+do nothing; a stroke leaving that area stops at its outer edge, never starts a pan.
+Bucket regions and blur/jumble neighborhoods connect across opposite edges.
+Bucket gradients keep their original-tile horizontal/vertical coordinates; they
+do not bend into a circular gradient across the seam.
+Mirroring operates on the original tile, deduplicating overlapping ink; indexed
+colors and alpha retain the normal tool rules. The whole-layer Gradient still
+paints one linear field (not necessarily a seamless texture): its first point is
+mapped into the original tile and its drag direction/length preserved.
+
+**View · Slide** shows the previous and next frame beside the active frame
+instead of onion-skin overlays. Slide neighbors remain read-only: dragging one
+pans, and frame ends stay blank (no frame wrap). Normal is the default. View mode
+does not resize the document or repeat exports; tiled edits change its one tile.
 Fit includes the context cells. Slide lazily caches one additional full-resolution
 next-frame image, discards stale responses, and releases it when disabled.
 

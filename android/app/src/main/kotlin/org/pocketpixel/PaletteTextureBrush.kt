@@ -52,9 +52,9 @@ internal fun paletteShadeRamp(palette: IntArray, color: Int, selectedIndex: Int?
 
 /** Same integer resampling, palette indices and deterministic texture as Dart. */
 internal fun paletteTexturePixels(tool: String, points: List<Pair<Int,Int>>, width: Int, height: Int, size: Int, ramp: List<Int>, seed: Long=1L, mirrorX: Boolean=false, mirrorY: Boolean=false,
-    mirrorDiagonal: Boolean=false, mirrorAntiDiagonal: Boolean=false): Map<Int,Int> {
+    mirrorDiagonal: Boolean=false, mirrorAntiDiagonal: Boolean=false, wrap: Boolean=false): Map<Int,Int> {
     val out=linkedMapOf<Int,Int>()
-    val symmetry=StrokeSymmetry(width,height,mirrorX,mirrorY,mirrorDiagonal,mirrorAntiDiagonal)
+    val symmetry=StrokeSymmetry(width,height,mirrorX,mirrorY,mirrorDiagonal,mirrorAntiDiagonal,wrap)
     if(points.isEmpty() || ramp.isEmpty()) return out
     val p=mutableListOf<Pair<Int,Int>>()
     for(point in points) {
@@ -187,20 +187,22 @@ internal fun paletteTexturePixels(tool: String, points: List<Pair<Int,Int>>, wid
     val bounds=symmetry.sourceBounds
     fun stamp(x: Int,y: Int,tx: Double,ty: Double) {
         val left = x-size/2; val top = y-size/2
-        if (left > bounds.right || top > bounds.bottom || left+size <= bounds.left || top+size <= bounds.top) return
+        if (!wrap && (left > bounds.right || top > bounds.bottom || left+size <= bounds.left || top+size <= bounds.top)) return
         val cell=max(2.0,size/3.0)
         for(oy in 0 until size) for(ox in 0 until size) {
             val px=left+ox; val py=top+oy
-            if (px !in bounds.left..bounds.right || py !in bounds.top..bounds.bottom) continue
+            if (!wrap && (px !in bounds.left..bounds.right || py !in bounds.top..bounds.bottom)) continue
             val nx=(2*ox-size+1).toDouble()/size;val ny=(2*oy-size+1).toDouble()/size
             val radius=nx*nx+ny*ny
             if(radius>1) continue
+            val sampleX=if(wrap) Math.floorMod(px,width) else px
+            val sampleY=if(wrap) Math.floorMod(py,height) else py
             val shade=when(tool) {
                 "ditherPaint", "ditherRetouch" -> 2
-                "cluster" -> clusterCache.getOrPut(px to py) { cluster(px.toDouble(),py.toDouble(),cell) }
-                "bark" -> barkCache.getOrPut(px to py) { bark(px, py) }
+                "cluster" -> clusterCache.getOrPut(sampleX to sampleY) { cluster(sampleX.toDouble(),sampleY.toDouble(),cell) }
+                "bark" -> barkCache.getOrPut(sampleX to sampleY) { bark(sampleX, sampleY) }
                 "leaves" -> 2 // Destination-space canonical texture is sampled in emit.
-                "stripes" -> cluster((px*tx+py*ty)/4,-px*ty+py*tx,cell)
+                "stripes" -> cluster((sampleX*tx+sampleY*ty)/4,-sampleX*ty+sampleY*tx,cell)
                 "sphere" -> {
                     val light=(.62*sqrt(max(0.0,1-radius))-.70*ny-.18*nx).coerceIn(-1.0,1.0)
                     ((light+1)*2).roundToInt()

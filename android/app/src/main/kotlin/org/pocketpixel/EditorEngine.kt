@@ -55,12 +55,19 @@ class EditorEngine {
     fun stroke(args: Map<String, Any?>) {
         val tool = args["tool"] as? String ?: "pencil"
         require(tool in listOf("pencil", "eraser", "fill", "gradient", "line", "rectangle", "ellipse", "spray", "splatter", "airbrush", "blur", "jumble") || tool in paletteTextureTools) { "Unknown drawing tool" }
-        val points = (args["points"] as? List<*>)?.map { p ->
+        val rawPoints = (args["points"] as? List<*>)?.map { p ->
             val a = p as List<*>; Pair((a[0] as Number).toInt(), (a[1] as Number).toInt())
         } ?: emptyList()
-        if (points.isEmpty()) return
-        require(points.size <= 100000) { "Stroke is too long" }
-        require(points.all { abs(it.first.toLong()) <= 8192 && abs(it.second.toLong()) <= 8192 }) { "Stroke exceeds canvas limits" }
+        if (rawPoints.isEmpty()) return
+        require(rawPoints.size <= 100000) { "Stroke is too long" }
+        require(rawPoints.all { abs(it.first.toLong()) <= 8192 && abs(it.second.toLong()) <= 8192 }) { "Stroke exceeds canvas limits" }
+        // Preserve continuous deltas while using a repeat-independent origin.
+        // Never modulo each endpoint before rasterizing a seam-crossing line.
+        val points=if(args["wrap"] == true) {
+            val offsetX=rawPoints.first().first-Math.floorMod(rawPoints.first().first,document.width)
+            val offsetY=rawPoints.first().second-Math.floorMod(rawPoints.first().second,document.height)
+            rawPoints.map { (x,y) -> x-offsetX to y-offsetY }
+        } else rawPoints
         if (tool == "gradient" && points.first() == points.last()) return
         val size = args.number("size", if(tool == "spray" || tool == "airbrush" || tool == "splatter") 12 else 1).coerceIn(1, 32)
         val color = (args["color"] as? Number)?.toLong()?.toInt() ?: 0xff000000.toInt()
