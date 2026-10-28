@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -16,16 +17,20 @@ const _scale = 280 / 24;
 const _origin = (320 - 8 * _scale) / 2;
 
 class Harness {
-  Harness() {
+  Harness({this.commitGate}) {
     engine.replace(SpriteDocument.create(8, 8));
     editor = Editor(
       transport: (method, args) async {
-        if (method == 'stroke') commits.add(args!);
+        if (method == 'stroke') {
+          commits.add(args!);
+          if (commitGate != null) await commitGate!.future;
+        }
         if (method == 'previewStroke') previews.add(args!);
         return engine.invoke(method, args ?? {});
       },
     );
   }
+  final Completer<void>? commitGate;
   final engine = EditorEngine();
   late final Editor editor;
   final commits = <Map<String, dynamic>>[];
@@ -139,7 +144,10 @@ void main() {
     await t.pumpAndSettle();
     await t.tap(find.byTooltip('Project and view options'));
     await t.pumpAndSettle();
-    await t.tap(find.text('View · Tiled (3×3)'));
+    final tiledOption = find.byWidgetPredicate((widget) {
+      return widget is CheckedPopupMenuItem && widget.value == 'viewTiled';
+    });
+    await t.tap(tiledOption);
     await t.pumpAndSettle();
     final canvas = t.widget<PixelCanvas>(find.byType(PixelCanvas));
     expect(canvas.viewMode, CanvasViewMode.tiled);
@@ -233,7 +241,8 @@ void main() {
   testWidgets(
     'seam stroke preview, pending and final pixels agree without a center line',
     (t) async {
-      final h = Harness();
+      final gate = Completer<void>();
+      final h = Harness(commitGate: gate);
       await h.host(t);
       final g = await t.startGesture(h.point(t, 7, 2));
       await g.moveTo(h.point(t, 9, 2));
@@ -249,6 +258,10 @@ void main() {
       ]);
       final before = await h.screenshot(t, 'seam-live');
       await g.up();
+      await t.pump();
+      expect(h.editor.busy, isTrue);
+      expect(await h.screenshot(t, 'seam-pending'), orderedEquals(before));
+      gate.complete();
       await h.flush(t);
       expect(await h.screenshot(t, 'seam-committed'), orderedEquals(before));
       expect(h.engine.document.composite(0).sublist(16, 24), [

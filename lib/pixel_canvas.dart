@@ -746,7 +746,20 @@ class _CanvasPainter extends CustomPainter {
       editor.height.toDouble(),
     );
     canvas.saveLayer(bounds, Paint());
-    final image = editor.image;
+    final visuals = [...committing, this];
+    var image = editor.image;
+    var firstOverlay = 0;
+    for (var i = 0; i < visuals.length; i++) {
+      final replacement = visuals[i].preview;
+      if (replacement != null) {
+        image = replacement;
+        firstOverlay = i + 1;
+      }
+    }
+    // A preview is a complete composited frame, not an ink overlay. Draw the
+    // latest one exactly like a committed image. Drawing it with BlendMode.src
+    // over stale pixels leaves antialiased edge residue at fractional zoom,
+    // especially where an eraser makes a tile boundary transparent.
     if (image != null) {
       canvas.drawImage(
         image,
@@ -754,10 +767,9 @@ class _CanvasPainter extends CustomPainter {
         Paint()..filterQuality = FilterQuality.none,
       );
     }
-    for (final visual in committing) {
-      visual.paintStroke(canvas);
+    for (var i = firstOverlay; i < visuals.length; i++) {
+      visuals[i].paintStroke(canvas);
     }
-    paintStroke(canvas);
     canvas.restore();
   }
 
@@ -792,18 +804,6 @@ class _CanvasPainter extends CustomPainter {
   }
 
   void paintStroke(Canvas canvas) {
-    if (preview != null) {
-      // Effect previews contain the complete composited frame, including its
-      // transparency. Replace the prior frame rather than alpha-blending it
-      // twice. The checkerboard remains outside this isolated pixel layer.
-      canvas.drawImage(
-        preview!,
-        Offset.zero,
-        Paint()
-          ..filterQuality = FilterQuality.none
-          ..blendMode = BlendMode.src,
-      );
-    }
     if (preview == null &&
         points.isNotEmpty &&
         tool != 'pan' &&
