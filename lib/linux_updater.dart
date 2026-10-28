@@ -53,12 +53,29 @@ class LinuxUpdater {
     );
     if (!await script.exists()) {
       throw StateError(
-        'The updater is available in official Linux release bundles.',
+        'The updater is available in official Linux AppImages.',
+      );
+    }
+    final appimage = Platform.environment['APPIMAGE'];
+    final current = File(
+      '${script.parent.path}/release-version.txt',
+    ).readAsStringSync().trim();
+    // APPIMAGE is supplied by the runtime and points outside its read-only mount.
+    // Extracted AppDirs have no replaceable AppImage; use the installer once.
+    if (!arguments.contains('--check') && appimage == null) {
+      throw StateError(
+        'Open the AppImage itself to update it, or run install-spritedawg.sh once.',
       );
     }
     final process = await Process.start('/bin/bash', [
       script.path,
       ...arguments,
+      if (appimage != null) ...[
+        '--appimage',
+        appimage,
+        '--current-version',
+        current,
+      ],
     ]);
     var length = 0;
     final output = StringBuffer(), errors = StringBuffer();
@@ -199,7 +216,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
               Text(
                 error ??
                     (installed
-                        ? '${release!.tag} installed. Restart from your application menu when ready; your open drawings are unchanged.'
+                        ? '${release!.tag} replaced this AppImage. Save your work, then close and reopen it when ready; your open drawings are unchanged.'
                         : busy
                         ? (release == null
                               ? 'Checking GitHub…'

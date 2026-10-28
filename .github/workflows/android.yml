@@ -261,11 +261,22 @@ jobs:
           dart tool/image_export_interop.dart build/export-interop "$(realpath "$codec")"
           python3 scripts/check-image-exports.py build/export-interop --require-avif
       - run: scripts/package-linux.sh ${{ matrix.arch }} "${{ needs.version.outputs.version }}"
+      - name: Smoke-test packaged AppImage, native codecs and KDE icon fallback
+        run: bash scripts/smoke-appimage.sh build/spritedawg-linux-${{ matrix.arch }}.AppImage ${{ matrix.arch }} "${{ needs.version.outputs.version }}"
+      - name: Preserve AppImage smoke logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: appimage-smoke-${{ matrix.arch }}
+          path: build/appimage-*.log
+          if-no-files-found: ignore
+          retention-days: 14
       - uses: actions/upload-artifact@v4
         with:
           overwrite: true
           name: spritedawg-linux-${{ matrix.arch }}
-          path: build/spritedawg-linux-${{ matrix.arch }}.tar.gz*
+          path: build/spritedawg-linux-${{ matrix.arch }}.AppImage*
+          if-no-files-found: error
 
   signed-android:
     timeout-minutes: 25
@@ -396,15 +407,16 @@ jobs:
             test -s "release-assets/spritedawg-v$RELEASE_VERSION-android-$abi.apk"
           done
           for arch in x64 arm64; do
-            source="downloaded/linux-$arch/spritedawg-linux-$arch.tar.gz"
+            source="downloaded/linux-$arch/spritedawg-linux-$arch.AppImage"
             test -s "$source"
-            tar -tzf "$source" > /dev/null
-            cp "$source" "release-assets/spritedawg-v$RELEASE_VERSION-linux-$arch.tar.gz"
+            (cd "downloaded/linux-$arch" && sha256sum --check "spritedawg-linux-$arch.AppImage.sha256")
+            python3 scripts/check-appimage.py "$source" "$arch"
+            cp "$source" "release-assets/spritedawg-v$RELEASE_VERSION-linux-$arch.AppImage"
           done
           cp scripts/install-spritedawg.sh release-assets/install-spritedawg.sh
           cd release-assets
           test "$(find . -maxdepth 1 -type f | wc -l)" -eq 6
-          sha256sum *.apk *.tar.gz *.sh > SHA256SUMS
+          sha256sum *.apk *.AppImage *.sh > SHA256SUMS
           sha256sum --check SHA256SUMS
       - name: Publish or safely resume this tested main release
         env:

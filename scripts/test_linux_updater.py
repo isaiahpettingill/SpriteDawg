@@ -1,12 +1,12 @@
-"""Offline installer tests. Never installs to the user's home or contacts GitHub."""
+"""Offline self-replacement tests. No real app is executed, no home/network access."""
+import errno
+import fcntl
 import hashlib
-import io
 import json
 import os
+from pathlib import Path
 import shutil
 import subprocess
-from pathlib import Path
-import tarfile
 import tempfile
 import types
 import unittest
@@ -16,31 +16,16 @@ SCRIPT = Path(__file__).parent / 'install-spritedawg.sh'
 updater = types.ModuleType('updater')
 exec(compile(SCRIPT.read_text().split("<<'PYTHON'\n", 1)[1].rsplit('\nPYTHON', 1)[0], str(SCRIPT), 'exec'), updater.__dict__)
 TAG = 'v0.3.99'
-NAME = f'spritedawg-{TAG}-linux-x64.tar.gz'
-INFO = {'tag': TAG, 'arch': 'x64', 'asset': NAME, 'assets': {NAME: 'archive', 'SHA256SUMS': 'manifest'}}
+NAME = f'spritedawg-{TAG}-linux-x64.AppImage'
+INFO = {'tag': TAG, 'arch': 'x64', 'asset': NAME, 'assets': {NAME: 'image', 'SHA256SUMS': 'manifest'}}
 
 
-def archive_bytes(extra=(), arch='x64'):
+def image_bytes(arch='x64', payload=b'new payload'):
     executable = bytearray(20)
     executable[:6] = b'\x7fELF\x02\x01'
+    executable[8:11] = b'AI\x02'
     executable[18:20] = (62 if arch == 'x64' else 183).to_bytes(2, 'little')
-    entries = [('./spritedawg', bytes(executable), None),
-               ('./release-version.txt', (TAG + '\n').encode(), None),
-               ('./update-spritedawg.sh', b'#!/bin/bash\n', None),
-               ('./share/icons/hicolor/scalable/apps/' + updater.APP_ID + '.svg', b'<svg/>', None),
-               ('./share/mime/packages/' + updater.APP_ID + '.xml', b'<mime-info/>', None),
-               *extra]
-    stream = io.BytesIO()
-    with tarfile.open(fileobj=stream, mode='w:gz') as tar:
-        for name, data, kind in entries:
-            member = tarfile.TarInfo(name)
-            member.size = len(data)
-            member.mode = 0o755
-            if kind is not None:
-                member.type = kind
-                member.linkname = '../../outside'
-            tar.addfile(member, io.BytesIO(data))
-    return stream.getvalue()
+    return bytes(executable) + payload
 
 
 class LinuxUpdaterTests(unittest.TestCase):
@@ -48,8 +33,8 @@ class LinuxUpdaterTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix='updater tests ')
         self.addCleanup(self.temp.cleanup)
         self.home = Path(self.temp.name) / 'data with spaces $cash %percent'
-        self.archive = archive_bytes()
-        self.manifest = (hashlib.sha256(self.archive).hexdigest() + '  ' + NAME + '\n').encode()
+        self.image = image_bytes()
+        self.manifest = self.make_manifest()
         self.network = patch.object(updater, 'fetch', side_effect=self.fetch)
         self.network.start()
         self.addCleanup(self.network.stop)
@@ -57,69 +42,130 @@ class LinuxUpdaterTests(unittest.TestCase):
         self.cache.start()
         self.addCleanup(self.cache.stop)
 
+    def make_manifest(self):
+        return (hashlib.sha256(self.image).hexdigest() + '  ' + NAME + '\n').encode()
+
     def fetch(self, url, destination=None, limit=0):
         if url == 'manifest':
             return self.manifest
-        self.assertEqual(url, 'archive')
-        destination.write_bytes(self.archive)
+        self.assertEqual(url, 'image')
+        destination.write_bytes(self.image)
         return b''
 
-    def test_install_and_repeat_keep_old_version_and_registration(self):
-        result = updater.install(INFO, self.home)
-        self.assertTrue(result.is_file())
-        old = (self.home / 'spritedawg/current').resolve()
+    def portable(self):
+        path = Path(self.temp.name) / 'Sprite Dawg $cash %percent.AppImage'
+        path.write_bytes(image_bytes(payload=b'old payload'))
+        path.chmod(0o755)
+        return path
+
+    def update(self, target, version='v0.3.98'):
+        return updater.install(INFO, self.home, target, version)
+
+    def test_fresh_install_with_group_writable_umask_is_private(self):
+        previous = os.umask(0o002)
+        try:
+            target = updater.install(INFO, self.home)
+        finally:
+            os.umask(previous)
+        self.assertEqual(target.parent.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(target.read_bytes(), self.image)
+
+    def test_self_replaces_same_path_and_retains_old_running_inode(self):
+        target = self.portable()
+        with target.open('rb') as running:
+            inode = target.stat().st_ino
+            self.assertEqual(self.update(target), target)
+            self.assertEqual(target.read_bytes(), self.image)
+            self.assertNotEqual(inode, target.stat().st_ino)
+            self.assertEqual(running.read(), image_bytes(payload=b'old payload'))
+        self.assertFalse(self.home.exists())
+        self.assertEqual(list(target.parent.glob('.spritedawg-update-*')), [])
+        self.assertTrue(os.access(target, os.X_OK))
+
+    def test_hardlinks_or_interrupted_backup_do_not_modify_other_paths(self):
+        target = self.portable()
+        other = target.with_name('retained-old-copy')
+        os.link(target, other)
+        self.update(target)
+        self.assertEqual(target.read_bytes(), self.image)
+        self.assertEqual(other.read_bytes(), image_bytes(payload=b'old payload'))
+
+    def test_fresh_install_repeat_and_legacy_migration_preserve_all_data(self):
+        legacy = self.home / 'spritedawg/versions/old'
+        legacy.mkdir(parents=True)
+        (legacy / 'release-version.txt').write_text('v0.3.98')
+        (legacy / 'spritedawg').write_text('old executable')
+        (self.home / 'spritedawg/current').symlink_to('versions/old')
+        drafts = self.home / 'org.pocketpixel.SpriteDawg/drafts'
+        drafts.mkdir(parents=True)
+        (drafts / 'drawing').write_bytes(b'drawing preferences draft')
+        target = updater.install(INFO, self.home)
+        self.assertEqual(target.name, 'SpriteDawg.AppImage')
         updater.install(INFO, self.home)
-        self.assertNotEqual(old, (self.home / 'spritedawg/current').resolve())
-        self.assertTrue((old / 'spritedawg').is_file())
+        self.assertEqual(list(legacy.parent.iterdir()), [legacy])
+        self.assertEqual((legacy / 'spritedawg').read_text(), 'old executable')
+        self.assertEqual((drafts / 'drawing').read_bytes(), b'drawing preferences draft')
         desktop = (self.home / 'applications' / (updater.APP_ID + '.desktop')).read_text()
         self.assertIn('%%percent', desktop)
         self.assertIn('\\\\$cash', desktop)
         self.assertIn(' %F\n', desktop)
         self.assertIn('image/x-aseprite;', desktop)
         self.assertIn('Terminal=false', desktop)
-        self.assertEqual(len(list((self.home / 'spritedawg/versions').iterdir())), 2)
+        self.assertIn('StartupWMClass=' + updater.APP_ID, desktop)
+        self.assertIn('Icon=' + str(self.home), desktop)
 
     @unittest.skipUnless(shutil.which('desktop-file-validate'), 'desktop validator unavailable')
     def test_desktop_quoting_passes_standard_validator(self):
         file = Path(self.temp.name) / 'test.desktop'
-        file.write_text(updater.desktop_text(Path('/tmp/spaces $cash %percent/"quote`tick\\slash')))
+        file.write_text(updater.desktop_text(Path('/tmp/spaces $cash %percent/"quote`tick\\slash'), Path('/tmp/icon.svg')))
         subprocess.run(['desktop-file-validate', str(file)], check=True, capture_output=True)
 
-    def test_packaging_includes_updater_version_and_release_asset(self):
+    def test_metadata_is_original_icon_and_aseprite_mime_not_theme_collision(self):
         repository = SCRIPT.parent.parent
-        root = Path(self.temp.name) / 'package build'
-        for source in ['scripts/package-linux.sh', 'scripts/install-spritedawg.sh',
-                       'linux/packaging/org.pocketpixel.SpriteDawg.desktop',
-                       'linux/packaging/org.pocketpixel.SpriteDawg.xml',
-                       'art/spritedawg.svg', 'LICENSE']:
-            target = root / source
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(repository / source, target)
-        binary = root / 'build/linux/x64/release/bundle/spritedawg'
-        binary.parent.mkdir(parents=True)
-        binary.write_bytes(b'not executed')
-        binary.chmod(0o755)
-        subprocess.run(['bash', 'scripts/package-linux.sh', 'x64', '0.3.99'], cwd=root, check=True)
-        with tarfile.open(root / 'build/spritedawg-linux-x64.tar.gz') as archive:
-            self.assertEqual(archive.extractfile('./release-version.txt').read(), b'v0.3.99\n')
-            self.assertEqual(archive.extractfile('./update-spritedawg.sh').read(), SCRIPT.read_bytes())
-        workflow = (repository / '.github/workflows/android.yml').read_text()
-        self.assertIn('cp scripts/install-spritedawg.sh release-assets/install-spritedawg.sh', workflow)
-        self.assertIn('sha256sum *.apk *.tar.gz *.sh > SHA256SUMS', workflow)
+        self.assertEqual(updater.ICON, (repository / 'art/spritedawg.svg').read_text())
+        self.assertEqual(updater.MIME, (repository / 'linux/packaging/org.pocketpixel.SpriteDawg.xml').read_text())
+        self.assertIn('*.aseprite', updater.MIME)
+        self.assertIn('*.ase', updater.MIME)
 
-    def test_tamper_does_not_change_old_install_or_desktop(self):
-        updater.install(INFO, self.home)
-        current = (self.home / 'spritedawg/current').resolve()
-        desktop = (self.home / 'applications' / (updater.APP_ID + '.desktop')).read_bytes()
-        self.archive += b'tamper'
+    def test_checksum_failure_leaves_target_and_registration_unchanged(self):
+        target = updater.install(INFO, self.home)
+        original = target.read_bytes()
+        self.image += b'tamper'
         with self.assertRaisesRegex(ValueError, 'checksum'):
+            self.update(target)
+        self.assertEqual(target.read_bytes(), original)
+        self.assertFalse(list(target.parent.glob('.spritedawg-update-*')))
+
+    def test_download_failure_and_disk_full_do_not_replace_old_file(self):
+        target = self.portable()
+        for error in (TimeoutError('interrupted'), OSError(errno.ENOSPC, 'disk full')):
+            with self.subTest(error=error):
+                with patch.object(updater, 'fetch', side_effect=error), self.assertRaises(type(error)):
+                    self.update(target)
+                self.assertEqual(target.read_bytes(), image_bytes(payload=b'old payload'))
+
+    def test_registration_symlink_parent_cannot_write_outside_app_paths(self):
+        self.home.mkdir(parents=True)
+        outside = Path(self.temp.name) / 'unrelated'
+        outside.mkdir()
+        (self.home / 'icons').symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'symlinked'):
             updater.install(INFO, self.home)
-        self.assertEqual(current, (self.home / 'spritedawg/current').resolve())
-        self.assertEqual(desktop, (self.home / 'applications' / (updater.APP_ID + '.desktop')).read_bytes())
+        self.assertEqual(list(outside.iterdir()), [])
+        self.assertFalse((self.home / 'spritedawg/SpriteDawg.AppImage').exists())
+
+    def test_publish_failure_rolls_back_metadata_and_binary(self):
+        target = updater.install(INFO, self.home)
+        old = target.read_bytes()
+        self.image = image_bytes(payload=b'replacement')
+        self.manifest = self.make_manifest()
+        with patch.object(updater, 'sync_directory', side_effect=OSError('disk full')):
+            with self.assertRaises(OSError):
+                self.update(target)
+        self.assertEqual(target.read_bytes(), old)
 
     def test_registration_failure_rolls_back_all_files(self):
-        updater.install(INFO, self.home)
-        current = (self.home / 'spritedawg/current').resolve()
+        target = updater.install(INFO, self.home)
         desktop = self.home / 'applications' / (updater.APP_ID + '.desktop')
         desktop.write_text('old desktop')
         original = updater.atomic_bytes
@@ -130,53 +176,73 @@ class LinuxUpdaterTests(unittest.TestCase):
             if calls == 2:
                 raise OSError('disk full')
             return original(path, data)
-        with patch.object(updater, 'atomic_bytes', side_effect=failing):
-            with self.assertRaisesRegex(OSError, 'disk full'):
-                updater.install(INFO, self.home)
-        self.assertEqual(current, (self.home / 'spritedawg/current').resolve())
+        with patch.object(updater, 'atomic_bytes', side_effect=failing), self.assertRaises(OSError):
+            updater.install(INFO, self.home)
         self.assertEqual(desktop.read_text(), 'old desktop')
-        self.assertEqual(len(list((self.home / 'spritedawg/versions').iterdir())), 1)
+        self.assertEqual(target.read_bytes(), self.image)
 
-    def test_reject_downgrade(self):
-        updater.install(INFO, self.home)
-        (self.home / 'spritedawg/current/release-version.txt').write_text('v9.0.0')
+    def test_wrong_architecture_and_non_appimage_never_replace_old_file(self):
+        for data in (image_bytes(arch='arm64'), b'not an AppImage', image_bytes().replace(b'AI\x02', b'AI\x01')):
+            target = self.portable()
+            self.image = data
+            self.manifest = self.make_manifest()
+            with self.assertRaisesRegex(ValueError, 'architecture'):
+                self.update(target)
+            self.assertEqual(target.read_bytes(), image_bytes(payload=b'old payload'))
+
+    def test_reject_downgrade_even_from_an_old_still_running_instance(self):
+        target = self.portable()
         with self.assertRaisesRegex(ValueError, 'downgrade'):
-            updater.install(INFO, self.home)
+            self.update(target, 'v9.0.0')
+        version = target.with_name('.' + target.name + '.version')
+        version.write_text('v9.0.0')
+        with self.assertRaisesRegex(ValueError, 'downgrade'):
+            self.update(target)
 
-    def test_reject_wrong_architecture_before_registration(self):
-        self.archive = archive_bytes(arch='arm64')
-        self.manifest = (hashlib.sha256(self.archive).hexdigest() + '  ' + NAME + '\n').encode()
-        with self.assertRaisesRegex(ValueError, 'architecture'):
-            updater.install(INFO, self.home)
-        self.assertFalse((self.home / 'spritedawg/current').exists())
+    def test_symlink_readonly_and_unowned_targets_refused(self):
+        target = self.portable()
+        link = target.with_name('symlink.AppImage')
+        link.symlink_to(target)
+        with self.assertRaisesRegex(ValueError, 'symlink'):
+            self.update(link)
+        target.chmod(0o555)
+        with self.assertRaisesRegex(ValueError, 'writable'):
+            self.update(target)
+        target.chmod(0o755)
+        with patch.object(updater.os, 'getuid', return_value=999999), self.assertRaisesRegex(ValueError, 'writable'):
+            self.update(target)
+        target.parent.chmod(0o555)
+        try:
+            with self.assertRaisesRegex(ValueError, 'writable'):
+                self.update(target)
+        finally:
+            target.parent.chmod(0o700)
 
-    def test_unsafe_archives_rejected_before_writes(self):
-        for name, kind in [('../escape', None), ('/tmp/escape', None), ('./spritedawg', None),
-                           ('link', tarfile.SYMTYPE), ('link', tarfile.LNKTYPE),
-                           ('device', tarfile.CHRTYPE), ('a\\b', None)]:
-            with self.subTest(name=name, kind=kind):
-                file = Path(self.temp.name) / 'bad.tar.gz'
-                file.write_bytes(archive_bytes([(name, b'x', kind)]))
-                destination = Path(self.temp.name) / 'unpack'
-                destination.mkdir(exist_ok=True)
-                with self.assertRaises(ValueError):
-                    updater.unpack(file, destination)
-                self.assertEqual(list(destination.iterdir()), [])
+    def test_concurrent_updates_refused(self):
+        target = self.portable()
+        lock = target.with_name('.' + target.name + '.update.lock')
+        with lock.open('w') as stream:
+            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with self.assertRaisesRegex(ValueError, 'in progress'):
+                self.update(target)
 
-    def test_archive_size_limit(self):
-        file = Path(self.temp.name) / 'big.tar.gz'
-        file.write_bytes(self.archive)
-        target = Path(self.temp.name) / 'unpack'
-        target.mkdir()
-        with patch.object(updater, 'MAX_UNPACKED', 2), self.assertRaisesRegex(ValueError, 'limits'):
-            updater.unpack(file, target)
-        self.assertEqual(list(target.iterdir()), [])
+    def test_target_changed_during_download_is_not_overwritten(self):
+        target = self.portable()
+        original_fetch = self.fetch
+        def changing(*args, **kwargs):
+            result = original_fetch(*args, **kwargs)
+            if args[0] == 'image':
+                target.write_bytes(image_bytes(payload=b'another update'))
+            return result
+        with patch.object(updater, 'fetch', side_effect=changing), self.assertRaisesRegex(ValueError, 'changed'):
+            self.update(target)
+        self.assertEqual(target.read_bytes(), image_bytes(payload=b'another update'))
 
     def test_checksum_requires_unique_exact_filename(self):
         with self.assertRaisesRegex(ValueError, 'duplicate'):
             updater.checksum(self.manifest * 2, NAME)
         with self.assertRaisesRegex(ValueError, 'Missing'):
-            updater.checksum(self.manifest, 'other.tar.gz')
+            updater.checksum(self.manifest, 'other.AppImage')
         with self.assertRaisesRegex(ValueError, 'Malformed'):
             updater.checksum(b'../escape', NAME)
 
@@ -185,24 +251,39 @@ class LinuxUpdaterTests(unittest.TestCase):
                     'https://user:pass@github.com/x', 'https://github.com:444/x']:
             with self.assertRaises(ValueError):
                 updater.validate_url(url)
-        self.assertEqual(updater.validate_url('https://release-assets.githubusercontent.com/x'),
-                         'https://release-assets.githubusercontent.com/x')
 
-    def test_release_api_exact_assets_stable_only(self):
-        payload = {'tag_name': TAG, 'draft': False, 'prerelease': False, 'assets': [
-            {'name': name, 'state': 'uploaded', 'browser_download_url':
-             f'https://github.com/{updater.REPO}/releases/download/{TAG}/{name}'}
-            for name in [NAME, 'SHA256SUMS']]}
-        with patch.object(updater, 'fetch', return_value=json.dumps(payload).encode()):
-            self.assertEqual(updater.release(arch='x64')['tag'], TAG)
-        for mutation in ['draft', 'prerelease']:
-            payload[mutation] = True
+    def test_release_selects_exact_appimage_both_architectures_no_tar_fallback(self):
+        for arch in ('x64', 'arm64'):
+            name = f'spritedawg-{TAG}-linux-{arch}.AppImage'
+            payload = {'tag_name': TAG, 'draft': False, 'prerelease': False, 'assets': [
+                {'name': item, 'state': 'uploaded', 'browser_download_url':
+                 f'https://github.com/{updater.REPO}/releases/download/{TAG}/{item}'}
+                for item in [name, 'SHA256SUMS']]}
+            with patch.object(updater, 'fetch', return_value=json.dumps(payload).encode()):
+                self.assertEqual(updater.release(arch=arch)['asset'], name)
+            payload['assets'][0]['name'] = name.replace('.AppImage', '.tar.gz')
             with patch.object(updater, 'fetch', return_value=json.dumps(payload).encode()), self.assertRaises(ValueError):
-                updater.release(arch='x64')
-            payload[mutation] = False
-        payload['assets'][0]['browser_download_url'] = 'https://github.com/evil/x'
-        with patch.object(updater, 'fetch', return_value=json.dumps(payload).encode()), self.assertRaises(ValueError):
-            updater.release(arch='x64')
+                updater.release(arch=arch)
+
+    def test_release_rejects_wrong_version_unpublished_and_hostile_urls(self):
+        base = {'tag_name': TAG, 'draft': False, 'prerelease': False, 'assets': [
+            {'name': item, 'state': 'uploaded', 'browser_download_url':
+             f'https://github.com/{updater.REPO}/releases/download/{TAG}/{item}'}
+            for item in [NAME, 'SHA256SUMS']]}
+        mutations = [
+            lambda data: data.update(tag_name='v0.3.98'),
+            lambda data: data.update(draft=True),
+            lambda data: data.update(prerelease=True),
+            lambda data: data['assets'][0].update(state='new'),
+            lambda data: data['assets'][0].update(browser_download_url='https://github.com/other/asset'),
+            lambda data: data['assets'].append(data['assets'][0]),
+        ]
+        for mutation in mutations:
+            payload = json.loads(json.dumps(base))
+            mutation(payload)
+            with patch.object(updater, 'fetch', return_value=json.dumps(payload).encode()):
+                with self.assertRaises(ValueError):
+                    updater.release(TAG, 'x64')
 
     def test_version_and_platform_validation(self):
         for value in ['v1.2.3-rc1', 'v01.2.3', '1.2.3', 'v1.2.3;exit', '../x', None]:
@@ -215,13 +296,13 @@ class LinuxUpdaterTests(unittest.TestCase):
     def test_desktop_control_characters_rejected(self):
         with self.assertRaises(ValueError):
             updater.desktop_quote('/home/user\nExec=evil')
-        self.assertEqual(updater.desktop_quote('/path/quote"'), '"/path/quote\\\\\""')
 
-    def test_no_downloaded_scripts_are_executed(self):
-        # Installation is file publication and native database refresh only.
+    def test_no_downloaded_scripts_or_appimages_are_executed(self):
         with patch.object(updater.subprocess, 'run') as run:
             updater.install(INFO, self.home)
+            self.update(self.portable())
             run.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()

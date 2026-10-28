@@ -200,15 +200,28 @@ git -C /tmp/ase-parser checkout 550bde9ec5d3dc03571d7ea5acd9612a49c61a80
 # See scripts/check-ase-parser.cjs and tool/aseprite_interop.dart for invocation.
 ```
 
-APK: `build/app/outputs/flutter-apk/app-debug.apk`. Linux archive:
-`build/spritedawg-linux-x64.tar.gz` (or `arm64`). Extract the entire archive, run
-`./spritedawg`; optional `./install-desktop.sh` installs the per-user launcher/icon.
-Do not move the extracted directory after installing its launcher.
+APK: `build/app/outputs/flutter-apk/app-debug.apk`. Linux builds now produce only
+`build/spritedawg-linux-x64.AppImage` or `build/spritedawg-linux-arm64.AppImage`,
+plus their checksum files. Download the matching architecture, verify SHA256SUMS,
+make it executable, then launch it:
 
-Linux bundles require compatible glibc/GTK3 and a working graphics stack. ARM64
-Linux builds are separate from x64 desktop builds; building either does **not**
-prove hardware/Wayland/touch compatibility on every Linux phone. No real phone is
-claimed tested unless explicitly recorded in the PR verification results.
+```sh
+chmod +x spritedawg-vX.Y.Z-linux-x64.AppImage
+./spritedawg-vX.Y.Z-linux-x64.AppImage
+```
+
+GTK3, Flutter, plugins and native codecs are bundled. A compatible host glibc
+(Ubuntu 24.04 or newer baseline), graphics drivers and display server are still
+required. If the host lacks usable FUSE, run the same file with
+`--appimage-extract-and-run`; no root installation is required. For inspection or
+manual troubleshooting, `--appimage-extract` creates `squashfs-root`, whose
+`./squashfs-root/AppRun` launches the extracted app. In-place updates require
+launching the AppImage, including extraction-and-run, not an extracted AppDir.
+
+Both x64 and ARM64 are built and launch-smoked on native CI runners. This does
+**not** prove hardware/Wayland/touch compatibility on every Linux phone; no
+physical ARM device is claimed tested without explicit verification results.
+See [AppImage packaging and verification](docs/LINUX_APPIMAGE.md).
 
 ## CI and signing
 
@@ -217,9 +230,9 @@ and separate Linux x64 + ARM64 release builds. Branches produce workflow artifac
 Trusted main-branch pushes/merges automatically publish releases
 only after all required checks pass and production Android signing succeeds.
 Release assets include architecture-specific
-Android APKs, Linux x64/ARM64 archives, and basename-relative SHA256 checksums.
-Download the Android ARM64 APK for a Pixel 8; use the Linux ARM64 archive only for
-a compatible glibc/GTK3 Linux system, not Android.
+Android APKs, Linux x64/ARM64 AppImages, and basename-relative SHA256 checksums.
+Download the Android ARM64 APK for a Pixel 8; use the Linux ARM64 AppImage only for
+a compatible glibc Linux system, not Android.
 
 The old v0.1.1 release was debug-signed despite using `org.pocketpixel`. A release
 signed by a different permanent key cannot update that installation in place.
@@ -264,21 +277,33 @@ Download `install-spritedawg.sh` from the [latest release](https://github.com/is
 bash ~/Downloads/install-spritedawg.sh
 ```
 
-Requires Python 3.9+, Linux x64 or ARM64, and the GTK runtime used by the app.
-No sudo. It downloads the latest stable build, checks its SHA-256 against the
-release manifest, validates the archive, and installs into
-`${XDG_DATA_HOME:-$HOME/.local/share}/spritedawg`. The launcher, icon and Aseprite
-file associations are refreshed without changing your default editor.
-`shared-mime-info` and `desktop-file-utils` enable immediate desktop cache refresh.
-Checksums detect corrupted downloads; they are not an independent release signature.
+The optional installer requires Python 3.9+, Linux x64 or ARM64, and no sudo.
+It verifies the latest stable AppImage against SHA256SUMS and its native ELF/type
+header, then installs one file at
+`${XDG_DATA_HOME:-$HOME/.local/share}/spritedawg/SpriteDawg.AppImage`.
+It registers the original icon and Aseprite associations without changing your
+default editor. `shared-mime-info` and `desktop-file-utils` allow immediate cache
+refresh; otherwise log out/in. Checksums detect corruption, not an independent
+release signature. Verify the installer itself with the release's SHA256SUMS too.
 
-On Linux, use the overflow menu **Check for updates…**, then **Install update**.
-Checks are manual and installation requires confirmation. Your running editor and
-unsaved drawings stay open; save and restart from the application menu when ready.
-Old version folders are retained so running processes keep their libraries. Updates
-use a staged, verified bundle and atomically switch the `current` launcher target;
-failed activation restores the previous registration. Documents and preferences
-are never removed. The installer also supports `--check` and `--version vX.Y.Z`.
+**Existing tar installations:** run the new installer once to switch your launcher
+to the AppImage. The old bundled updater only understands tar releases and cannot
+perform that first transition. Old folders and `current` links are left untouched;
+no documents, preferences, palettes or internal drafts are moved or deleted.
+
+**Check for updates… → Install update** now replaces the **running AppImage file
+itself**, at the same path. It checks the exact release, checksum and architecture,
+stages on the same filesystem, then atomically renames the verified replacement.
+A running process keeps its old inode/mount until you close it. There are no new
+version folders. Failures before replacement retain the old app; activation errors
+restore it. Read-only, symlink or unowned locations are refused with instructions
+to save a new copy in a user-owned folder—never a sudo fallback.
+
+Updates never close the editor or restart automatically. **Save your work, then
+close and reopen the same AppImage** when ready. App-support paths and the stable
+application ID are unchanged. The installer also supports `--check` and
+`--version vX.Y.Z`; older versions cannot replace a newer recorded installation.
+
 ## Image and spritesheet export
 
 Choose **⋮ → Export…**. GIF, APNG and WebP can export the current frame, all
