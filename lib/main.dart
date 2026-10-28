@@ -511,12 +511,24 @@ class _EditorScreenState extends State<EditorScreen>
   }
 
   int playbackDirection = 1, completedLoops = 0;
+  bool _startingPlayback = false;
   Future<void> play() async {
     if (playing) {
       stop();
       return;
     }
-    if (e.maps('frames').length < 2) return;
+    if (_startingPlayback || e.busy || e.maps('frames').length < 2) return;
+    _startingPlayback = true;
+    final startingPanel = panel;
+    bool ready;
+    try {
+      ready =
+          await (_tagEditorKey.currentState?.savePending() ??
+              Future.value(true));
+    } finally {
+      _startingPlayback = false;
+    }
+    if (!ready || !mounted || panel != startingPanel) return;
     setState(() => playing = true);
     final tags = e.maps('tags');
     final tag = selectedTag >= 0 && selectedTag < tags.length
@@ -748,6 +760,10 @@ class _EditorScreenState extends State<EditorScreen>
             MediaQuery.viewInsetsOf(context).bottom <
         430;
     final compactTags = panel == 'tags' && compactHeight;
+    final tightTagKeyboard =
+        panel == 'tags' &&
+        tightHeight &&
+        MediaQuery.viewInsetsOf(context).bottom > 0;
     final hideDrawingStrips =
         (compactHeight && panel != null) || panel == 'tags';
     final layers = e.maps('layers');
@@ -775,104 +791,121 @@ class _EditorScreenState extends State<EditorScreen>
       },
       child: Scaffold(
         resizeToAvoidBottomInset: panel == 'tags',
-        appBar: AppBar(
-          title: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'SpriteDawg${e.dirty ? ' •' : ''}',
-                style: const TextStyle(
-                  fontSize: 19,
-                  fontWeight: FontWeight.w700,
+        appBar: tightTagKeyboard
+            ? null
+            : AppBar(
+                title: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'SpriteDawg${e.dirty ? ' •' : ''}',
+                      style: const TextStyle(
+                        fontSize: 19,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      '${e.width} × ${e.height} · ${e.state['depth'] ?? 32}-bit',
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
+                  ],
                 ),
-              ),
-              Text(
-                '${e.width} × ${e.height} · ${e.state['depth'] ?? 32}-bit',
-                style: Theme.of(context).textTheme.labelSmall,
-              ),
-            ],
-          ),
-          actions: [
-            IconButton(
-              tooltip: 'Open Aseprite',
-              onPressed: e.busy ? null : open,
-              icon: const Icon(Icons.folder_open),
-            ),
-            IconButton(
-              tooltip: 'Save Aseprite',
-              onPressed: e.busy
-                  ? null
-                  : () {
-                      stop();
-                      fileAction('save');
-                    },
-              icon: const Icon(Icons.save_outlined),
-            ),
-            PopupMenuButton<String>(
-              tooltip: 'Project and view options',
-              enabled: !e.busy,
-              onSelected: menu,
-              itemBuilder: (context) => [
-                const PopupMenuItem(value: 'new', child: Text('New canvas')),
-                const PopupMenuItem(value: 'saveAs', child: Text('Save as…')),
-                const PopupMenuItem(
-                  value: 'drafts',
-                  child: Text('Internal drafts…'),
-                ),
-                const PopupMenuItem(value: 'exportPng', child: Text('Export…')),
-                const PopupMenuDivider(),
-                CheckedPopupMenuItem(
-                  value: 'grid',
-                  checked: grid,
-                  child: const Text('Pixel grid'),
-                ),
-                CheckedPopupMenuItem(
-                  value: 'onion',
-                  checked: onion,
-                  child: const Text('Onion skin'),
-                ),
-                CheckedPopupMenuItem(
-                  value: 'viewNormal',
-                  checked: canvasViewMode == CanvasViewMode.normal,
-                  child: const Text('View · Normal'),
-                ),
-                CheckedPopupMenuItem(
-                  value: 'viewTiled',
-                  checked: canvasViewMode == CanvasViewMode.tiled,
-                  child: const Text('View · Tiled (3×3)'),
-                ),
-                CheckedPopupMenuItem(
-                  value: 'viewSlide',
-                  checked: canvasViewMode == CanvasViewMode.slide,
-                  child: const Text('View · Slide'),
-                ),
-                const PopupMenuItem(value: 'fit', child: Text('Fit canvas')),
-                const PopupMenuItem(
-                  value: 'flipHorizontal',
-                  child: Text('Flip active cel horizontally'),
-                ),
-                const PopupMenuItem(
-                  value: 'flipVertical',
-                  child: Text('Flip active cel vertically'),
-                ),
-                const PopupMenuItem(
-                  value: 'metadata',
-                  child: Text('User data'),
-                ),
-                const PopupMenuItem(
-                  value: 'defaultUserData',
-                  child: Text('Default user data'),
-                ),
-                const PopupMenuItem(value: 'help', child: Text('Drawing help')),
-                if (LinuxUpdater.supported)
-                  const PopupMenuItem(
-                    value: 'updates',
-                    child: Text('Check for updates…'),
+                actions: [
+                  IconButton(
+                    tooltip: 'Open Aseprite',
+                    onPressed: e.busy ? null : open,
+                    icon: const Icon(Icons.folder_open),
                   ),
-              ],
-            ),
-          ],
-        ),
+                  IconButton(
+                    tooltip: 'Save Aseprite',
+                    onPressed: e.busy
+                        ? null
+                        : () {
+                            stop();
+                            fileAction('save');
+                          },
+                    icon: const Icon(Icons.save_outlined),
+                  ),
+                  PopupMenuButton<String>(
+                    tooltip: 'Project and view options',
+                    enabled: !e.busy,
+                    onSelected: menu,
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(
+                        value: 'new',
+                        child: Text('New canvas'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'saveAs',
+                        child: Text('Save as…'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'drafts',
+                        child: Text('Internal drafts…'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'exportPng',
+                        child: Text('Export…'),
+                      ),
+                      const PopupMenuDivider(),
+                      CheckedPopupMenuItem(
+                        value: 'grid',
+                        checked: grid,
+                        child: const Text('Pixel grid'),
+                      ),
+                      CheckedPopupMenuItem(
+                        value: 'onion',
+                        checked: onion,
+                        child: const Text('Onion skin'),
+                      ),
+                      CheckedPopupMenuItem(
+                        value: 'viewNormal',
+                        checked: canvasViewMode == CanvasViewMode.normal,
+                        child: const Text('View · Normal'),
+                      ),
+                      CheckedPopupMenuItem(
+                        value: 'viewTiled',
+                        checked: canvasViewMode == CanvasViewMode.tiled,
+                        child: const Text('View · Tiled (3×3)'),
+                      ),
+                      CheckedPopupMenuItem(
+                        value: 'viewSlide',
+                        checked: canvasViewMode == CanvasViewMode.slide,
+                        child: const Text('View · Slide'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'fit',
+                        child: Text('Fit canvas'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'flipHorizontal',
+                        child: Text('Flip active cel horizontally'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'flipVertical',
+                        child: Text('Flip active cel vertically'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'metadata',
+                        child: Text('User data'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'defaultUserData',
+                        child: Text('Default user data'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'help',
+                        child: Text('Drawing help'),
+                      ),
+                      if (LinuxUpdater.supported)
+                        const PopupMenuItem(
+                          value: 'updates',
+                          child: Text('Check for updates…'),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
         body: SafeArea(
           top: false,
           child: Column(
@@ -880,12 +913,16 @@ class _EditorScreenState extends State<EditorScreen>
               if (recoveryIssue != null) recoveryBanner(),
               Expanded(
                 child: ResponsiveEditorShell(
-                  documentTabs: DocumentTabs(
-                    editor: e,
-                    onNew: () => newProject(),
-                    onOpen: () => open(),
-                    beforeSwitch: beforeDocumentSwitch,
-                  ),
+                  documentTabs:
+                      panel == 'tags' &&
+                          MediaQuery.viewInsetsOf(context).bottom > 0
+                      ? null
+                      : DocumentTabs(
+                          editor: e,
+                          onNew: () => newProject(),
+                          onOpen: () => open(),
+                          beforeSwitch: beforeDocumentSwitch,
+                        ),
                   canvas: Column(
                     children: [
                       paletteStrip(),
@@ -896,7 +933,7 @@ class _EditorScreenState extends State<EditorScreen>
                   tools: toolRail(),
                   layers: layerPanel(),
                   timeline: wideTimeline(),
-                  timelineHeight: panel == 'tags' ? 260 : 168,
+                  timelineHeight: panel == 'tags' ? 288 : 168,
                   mobileBody: Column(
                     children: [
                       SizedBox(
@@ -957,25 +994,41 @@ class _EditorScreenState extends State<EditorScreen>
                           ),
                         ),
                       Expanded(
-                        child: compactTags ? tagPanel() : drawingCanvas(),
-                      ),
-                      if (panel != null && !compactTags)
-                        SizedBox(
-                          height: panel == 'frames'
-                              ? 120
-                              : panel == 'tags'
-                              ? 280
-                              : compactHeight
-                              ? (MediaQuery.sizeOf(context).height - 210)
-                                    .clamp(130.0, 180.0)
-                                    .toDouble()
-                              : 180,
-                          child: panel == 'layers'
-                              ? layerPanel()
-                              : panel == 'frames'
-                              ? framePanel()
-                              : tagPanel(),
+                        child: LayoutBuilder(
+                          builder: (context, box) {
+                            final tagHeight = (box.maxHeight * .78).clamp(
+                              0.0,
+                              tightTagKeyboard ? 132.0 : 248.0,
+                            );
+                            final panelHeight = panel == 'tags'
+                                ? tagHeight
+                                : panel == 'frames'
+                                ? 120.0
+                                : panel == 'layers'
+                                ? (box.maxHeight * .6).clamp(0.0, 180.0)
+                                : 0.0;
+                            return Column(
+                              children: [
+                                Expanded(child: drawingCanvas()),
+                                SizedBox(
+                                  height: panelHeight,
+                                  child: Stack(
+                                    children: [
+                                      if (panel == 'layers') layerPanel(),
+                                      if (panel == 'frames') framePanel(),
+                                      // Retain unfinished names while changing panels.
+                                      Offstage(
+                                        offstage: panel != 'tags',
+                                        child: tagPanel(),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
                         ),
+                      ),
                       if (!hideDrawingStrips && !tightHeight) paletteStrip(),
                       if (!hideDrawingStrips &&
                           !tightHeight &&
@@ -1075,6 +1128,9 @@ class _EditorScreenState extends State<EditorScreen>
                 control: true,
               ): () {
                 if (!e.busy) open();
+              },
+              const SingleActivator(LogicalKeyboardKey.f2): () {
+                if (panel == 'tags') _tagEditorKey.currentState?.rename();
               },
               const SingleActivator(LogicalKeyboardKey.keyB): () =>
                   chooseTool('pencil'),
@@ -1525,11 +1581,11 @@ class _EditorScreenState extends State<EditorScreen>
         child: Row(
           children: [
             TextButton(
-              onPressed: () => setState(() => panel = 'frames'),
+              onPressed: () => changePanel('frames'),
               child: const Text('Frames'),
             ),
             TextButton(
-              onPressed: () => setState(() => panel = 'tags'),
+              onPressed: () => changePanel('tags'),
               child: const Text('Tags'),
             ),
             const Spacer(),
@@ -1545,17 +1601,30 @@ class _EditorScreenState extends State<EditorScreen>
           ],
         ),
       ),
-      Expanded(child: panel == 'tags' ? tagPanel() : framePanel()),
+      Expanded(
+        child: Stack(
+          children: [
+            if (panel != 'tags') framePanel(),
+            Offstage(offstage: panel != 'tags', child: tagPanel()),
+          ],
+        ),
+      ),
     ],
   );
 
+  void changePanel(String? value) {
+    stop();
+    _tagEditorKey.currentState?.pauseEditing();
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      panel = value;
+      editingText = false;
+    });
+  }
+
   Widget panelButton(String key, IconData icon, String label) => Expanded(
     child: TextButton(
-      onPressed: () {
-        stop();
-        FocusManager.instance.primaryFocus?.unfocus();
-        setState(() => panel = panel == key ? null : key);
-      },
+      onPressed: () => changePanel(panel == key ? null : key),
       style: TextButton.styleFrom(
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
         minimumSize: const Size(0, 48),
@@ -1749,11 +1818,10 @@ class _EditorScreenState extends State<EditorScreen>
     key: _tagEditorKey,
     editor: e,
     selectedTag: selectedTag,
-    playing: playing,
     onSelected: (index) => setState(() => selectedTag = index),
     onEdit: edit,
     onStop: stop,
-    onPlay: () => play(),
+    active: panel == 'tags',
     onEditingChanged: (value) {
       if (mounted) setState(() => editingText = value);
     },

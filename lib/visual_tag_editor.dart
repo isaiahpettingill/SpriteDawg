@@ -1,33 +1,33 @@
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
+import 'package:flutter/services.dart';
 
 import 'editor.dart';
 
-enum _RangeTarget { browse, start, end }
-
-/// Aseprite tags remain ordinary named ranges: browsing tiles and playing an
-/// animation are viewer actions, never new file types or automatic renames.
+/// Tags remain ordinary Aseprite ranges, useful for tiles and animations alike.
+/// The shell keeps this widget mounted when its panel is hidden, so a name draft
+/// is not silently discarded or committed by changing workspaces.
 class VisualTagEditor extends StatefulWidget {
   const VisualTagEditor({
     super.key,
     required this.editor,
     required this.selectedTag,
-    required this.playing,
     required this.onSelected,
     required this.onEdit,
-    required this.onPlay,
     required this.onStop,
     required this.onData,
     required this.onEditingChanged,
+    this.active = true,
   });
   final Editor editor;
   final int selectedTag;
-  final bool playing;
+  final bool active;
   final ValueChanged<int> onSelected;
   final Future<bool> Function(String, Map<String, dynamic>) onEdit;
-  final VoidCallback onPlay, onStop;
+  final VoidCallback onStop;
   final Future<void> Function(int) onData;
   final ValueChanged<bool> onEditingChanged;
   @override
@@ -35,22 +35,26 @@ class VisualTagEditor extends StatefulWidget {
 }
 
 class VisualTagEditorState extends State<VisualTagEditor> {
+  static const _frameWidth = 68.0, _gutter = 22.0;
   final _name = TextEditingController();
-  final _nameFocus = FocusNode();
-  final _frames = ScrollController();
-  bool _creating = false, _dirty = false, _working = false;
-  int _from = 0, _to = 0;
+  final _nameFocus = FocusNode(), _keyboardFocus = FocusNode();
+  final _frames = ScrollController(), _chips = ScrollController();
+  final _startFocus = FocusNode(), _endFocus = FocusNode();
+  final _stripKey = GlobalKey();
+  bool _creating = false, _naming = false, _working = false;
+  int _from = 0, _to = 0, _lastFrame = -1;
   String _signature = '';
-  _RangeTarget _target = _RangeTarget.browse;
+  Object? _document;
+  _RangeDrag? _drag;
+  Timer? _edgeScroll;
+
   Object? _tagSource;
   List<Map<String, dynamic>> _cachedTags = [];
   List<Map<String, dynamic>> get tags {
     final source = widget.editor.state['tags'];
     if (!identical(source, _tagSource)) {
       _tagSource = source;
-      _cachedTags = (source as List? ?? const [])
-          .map((tag) => Map<String, dynamic>.from(tag as Map))
-          .toList();
+      _cachedTags = widget.editor.maps('tags');
     }
     return _cachedTags;
   }
@@ -60,113 +64,199 @@ class VisualTagEditorState extends State<VisualTagEditor> {
       widget.selectedTag >= 0 && widget.selectedTag < tags.length
       ? widget.selectedTag
       : -1;
-  bool get editing => _creating || selected >= 0;
+  bool get hasRange => _creating || selected >= 0;
   bool get blocked => widget.editor.busy || _working;
-  @override
-  void initState() {
-    super.initState();
-    _nameFocus.addListener(() => widget.onEditingChanged(_nameFocus.hasFocus));
-    _load();
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) => _reveal(widget.editor.frame),
-    );
-  }
-
   String get signature => selected < 0
       ? ''
       : '${tags[selected]['name']}\u0000${tags[selected]['from']}:${tags[selected]['to']}';
-  void _load() {
-    _creating = false;
-    _dirty = false;
-    _target = _RangeTarget.browse;
-    if (selected >= 0) {
-      final tag = tags[selected];
-      _name.text = tag['name'] as String;
-      _from = tag['from'] as int;
-      _to = tag['to'] as int;
-    } else {
-      _name.text = '';
-      _from = 0;
-      _to = (count - 1).clamp(0, 4095);
-    }
-    _signature = signature;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameFocus.addListener(_focusChanged);
+    _load();
+    _lastFrame = widget.editor.frame;
+    _scheduleReveal();
   }
 
-  int _lastFrame = -1;
+  void _focusChanged() => widget.onEditingChanged(_nameFocus.hasFocus);
+
+  void _load() {
+    _creating = false;
+    _naming = false;
+    _name.text = selected >= 0 ? tags[selected]['name'] as String : '';
+    _from = selected >= 0 ? tags[selected]['from'] as int : 0;
+    _to = selected >= 0
+        ? tags[selected]['to'] as int
+        : (count - 1).clamp(0, 4095);
+    _signature = signature;
+    _document = widget.editor.state['documentId'];
+  }
+
   @override
   void didUpdateWidget(VisualTagEditor oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.selectedTag != widget.selectedTag ||
-        (!_dirty && !_creating && _signature != signature)) {
-      _load();
+    final changedDocument = _document != widget.editor.state['documentId'];
+    final changedSelection = oldWidget.selectedTag != widget.selectedTag;
+    if (_drag != null &&
+        (!widget.active ||
+            changedDocument ||
+            changedSelection ||
+            _drag!.revision != widget.editor.documentRevision)) {
+      _endDragTimer();
+      _drag = null;
+      if (!_creating) {
+        _from = selected >= 0 ? tags[selected]['from'] as int : 0;
+        _to = selected >= 0 ? tags[selected]['to'] as int : 0;
+      }
     }
-    if (_lastFrame != widget.editor.frame) {
-      _lastFrame = widget.editor.frame;
-      WidgetsBinding.instance.addPostFrameCallback((_) => _reveal(_lastFrame));
+    if (changedDocument ||
+        changedSelection ||
+        (_naming && !_creating && selected < 0) ||
+        (!_working && !_creating && !_naming && _signature != signature)) {
+      _load();
+    } else if (!_working && !_creating && selected >= 0 && _drag == null) {
+      // Undo or another edit may change a range while its name is being typed.
+      // Keep the draft name, but never write stale endpoints back over that edit.
+      _from = tags[selected]['from'] as int;
+      _to = tags[selected]['to'] as int;
     }
     if (_from >= count || _to >= count) {
-      _load();
+      if (_creating && count > 0) {
+        _from = _from.clamp(0, count - 1);
+        _to = _to.clamp(_from, count - 1);
+      } else {
+        _load();
+      }
     }
+    if (_lastFrame != widget.editor.frame ||
+        (!oldWidget.active && widget.active) ||
+        changedSelection) {
+      _lastFrame = widget.editor.frame;
+      _scheduleReveal(
+        chips: changedSelection || !oldWidget.active,
+        focus: !oldWidget.active,
+      );
+    }
+  }
+
+  void _scheduleReveal({bool chips = true, bool focus = false}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !widget.active) return;
+      _reveal(widget.editor.frame);
+      if (chips) _revealTag();
+      if (focus) _keyboardFocus.requestFocus();
+    });
   }
 
   @override
   void dispose() {
+    _endDragTimer();
+    _nameFocus.removeListener(_focusChanged);
     _name.dispose();
     _nameFocus.dispose();
+    _keyboardFocus.dispose();
+    _startFocus.dispose();
+    _endFocus.dispose();
     _frames.dispose();
+    _chips.dispose();
     super.dispose();
   }
 
+  /// Panel navigation preserves the name draft but cancels an unfinished drag.
+  void pauseEditing() {
+    _cancelDrag();
+    _nameFocus.unfocus();
+  }
+
   void _reveal(int frame) {
-    if (!mounted || !_frames.hasClients) return;
-    final left = frame * 76.0;
+    if (!mounted || !_frames.hasClients || _drag != null) return;
+    final left = frame * _frameWidth + _gutter;
     final viewport = _frames.position.viewportDimension;
-    if (left < _frames.offset || left + 76 > _frames.offset + viewport) {
+    if (left < _frames.offset ||
+        left + _frameWidth > _frames.offset + viewport) {
       _frames.jumpTo(
-        (left - viewport / 2 + 38).clamp(0.0, _frames.position.maxScrollExtent),
+        (left - viewport / 2 + _frameWidth / 2).clamp(
+          0.0,
+          _frames.position.maxScrollExtent,
+        ),
       );
+    }
+  }
+
+  double _chipWidth(int index) => index < 0
+      ? 106
+      : ((tags[index]['name'] as String).length * 7.0 + 24).clamp(100.0, 184.0);
+
+  void _revealTag() {
+    if (!_chips.hasClients || _creating) return;
+    var left = 0.0;
+    for (var i = -1; i < selected; i++) {
+      left += _chipWidth(i);
+    }
+    final right = left + _chipWidth(selected);
+    if (left < _chips.offset ||
+        right > _chips.offset + _chips.position.viewportDimension) {
+      _chips.jumpTo(left.clamp(0.0, _chips.position.maxScrollExtent));
     }
   }
 
   void _notice(String value) => ScaffoldMessenger.of(
     context,
   ).showSnackBar(SnackBar(content: Text(value)));
-  Future<bool> savePending() => _save();
-  Future<bool> _save() async {
-    if (!editing || !_dirty) return true;
-    if (blocked) return false;
+
+  void _leaveName() {
+    _nameFocus.unfocus();
+    if (widget.active) _keyboardFocus.requestFocus();
+  }
+
+  Future<bool> savePending() async {
+    if (_drag != null || blocked) return false;
+    if (!_naming) return true;
     if (_name.text.trim().isEmpty) {
-      _notice('Give this tag a name.');
-      _nameFocus.requestFocus();
+      _notice(
+        widget.active
+            ? 'Give this tag a name, or cancel.'
+            : 'Open Tags to finish naming this tag, or cancel it.',
+      );
+      if (widget.active) _nameFocus.requestFocus();
       return false;
+    }
+    if (!_creating && selected < 0) return false;
+    if (!_creating && _name.text == tags[selected]['name']) {
+      setState(() => _naming = false);
+      _leaveName();
+      return true;
     }
     setState(() => _working = true);
     widget.onStop();
-    final index = selected;
-    final wasCreating = _creating;
-    final ok = await widget.onEdit(wasCreating ? 'addTag' : 'updateTag', {
-      if (!wasCreating) 'index': index,
+    final creating = _creating;
+    final ok = await widget.onEdit(creating ? 'addTag' : 'updateTag', {
+      if (!creating) 'index': selected,
       'name': _name.text,
-      'from': _from,
-      'to': _to,
+      if (creating) 'from': _from,
+      if (creating) 'to': _to,
     });
     if (!mounted) return ok;
-    setState(() => _working = false);
+    setState(() {
+      _working = false;
+      if (ok) {
+        _creating = false;
+        _naming = false;
+        _signature = signature;
+      }
+    });
     if (ok) {
-      _dirty = false;
-      _creating = false;
-      if (wasCreating) widget.onSelected(tags.length - 1);
-      _signature = signature;
-      _nameFocus.unfocus();
+      _leaveName();
+      if (creating) widget.onSelected(tags.length - 1);
     }
     return ok;
   }
 
   Future<void> _selectTag(int index) async {
-    if (blocked || !await _save()) return;
+    if (!await savePending() || !mounted) return;
     widget.onStop();
-    _nameFocus.unfocus();
-    setState(() => _creating = false);
+    _leaveName();
     widget.onSelected(index);
     if (index >= 0) {
       await widget.editor.call('select', {'frame': tags[index]['from']});
@@ -174,88 +264,326 @@ class VisualTagEditorState extends State<VisualTagEditor> {
   }
 
   Future<void> _add() async {
-    if (blocked || !await _save()) return;
+    if (count == 0 || !await savePending() || !mounted) return;
     widget.onStop();
     widget.onSelected(-1);
-    // onSelected updates the parent synchronously; create after its rebuild so
-    // didUpdateWidget cannot reset this new draft.
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
     setState(() {
       _creating = true;
-      _dirty = true;
+      _naming = true;
       _name.text = 'Tag';
       _from = widget.editor.frame;
       _to = _from;
-      _target = _RangeTarget.end;
     });
     _reveal(_from);
+    // Do not open the keyboard until the name is tapped: range handles and the
+    // artwork remain visible while extending a newly-created tag.
+  }
+
+  void rename() {
+    if (blocked || selected < 0 || _creating || _drag != null) return;
+    widget.onStop();
+    setState(() {
+      _naming = true;
+      _name.text = tags[selected]['name'] as String;
+      _name.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: _name.text.length,
+      );
+    });
+    _nameFocus.requestFocus();
+  }
+
+  void _cancelName() {
+    if (blocked) return;
+    _cancelDrag();
+    _leaveName();
+    setState(_load);
   }
 
   Future<void> _tapFrame(int frame) async {
-    if (blocked) return;
+    if (blocked || _drag != null) return;
     widget.onStop();
-    _nameFocus.unfocus();
-    if (editing && _target != _RangeTarget.browse) {
-      setState(() {
-        if (_target == _RangeTarget.start) {
-          _from = frame;
-          if (_to < _from) _to = _from;
-        } else {
-          _to = frame;
-          if (_from > _to) _from = _to;
-        }
-        _dirty = true;
-      });
+    _leaveName();
+    if (hasRange && HardwareKeyboard.instance.isShiftPressed) {
+      final anchor = widget.editor.frame;
+      await _setRange(
+        frame < anchor ? frame : anchor,
+        frame > anchor ? frame : anchor,
+      );
     }
     await widget.editor.call('select', {'frame': frame});
   }
 
-  Future<void> _step(int delta) async {
-    if (blocked || count == 0) return;
-    widget.onStop();
-    _target = _RangeTarget.browse;
-    final from = editing ? _from : 0, to = editing ? _to : count - 1;
-    final current = widget.editor.frame;
-    final next = delta > 0
-        ? (current < from || current >= to ? from : current + 1)
-        : (current <= from || current > to ? to : current - 1);
-    await _tapFrame(next);
+  Future<void> _setRange(int from, int to) async {
+    if (blocked || !hasRange || (_from == from && _to == to)) return;
+    final oldFrom = _from, oldTo = _to;
+    setState(() {
+      _from = from;
+      _to = to;
+    });
+    if (_creating) return;
+    setState(() => _working = true);
+    final ok = await widget.onEdit('updateTag', {
+      'index': selected,
+      'from': from,
+      'to': to,
+    });
+    if (!mounted) return;
+    setState(() {
+      _working = false;
+      if (!ok) {
+        _from = oldFrom;
+        _to = oldTo;
+      }
+      _signature = signature;
+    });
   }
 
-  Future<void> _duplicate() async {
-    if (blocked || selected < 0 || !await _save()) return;
-    final index = selected;
-    if (await widget.onEdit('duplicateTag', {'index': index}) && mounted) {
-      widget.onSelected(tags.length - 1);
+  void _startDrag(bool start, PointerDownEvent event) {
+    if (blocked || !hasRange || _drag != null) return;
+    widget.onStop();
+    _nameFocus.unfocus();
+    (start ? _startFocus : _endFocus).requestFocus();
+    _drag = _RangeDrag(
+      start,
+      _from,
+      _to,
+      event.pointer,
+      event.position.dx,
+      _frames.offset,
+      widget.editor.documentRevision,
+    );
+    _edgeScroll = Timer.periodic(const Duration(milliseconds: 40), (_) {
+      final drag = _drag;
+      final box = _stripKey.currentContext?.findRenderObject() as RenderBox?;
+      if (drag == null || !drag.moved || box == null || !_frames.hasClients) {
+        return;
+      }
+      final local = box.globalToLocal(Offset(drag.latestX, 0)).dx;
+      final delta = local < 36
+          ? -12.0
+          : local > box.size.width - 36
+          ? 12.0
+          : 0.0;
+      if (delta == 0) return;
+      final offset = (_frames.offset + delta).clamp(
+        0.0,
+        _frames.position.maxScrollExtent,
+      );
+      if (offset != _frames.offset) {
+        _frames.jumpTo(offset);
+        _updateDrag(drag.latestX);
+      }
+    });
+  }
+
+  void _updateDrag(double x) {
+    final drag = _drag;
+    if (drag == null || count == 0) return;
+    drag.latestX = x;
+    if ((x - drag.x).abs() > 4) drag.moved = true;
+    final delta = ((x - drag.x + _frames.offset - drag.offset) / _frameWidth)
+        .round();
+    setState(() {
+      if (drag.start) {
+        _from = (drag.from + delta).clamp(0, drag.to);
+      } else {
+        _to = (drag.to + delta).clamp(drag.from, count - 1);
+      }
+    });
+  }
+
+  void _endDragTimer() {
+    _edgeScroll?.cancel();
+    _edgeScroll = null;
+  }
+
+  void _cancelDrag() {
+    final drag = _drag;
+    _endDragTimer();
+    if (drag == null) return;
+    setState(() {
+      _from = drag.from;
+      _to = drag.to;
+      _drag = null;
+    });
+  }
+
+  Future<void> _finishDrag() async {
+    final drag = _drag;
+    _endDragTimer();
+    if (drag == null) return;
+    final from = _from, to = _to;
+    _drag = null;
+    // Restore the baseline before using the shared single-transaction path.
+    _from = drag.from;
+    _to = drag.to;
+    await _setRange(from, to);
+  }
+
+  Future<void> _nudge(bool start, int delta) async {
+    if (blocked || _drag != null || !hasRange) return;
+    widget.onStop();
+    await _setRange(
+      start ? (_from + delta).clamp(0, _to) : _from,
+      start ? _to : (_to + delta).clamp(_from, count - 1),
+    );
+    _reveal(start ? _from : _to);
+  }
+
+  Future<void> _options(String action) async {
+    if (action == 'rename') {
+      rename();
+      return;
+    }
+    if (!await savePending() || !mounted) return;
+    widget.onStop();
+    if (action == 'data') {
+      await widget.onData(selected);
+    } else if (action == 'playback') {
+      await _playbackOptions();
+    } else if (action == 'duplicate') {
+      if (await widget.onEdit('duplicateTag', {'index': selected}) && mounted) {
+        widget.onSelected(tags.length - 1);
+      }
+    } else if (action == 'delete') {
+      if (await widget.onEdit('deleteTag', {'index': selected}) && mounted) {
+        widget.onSelected(-1);
+      }
+    } else if (action == 'undo') {
+      await widget.editor.call('undo');
+    } else if (action == 'copy') {
+      if (await widget.editor.call('copyTag', {'index': selected}) && mounted) {
+        _notice('Frames and tag copied. Choose a document, then paste.');
+      }
+    } else if (action == 'clear') {
+      await widget.editor.call('clearTagClipboard');
+    } else {
+      final ok = await widget.editor.call(
+        'pasteTag',
+        action == 'new' ? {'asNew': true} : {'after': widget.editor.frame},
+      );
+      if (ok && mounted) widget.onSelected(tags.length - 1);
     }
   }
 
-  Widget _tagChip(int index, String name, String range) {
-    final active = !_creating && selected == index;
-    return Semantics(
-      button: true,
-      selected: active,
-      label: '$name, $range',
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 2),
-        child: SizedBox(
-          height: 48,
-          width: index < 0 ? 94 : 148,
-          child: TextButton(
-            onPressed: blocked ? null : () => _selectTag(index),
-            style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              backgroundColor: active
-                  ? Theme.of(context).colorScheme.primaryContainer
-                  : null,
-            ),
+  Future<void> _playbackOptions() async {
+    final index = selected;
+    if (index < 0) return;
+    var direction = tags[index]['direction'] as int? ?? 0;
+    var repeat = '${tags[index]['repeat'] ?? 0}';
+    final form = GlobalKey<FormState>();
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          title: const Text('Tag playback'),
+          content: Form(
+            key: form,
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
-                Text(range, style: const TextStyle(fontSize: 10), maxLines: 1),
+                DropdownButtonFormField<int>(
+                  initialValue: direction,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Direction'),
+                  items: [
+                    for (final entry in (const {
+                      0: 'Forward',
+                      1: 'Reverse',
+                      2: 'Ping-pong',
+                      3: 'Reverse ping-pong',
+                    }).entries)
+                      DropdownMenuItem(
+                        value: entry.key,
+                        child: Text(entry.value),
+                      ),
+                  ],
+                  onChanged: (value) => update(() => direction = value!),
+                ),
+                TextFormField(
+                  key: const Key('tag-repeat'),
+                  initialValue: repeat,
+                  onChanged: (value) => repeat = value,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Repeat (0 = forever)',
+                  ),
+                  validator: (value) {
+                    final n = int.tryParse(value ?? '');
+                    return n == null || n < 0 || n > 65535
+                        ? 'Enter 0–65535'
+                        : null;
+                  },
+                ),
               ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                if (form.currentState!.validate()) Navigator.pop(context, true);
+              },
+              child: const Text('Done'),
+            ),
+          ],
+        ),
+      ),
+    );
+    final repetitions = int.tryParse(repeat);
+    if (result == true && mounted) {
+      await widget.onEdit('updateTag', {
+        'index': index,
+        'direction': direction,
+        'repeat': repetitions,
+      });
+    }
+  }
+
+  Widget _tagChip(int index) {
+    final name = index < 0 ? 'All frames' : tags[index]['name'] as String;
+    final range = index < 0
+        ? '$count frames'
+        : '${(tags[index]['from'] as int) + 1}–${(tags[index]['to'] as int) + 1}';
+    final active = !_creating && selected == index;
+    return SizedBox(
+      width: _chipWidth(index),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 3),
+        child: Tooltip(
+          message: '$name · $range',
+          child: Semantics(
+            selected: active,
+            child: TextButton(
+              key: Key('tag-chip-$index'),
+              onPressed: blocked ? null : () => _selectTag(index),
+              onLongPress: active && index >= 0 ? rename : null,
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                backgroundColor: active
+                    ? Theme.of(context).colorScheme.primaryContainer
+                    : null,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  Text(
+                    range,
+                    style: const TextStyle(fontSize: 10),
+                    maxLines: 1,
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -263,332 +591,297 @@ class VisualTagEditorState extends State<VisualTagEditor> {
     );
   }
 
-  Widget _control(
-    String label,
-    IconData icon,
-    VoidCallback? action, {
-    bool selected = false,
-    Key? key,
-  }) => SizedBox(
+  Widget _header() => SizedBox(
+    key: const Key('tag-header-row'),
     height: 48,
-    child: TextButton.icon(
-      key: key,
-      onPressed: action,
-      style: TextButton.styleFrom(
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        backgroundColor: selected
-            ? Theme.of(context).colorScheme.primaryContainer
-            : null,
-      ),
-      icon: Icon(icon, size: 18),
-      label: Text(label, maxLines: 1),
+    child: Row(
+      children: [
+        Expanded(
+          child: ListView.builder(
+            key: const Key('tag-chips'),
+            controller: _chips,
+            scrollDirection: Axis.horizontal,
+            itemCount: tags.length + 1,
+            itemBuilder: (_, index) => _tagChip(index - 1),
+          ),
+        ),
+        IconButton(
+          key: const Key('add-tag'),
+          tooltip: 'Add tag from current frame',
+          onPressed: blocked || count == 0 ? null : _add,
+          icon: const Icon(Icons.add),
+        ),
+        PopupMenuButton<String>(
+          key: const Key('tag-options'),
+          tooltip: 'Tag options',
+          enabled: !blocked && _drag == null,
+          onSelected: _options,
+          itemBuilder: (_) => [
+            if (selected >= 0 && !_creating) ...[
+              const PopupMenuItem(value: 'rename', child: Text('Rename tag')),
+              const PopupMenuItem(
+                value: 'duplicate',
+                child: Text('Duplicate tag label'),
+              ),
+              const PopupMenuItem(
+                value: 'copy',
+                child: Text('Copy frames + tag'),
+              ),
+              const PopupMenuItem(
+                value: 'playback',
+                child: Text('Direction and repeat…'),
+              ),
+              const PopupMenuItem(value: 'data', child: Text('User data')),
+            ],
+            PopupMenuItem(
+              value: 'after',
+              enabled: widget.editor.state['hasTagClipboard'] == true,
+              child: const Text('Paste after current frame'),
+            ),
+            PopupMenuItem(
+              value: 'new',
+              enabled: widget.editor.state['hasTagClipboard'] == true,
+              child: const Text('Paste as new document'),
+            ),
+            if (widget.editor.state['hasTagClipboard'] == true)
+              const PopupMenuItem(
+                value: 'clear',
+                child: Text('Clear copied tag'),
+              ),
+            if (widget.editor.canUndo)
+              const PopupMenuItem(value: 'undo', child: Text('Undo')),
+            if (selected >= 0 && !_creating)
+              const PopupMenuItem(value: 'delete', child: Text('Delete tag')),
+          ],
+        ),
+      ],
     ),
   );
+
+  Widget _nameRow() => SizedBox(
+    key: const Key('tag-name-row'),
+    height: 48,
+    child: Padding(
+      padding: const EdgeInsets.only(left: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              key: const Key('tag-name'),
+              controller: _name,
+              focusNode: _nameFocus,
+              enabled: !blocked,
+              textInputAction: TextInputAction.done,
+              decoration: InputDecoration(
+                isDense: true,
+                labelText: _creating ? 'New tag name' : 'Rename tag',
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 8,
+                ),
+                border: const OutlineInputBorder(),
+              ),
+              onSubmitted: (_) => savePending(),
+            ),
+          ),
+          TextButton(
+            key: const Key('save-tag'),
+            onPressed: blocked ? null : savePending,
+            child: const Text('Done'),
+          ),
+          TextButton(
+            key: const Key('cancel-tag'),
+            onPressed: blocked ? null : _cancelName,
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  int _endpoint(bool start, int delta) => start
+      ? (_from + delta).clamp(0, _to)
+      : (_to + delta).clamp(_from, count - 1);
+
+  Widget _handle(bool start, double center) => Positioned(
+    left: center - 22,
+    top: 0,
+    width: 44,
+    height: 44,
+    child: Semantics(
+      label: start ? 'Range start' : 'Range end',
+      value: '${_endpoint(start, 0) + 1}',
+      increasedValue: '${_endpoint(start, 1) + 1}',
+      decreasedValue: '${_endpoint(start, -1) + 1}',
+      onIncrease: blocked ? null : () => _nudge(start, 1),
+      onDecrease: blocked ? null : () => _nudge(start, -1),
+      child: Focus(
+        focusNode: start ? _startFocus : _endFocus,
+        onKeyEvent: (_, event) {
+          if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+            return KeyEventResult.ignored;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
+              event.logicalKey == LogicalKeyboardKey.arrowRight) {
+            _nudge(
+              start,
+              event.logicalKey == LogicalKeyboardKey.arrowLeft ? -1 : 1,
+            );
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.escape && _drag != null) {
+            _cancelDrag();
+            return KeyEventResult.handled;
+          }
+          return KeyEventResult.ignored;
+        },
+        child: Tooltip(
+          message:
+              'Drag ${start ? 'start' : 'end'} · frame ${(start ? _from : _to) + 1}',
+          child: MouseRegion(
+            cursor: SystemMouseCursors.resizeLeftRight,
+            child: Listener(
+              key: Key(start ? 'tag-start-handle' : 'tag-end-handle'),
+              behavior: HitTestBehavior.opaque,
+              onPointerDown: (event) => _startDrag(start, event),
+              onPointerMove: (event) {
+                if (_drag?.pointer == event.pointer) {
+                  _updateDrag(event.position.dx);
+                }
+              },
+              onPointerUp: (event) {
+                if (_drag?.pointer == event.pointer) _finishDrag();
+              },
+              onPointerCancel: (event) {
+                if (_drag?.pointer == event.pointer) _cancelDrag();
+              },
+              child: Center(
+                child: Container(
+                  width: 24,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primary,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Icon(
+                    start ? Icons.chevron_left : Icons.chevron_right,
+                    size: 20,
+                    color: Theme.of(context).colorScheme.onPrimary,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  Widget _strip() => SizedBox(
+    key: _stripKey,
+    child: AnimatedBuilder(
+      animation: _frames,
+      builder: (context, _) {
+        final offset = _frames.hasClients ? _frames.offset : 0.0;
+        final start = _from * _frameWidth + _gutter - offset;
+        final end = (_to + 1) * _frameWidth + _gutter - offset;
+        return Stack(
+          clipBehavior: Clip.hardEdge,
+          children: [
+            Positioned.fill(
+              top: hasRange ? 44 : 0,
+              child: ListView.builder(
+                scrollCacheExtent: ScrollCacheExtent.pixels(152),
+                key: const Key('tag-frame-strip'),
+                controller: _frames,
+                padding: const EdgeInsets.symmetric(horizontal: _gutter),
+                scrollDirection: Axis.horizontal,
+                itemExtent: _frameWidth,
+                itemCount: count,
+                itemBuilder: (context, index) => _FrameCard(
+                  editor: widget.editor,
+                  frame: index,
+                  inRange: hasRange && index >= _from && index <= _to,
+                  current: index == widget.editor.frame,
+                  start: hasRange && index == _from,
+                  end: hasRange && index == _to,
+                  onTap: blocked ? null : () => _tapFrame(index),
+                ),
+              ),
+            ),
+            if (hasRange) ...[
+              Positioned(
+                left: start,
+                top: 20,
+                width: end - start,
+                height: 4,
+                child: ColoredBox(color: Theme.of(context).colorScheme.primary),
+              ),
+              Positioned(
+                left: start + 22,
+                top: 0,
+                width: (end - start - 44).clamp(0.0, double.infinity),
+                height: 20,
+                child: IgnorePointer(
+                  child: Center(
+                    child: Text(
+                      '${_from + 1}–${_to + 1}',
+                      maxLines: 1,
+                      style: const TextStyle(fontSize: 10),
+                    ),
+                  ),
+                ),
+              ),
+              _handle(true, start),
+              _handle(false, end),
+            ],
+          ],
+        );
+      },
+    ),
+  );
+
   @override
-  Widget build(BuildContext context) {
-    final canStep = count > 1 && (!editing || _to > _from);
-    return Material(
+  Widget build(BuildContext context) => Focus(
+    focusNode: _keyboardFocus,
+    canRequestFocus: widget.active,
+    child: Material(
       color: const Color(0xff1c2331),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          // Four compact rows fit a 320px-high landscape phone after app chrome.
-          const rowHeight = 48.0;
-          final rows = <Widget>[
-            SizedBox(
-              height: rowHeight,
-              child: Row(
-                children: [
-                  Expanded(
-                    child: ListView.builder(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: tags.length + 1,
-                      itemBuilder: (context, item) {
-                        if (item == 0) {
-                          return _tagChip(-1, 'All frames', '$count frames');
-                        }
-                        final i = item - 1;
-                        return _tagChip(
-                          i,
-                          tags[i]['name'] as String,
-                          '${(tags[i]['from'] as int) + 1}–${(tags[i]['to'] as int) + 1}',
-                        );
-                      },
-                    ),
-                  ),
-                  PopupMenuButton<String>(
-                    tooltip: 'Copy or paste tagged section',
-                    enabled: !blocked,
-                    icon: const Icon(Icons.content_paste),
-                    onSelected: (action) async {
-                      if (!await _save() || !mounted) return;
-                      widget.onStop();
-                      if (action == 'copy') {
-                        final copied = await widget.editor.call('copyTag', {
-                          'index': selected,
-                        });
-                        if (copied && mounted) {
-                          _notice(
-                            'Tagged frames copied. Choose a document, then paste.',
-                          );
-                        }
-                      } else if (action == 'clear') {
-                        await widget.editor.call('clearTagClipboard');
-                      } else {
-                        final ok = await widget.editor.call(
-                          'pasteTag',
-                          action == 'new'
-                              ? {'asNew': true}
-                              : {'after': widget.editor.frame},
-                        );
-                        if (ok && mounted) widget.onSelected(tags.length - 1);
-                      }
-                    },
-                    itemBuilder: (_) => [
-                      PopupMenuItem(
-                        value: 'copy',
-                        enabled: selected >= 0 && !_creating,
-                        child: const Text('Copy tagged section'),
-                      ),
-                      PopupMenuItem(
-                        value: 'after',
-                        enabled: widget.editor.state['hasTagClipboard'] == true,
-                        child: const Text('Paste after current frame'),
-                      ),
-                      PopupMenuItem(
-                        value: 'new',
-                        enabled: widget.editor.state['hasTagClipboard'] == true,
-                        child: const Text('Paste as new document'),
-                      ),
-                      PopupMenuItem(
-                        value: 'clear',
-                        enabled: widget.editor.state['hasTagClipboard'] == true,
-                        child: const Text('Clear copied tag'),
-                      ),
-                    ],
-                  ),
-                  IconButton(
-                    key: const Key('add-tag'),
-                    tooltip: 'Add tag from current frame',
-                    onPressed: blocked ? null : _add,
-                    icon: const Icon(Icons.add),
-                  ),
-                ],
-              ),
-            ),
-            SizedBox(
-              height: rowHeight,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: editing
-                          ? TextField(
-                              key: const Key('tag-name'),
-                              controller: _name,
-                              focusNode: _nameFocus,
-                              enabled: !blocked,
-                              textInputAction: TextInputAction.done,
-                              decoration: InputDecoration(
-                                isDense: true,
-                                labelText: _creating
-                                    ? 'New tag name'
-                                    : 'Tag name',
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 8,
-                                ),
-                                border: const OutlineInputBorder(),
-                              ),
-                              onChanged: (_) => setState(() => _dirty = true),
-                              onSubmitted: (_) => _save(),
-                            )
-                          : const Text(
-                              'Choose a tag, or add one.\nTags can group tiles or animation frames.',
-                              style: TextStyle(fontSize: 12),
-                            ),
-                    ),
-                    if (editing)
-                      IconButton(
-                        key: const Key('save-tag'),
-                        tooltip: _creating
-                            ? 'Create tag'
-                            : _dirty
-                            ? 'Save tag changes'
-                            : 'Tag saved',
-                        onPressed: blocked || !_dirty ? null : _save,
-                        icon: Icon(_dirty ? Icons.check_circle : Icons.check),
-                      ),
-                    if (selected >= 0 && !_creating)
-                      IconButton(
-                        key: const Key('duplicate-tag'),
-                        tooltip: 'Duplicate tag, preserving metadata',
-                        onPressed: blocked ? null : _duplicate,
-                        icon: const Icon(Icons.copy),
-                      ),
-                    if (selected >= 0 && !_creating)
-                      PopupMenuButton<String>(
-                        tooltip: 'Tag options',
-                        enabled: !blocked,
-                        onSelected: (action) async {
-                          if (!await _save() || !mounted) return;
-                          if (action == 'data') {
-                            await widget.onData(selected);
-                          } else if (action == 'undo') {
-                            widget.onStop();
-                            await widget.editor.call('undo');
-                          } else if (action == 'delete') {
-                            if (await widget.onEdit('deleteTag', {
-                                  'index': selected,
-                                }) &&
-                                mounted) {
-                              widget.onSelected(-1);
-                            }
-                          }
-                        },
-                        itemBuilder: (_) => [
-                          const PopupMenuItem(
-                            value: 'data',
-                            child: Text('User data'),
-                          ),
-                          if (widget.editor.canUndo)
-                            const PopupMenuItem(
-                              value: 'undo',
-                              child: Text('Undo'),
-                            ),
-                          const PopupMenuItem(
-                            value: 'delete',
-                            child: Text('Delete tag'),
-                          ),
-                        ],
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            SizedBox(
-              height: rowHeight,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    _control(
-                      'Browse',
-                      Icons.touch_app,
-                      blocked
-                          ? null
-                          : () {
-                              widget.onStop();
-                              setState(() => _target = _RangeTarget.browse);
-                            },
-                      selected:
-                          _target == _RangeTarget.browse && !widget.playing,
-                      key: const Key('browse-tag'),
-                    ),
-                    if (editing)
-                      _control(
-                        'Start ${_from + 1}',
-                        Icons.first_page,
-                        blocked
-                            ? null
-                            : () {
-                                widget.onStop();
-                                setState(() => _target = _RangeTarget.start);
-                              },
-                        selected: _target == _RangeTarget.start,
-                        key: const Key('tag-start'),
-                      ),
-                    if (editing)
-                      _control(
-                        'End ${_to + 1}',
-                        Icons.last_page,
-                        blocked
-                            ? null
-                            : () {
-                                widget.onStop();
-                                setState(() => _target = _RangeTarget.end);
-                              },
-                        selected: _target == _RangeTarget.end,
-                        key: const Key('tag-end'),
-                      ),
-                    IconButton(
-                      tooltip: 'Previous frame in range',
-                      onPressed: blocked || !canStep ? null : () => _step(-1),
-                      icon: const Icon(Icons.chevron_left),
-                    ),
-                    IconButton(
-                      tooltip: 'Next frame in range',
-                      onPressed: blocked || !canStep ? null : () => _step(1),
-                      icon: const Icon(Icons.chevron_right),
-                    ),
-                    _control(
-                      widget.playing ? 'Stop' : 'Play range',
-                      widget.playing ? Icons.pause_circle : Icons.play_circle,
-                      blocked || !canStep
-                          ? null
-                          : () async {
-                              if (widget.playing) {
-                                widget.onStop();
-                              } else if (await _save()) {
-                                widget.onPlay();
-                              }
-                            },
-                      selected: widget.playing,
-                      key: const Key('play-tag'),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ];
-          final strip = Semantics(
-            label: _target == _RangeTarget.start
-                ? 'Tap a frame to set the range start'
-                : _target == _RangeTarget.end
-                ? 'Tap a frame to set the range end'
-                : 'Browse frames; selected range is highlighted',
-            child: ListView.builder(
-              scrollCacheExtent: ScrollCacheExtent.pixels(152),
-              key: const Key('tag-frame-strip'),
-              controller: _frames,
-              scrollDirection: Axis.horizontal,
-              itemExtent: 76,
-              itemCount: count,
-              itemBuilder: (context, index) => _FrameCard(
-                editor: widget.editor,
-                frame: index,
-                inRange: editing && index >= _from && index <= _to,
-                current: index == widget.editor.frame,
-                start: editing && index == _from,
-                end: editing && index == _to,
-                onTap: blocked ? null : () => _tapFrame(index),
-              ),
-            ),
-          );
-          if (constraints.maxHeight < 208) {
-            final previewHeight = (constraints.maxHeight * .4).clamp(
-              40.0,
-              72.0,
-            );
-            return Column(
-              children: [
-                Expanded(
-                  child: SingleChildScrollView(child: Column(children: rows)),
-                ),
-                SizedBox(height: previewHeight, child: strip),
-              ],
-            );
+          // Hidden panels stay mounted with zero height to retain pending names.
+          if (constraints.maxHeight < 1 || !widget.active) {
+            return const SizedBox.shrink();
           }
+          final compact = constraints.maxHeight < 200;
           return Column(
             children: [
-              ...rows,
-              Expanded(child: strip),
+              if (!_naming || !compact) _header(),
+              if (_naming) _nameRow(),
+              Expanded(child: _strip()),
             ],
           );
         },
       ),
-    );
-  }
+    ),
+  );
+}
+
+class _RangeDrag {
+  _RangeDrag(
+    this.start,
+    this.from,
+    this.to,
+    this.pointer,
+    this.x,
+    this.offset,
+    this.revision,
+  ) : latestX = x;
+  final bool start;
+  final int from, to, pointer, revision;
+  final double x, offset;
+  double latestX;
+  bool moved = false;
 }
 
 class _FrameCard extends StatefulWidget {
