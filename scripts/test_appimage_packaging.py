@@ -1,6 +1,7 @@
 """Offline packaging-contract tests; native AppImage and GUI tests run in CI."""
 import hashlib
 import importlib.util
+import os
 from pathlib import Path
 import platform
 import shutil
@@ -72,7 +73,18 @@ for path in root.glob('*.AppImage'): path.chmod(0o755)
             (bundle / 'spritedawg').chmod(0o755)
             (bundle / 'lib/libflutter_avif.so').write_bytes(b'codec')
             (bundle / 'data/flutter_assets/fixture').write_bytes(b'flutter assets')
-            subprocess.run(['bash', 'scripts/package-linux.sh', arch, '0.3.99'], cwd=root, check=True, capture_output=True)
+            # This is a packaging-contract fixture, not native tool validation.
+            # The version-planning job intentionally has no GTK/desktop packages.
+            commands = root / 'fixture-bin'
+            commands.mkdir()
+            validator = commands / 'desktop-file-validate'
+            validator.write_text('#!/bin/sh\nexit 0\n')
+            validator.chmod(0o755)
+            result = subprocess.run(
+                ['bash', 'scripts/package-linux.sh', arch, '0.3.99'], cwd=root,
+                env={**os.environ, 'PATH': str(commands) + ':' + os.environ['PATH']},
+                capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             appdir = root / f'build/SpriteDawg-{arch}.AppDir'
             self.assertEqual((appdir / 'usr/bin/release-version.txt').read_text(), 'v0.3.99\n')
             self.assertEqual((appdir / 'usr/bin/data/flutter_assets/fixture').read_bytes(), b'flutter assets')
