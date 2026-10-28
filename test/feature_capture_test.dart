@@ -156,10 +156,16 @@ void main() {
         expect(tester.takeException(), isNull);
         if (const bool.fromEnvironment('CAPTURE_UI')) {
           await tester.runAsync(() async {
-            final boundary = key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+            final boundary =
+                key.currentContext!.findRenderObject()!
+                    as RenderRepaintBoundary;
             final image = await boundary.toImage(pixelRatio: 1);
-            final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-            await File('build/ui/${entry.key}-tags-keyboard.png').writeAsBytes(bytes!.buffer.asUint8List());
+            final bytes = await image.toByteData(
+              format: ui.ImageByteFormat.png,
+            );
+            await File(
+              'build/ui/${entry.key}-tags-keyboard.png',
+            ).writeAsBytes(bytes!.buffer.asUint8List());
             image.dispose();
           });
         }

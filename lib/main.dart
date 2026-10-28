@@ -516,7 +516,9 @@ class _EditorScreenState extends State<EditorScreen>
     final startingPanel = panel;
     bool ready;
     try {
-      ready = await (_tagEditorKey.currentState?.savePending() ?? Future.value(true));
+      ready =
+          await (_tagEditorKey.currentState?.savePending() ??
+              Future.value(true));
     } finally {
       _startingPlayback = false;
     }
@@ -884,7 +886,9 @@ class _EditorScreenState extends State<EditorScreen>
               if (recoveryIssue != null) recoveryBanner(),
               Expanded(
                 child: ResponsiveEditorShell(
-                  documentTabs: panel == 'tags' && MediaQuery.viewInsetsOf(context).bottom > 0
+                  documentTabs:
+                      panel == 'tags' &&
+                          MediaQuery.viewInsetsOf(context).bottom > 0
                       ? null
                       : DocumentTabs(
                           editor: e,
@@ -961,28 +965,40 @@ class _EditorScreenState extends State<EditorScreen>
                           ),
                         ),
                       Expanded(
-                        child: LayoutBuilder(builder: (context, box) {
-                          final tagHeight = (box.maxHeight * .78).clamp(0.0, 248.0);
-                          final panelHeight = panel == 'tags'
-                              ? tagHeight
-                              : panel == 'frames'
-                              ? 120.0
-                              : panel == 'layers'
-                              ? (box.maxHeight * .6).clamp(0.0, 180.0)
-                              : 0.0;
-                          return Column(children: [
-                            Expanded(child: drawingCanvas()),
-                            SizedBox(
-                              height: panelHeight,
-                              child: Stack(children: [
-                                if (panel == 'layers') layerPanel(),
-                                if (panel == 'frames') framePanel(),
-                                // Retain unfinished names while changing panels.
-                                Offstage(offstage: panel != 'tags', child: tagPanel()),
-                              ]),
-                            ),
-                          ]);
-                        }),
+                        child: LayoutBuilder(
+                          builder: (context, box) {
+                            final tagHeight = (box.maxHeight * .78).clamp(
+                              0.0,
+                              248.0,
+                            );
+                            final panelHeight = panel == 'tags'
+                                ? tagHeight
+                                : panel == 'frames'
+                                ? 120.0
+                                : panel == 'layers'
+                                ? (box.maxHeight * .6).clamp(0.0, 180.0)
+                                : 0.0;
+                            return Column(
+                              children: [
+                                Expanded(child: drawingCanvas()),
+                                SizedBox(
+                                  height: panelHeight,
+                                  child: Stack(
+                                    children: [
+                                      if (panel == 'layers') layerPanel(),
+                                      if (panel == 'frames') framePanel(),
+                                      // Retain unfinished names while changing panels.
+                                      Offstage(
+                                        offstage: panel != 'tags',
+                                        child: tagPanel(),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
                       ),
                       if (!hideDrawingStrips && !tightHeight)
                         SizedBox(
@@ -1581,10 +1597,14 @@ class _EditorScreenState extends State<EditorScreen>
           ],
         ),
       ),
-      Expanded(child: Stack(children: [
-        if (panel != 'tags') framePanel(),
-        Offstage(offstage: panel != 'tags', child: tagPanel()),
-      ])),
+      Expanded(
+        child: Stack(
+          children: [
+            if (panel != 'tags') framePanel(),
+            Offstage(offstage: panel != 'tags', child: tagPanel()),
+          ],
+        ),
+      ),
     ],
   );
 
@@ -1592,7 +1612,10 @@ class _EditorScreenState extends State<EditorScreen>
     stop();
     _tagEditorKey.currentState?.pauseEditing();
     FocusManager.instance.primaryFocus?.unfocus();
-    setState(() { panel = value; editingText = false; });
+    setState(() {
+      panel = value;
+      editingText = false;
+    });
   }
 
   Widget panelButton(String key, IconData icon, String label) => Expanded(
