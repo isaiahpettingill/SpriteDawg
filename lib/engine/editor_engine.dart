@@ -7,6 +7,7 @@ import 'document.dart';
 import 'default_user_data.dart';
 import 'palette_operations.dart';
 import 'palette_texture_brush.dart';
+import 'splatter_brush.dart';
 
 /// Portable Linux editing backend with exactly the Android channel contract.
 /// File picking, atomic recovery and PNG encoding belong to the platform adapter.
@@ -256,6 +257,7 @@ class EditorEngine {
         'rectangle',
         'ellipse',
         'spray',
+        'splatter',
         'airbrush',
         'blur',
         'jumble',
@@ -277,7 +279,7 @@ class EditorEngine {
     final size = _n(
           a,
           'size',
-          tool == 'spray' || tool == 'airbrush' ? 12 : 1,
+          tool == 'spray' || tool == 'airbrush' || tool == 'splatter' ? 12 : 1,
         ).clamp(1, 32),
         color = _n(a, 'color', 0xff000000);
     final gradient = tool == 'fill' && a['gradient'] == true,
@@ -315,6 +317,49 @@ class EditorEngine {
       tool != 'eraser' || document.layers[layer].flags & 8 == 0,
       'Convert background layer to transparent before erasing',
     );
+    if (tool == 'splatter') {
+      if (color >> 24 == 0) return;
+      final d = document, source = document.resolved(frame, layer);
+      final index = d.depth == 8
+          ? paletteIndex as int? ?? d.drawingColor(color, frame)
+          : null;
+      if (index != null && d.display(index, frame, layer) >> 24 == 0) return;
+      final pixels = splatterPixels(
+        points: points,
+        width: d.width,
+        height: d.height,
+        size: size,
+        seed: _n(a, 'seed', 1),
+        mirrorX: mirrorX,
+        mirrorY: mirrorY,
+      );
+      final changes = <int, int>{};
+      for (final entry in pixels.entries) {
+        final x = entry.key % d.width, y = entry.key ~/ d.width;
+        final sx = x - (source?.x ?? 0), sy = y - (source?.y ?? 0);
+        final original =
+            source != null && sx >= 0 && sy >= 0 &&
+                sx < source.width && sy < source.height
+            ? source.pixels[sy * source.width + sx]
+            : d.depth == 8 ? d.transparentIndex : 0;
+        // Indexed paint uses the exact selected entry, including its alpha.
+        // Only RGB/grayscale paint varies opacity; never synthesize indices.
+        final alpha = ((color >> 24) * entry.value + 127) ~/ 255;
+        if (index == null && alpha == 0) continue;
+        final ink = (color & 0xffffff) | (alpha << 24);
+        final value = index ?? d.drawingColor(over(original, ink), frame);
+        if (value != original) changes[entry.key] = value;
+      }
+      if (changes.isEmpty) return;
+      _mutate((d) {
+        final c = d.editable(frame, layer);
+        for (final entry in changes.entries) {
+          final x = entry.key % d.width, y = entry.key ~/ d.width;
+          c.pixels[(y - c.y) * c.width + x - c.x] = entry.value;
+        }
+      });
+      return;
+    }
     if (paletteTextureTools.contains(tool)) {
       final palette = document.frames[frame].palette;
       final transparent =

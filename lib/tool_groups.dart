@@ -13,6 +13,7 @@ const drawingToolGroups = <String, List<DrawingSubtool>>{
   'ink': [
     DrawingSubtool('pencil', 'Pencil', Icons.edit),
     DrawingSubtool('spray', 'Spray', Icons.grain),
+    DrawingSubtool('splatter', 'Splatter', Icons.bubble_chart),
     DrawingSubtool('airbrush', 'Airbrush', Icons.blur_circular),
     DrawingSubtool('ditherPaint', 'Dither Paint', Icons.gradient),
   ],
@@ -23,6 +24,7 @@ const drawingToolGroups = <String, List<DrawingSubtool>>{
     DrawingSubtool('sphere', 'Sphere', Icons.circle),
     DrawingSubtool('knife', 'Knife', Icons.architecture),
     DrawingSubtool('bark', 'Bark', Icons.forest),
+    DrawingSubtool('leaves', 'Leaves', Icons.eco),
   ],
   'eraser': [DrawingSubtool('eraser', 'Eraser', Icons.auto_fix_normal)],
   'fill': [
@@ -97,7 +99,9 @@ class DrawingToolGroupButton extends StatelessWidget {
       orElse: () => items.first,
     );
     final hasChoices = items.length > 1;
-    final help = item.label;
+    final help = item.id == 'splatter'
+        ? 'Splatter: variable alpha in RGB; exact palette alpha in indexed mode'
+        : item.label;
     return Builder(
       builder: (buttonContext) => Semantics(
         label: item.label,

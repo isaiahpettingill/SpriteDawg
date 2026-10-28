@@ -7,6 +7,7 @@ const paletteTextureTools = {
   'sphere',
   'knife',
   'bark',
+  'leaves',
   'ditherPaint',
   'ditherRetouch',
 };
@@ -215,6 +216,51 @@ Map<int, int> paletteTexturePixels({
     return 2;
   }
 
+  // A canvas-anchored canopy of overlapping pointed leaves. Jitter, length,
+  // orientation and layer order belong to a leaf, never to a stamp/pixel. The
+  // almond contour has a dark interior/vein and coherent light-facing rims.
+  int leaves(int x, int y) {
+    final cell = math.max(3.0, size / 4);
+    final u = x / cell, v = y / cell;
+    final gx = u.floor(), gy = v.floor();
+    var top = -1, shade = 0;
+    for (var cy = gy - 2; cy <= gy + 2; cy++) {
+      for (var cx = gx - 2; cx <= gx + 2; cx++) {
+        final h = hash(cx + 381, cy - 719);
+        final dx = u - (cx + .15 + (h % 701) / 1000);
+        final dy = v - (cy + .15 + ((h >> 10) % 701) / 1000);
+        final direction = (h >> 20) & 3;
+        final along = switch (direction) {
+          0 => dx,
+          1 => (dx + dy) * .7071067811865476,
+          2 => dy,
+          _ => (dx - dy) * .7071067811865476,
+        };
+        final across = switch (direction) {
+          0 => dy,
+          1 => (dy - dx) * .7071067811865476,
+          2 => -dx,
+          _ => (dx + dy) * .7071067811865476,
+        };
+        final length = .68 + ((h >> 5) % 401) / 1000;
+        final halfWidth = .30 + ((h >> 15) % 161) / 1000;
+        final a = along / length, b = across / halfWidth;
+        final contour = a.abs() + b * b;
+        if (contour > 1 || h <= top) continue;
+        top = h;
+        // Backlit rims frame each leaf instead of reducing foliage to noise.
+        if (contour > .62) {
+          shade = dy < 0 || dx < -.15 ? 4 : 3;
+        } else if (b.abs() < .15 || a < -.45) {
+          shade = 1;
+        } else {
+          shade = 2;
+        }
+      }
+    }
+    return shade;
+  }
+
   void emit(int x, int y, int shade) {
     for (final xx in {x, if (mirrorX) width - 1 - x}) {
       for (final yy in {y, if (mirrorY) height - 1 - y}) {
@@ -227,6 +273,7 @@ Map<int, int> paletteTexturePixels({
 
   final clusterCache = <int, int>{};
   final barkCache = <int, int>{};
+  final leavesCache = <int, int>{};
   void stamp(int x, int y, double tx, double ty) {
     final left = x - size ~/ 2, top = y - size ~/ 2;
     if (left >= width || top >= height || left + size <= 0 || top + size <= 0) {
@@ -250,6 +297,8 @@ Map<int, int> paletteTexturePixels({
           );
         } else if (tool == 'bark') {
           shade = barkCache.putIfAbsent(py * width + px, () => bark(px, py));
+        } else if (tool == 'leaves') {
+          shade = leavesCache.putIfAbsent(py * width + px, () => leaves(px, py));
         } else if (tool == 'stripes') {
           shade = cluster((px * tx + py * ty) / 4, -px * ty + py * tx, cell);
         } else if (tool == 'sphere') {

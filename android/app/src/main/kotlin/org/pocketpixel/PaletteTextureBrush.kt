@@ -2,7 +2,7 @@ package org.pocketpixel
 
 import kotlin.math.*
 
-internal val paletteTextureTools = setOf("metal", "cluster", "stripes", "sphere", "knife", "bark", "ditherPaint", "ditherRetouch")
+internal val paletteTextureTools = setOf("metal", "cluster", "stripes", "sphere", "knife", "bark", "leaves", "ditherPaint", "ditherRetouch")
 
 /** Oklab matrices from Björn Ottosson's public-domain reference (2021-01-25). */
 internal class PaletteLab(argb: Int) {
@@ -130,6 +130,44 @@ internal fun paletteTexturePixels(tool: String, points: List<Pair<Int,Int>>, wid
         if (crack - floor(crack) < .09 && hash(nearest, floor(crack).toInt()) % 4 == 0L) return 1
         return 2
     }
+    // Canvas-anchored overlapping pointed leaves: coherent lit rims and dark
+    // interiors. Every random property belongs to a whole leaf, not a dab.
+    fun leaves(x: Int, y: Int): Int {
+        val cell = max(3.0, size / 4.0)
+        val u = x / cell; val v = y / cell
+        val gx = floor(u).toInt(); val gy = floor(v).toInt()
+        var top = -1L; var shade = 0
+        for (cy in gy - 2..gy + 2) {
+            for (cx in gx - 2..gx + 2) {
+                val h = hash(cx + 381, cy - 719)
+                val dx = u - (cx + .15 + (h % 701) / 1000.0)
+                val dy = v - (cy + .15 + ((h ushr 10) % 701) / 1000.0)
+                val direction = ((h ushr 20) and 3).toInt()
+                val along = when (direction) {
+                    0 -> dx
+                    1 -> (dx + dy) * .7071067811865476
+                    2 -> dy
+                    else -> (dx - dy) * .7071067811865476
+                }
+                val across = when (direction) {
+                    0 -> dy
+                    1 -> (dy - dx) * .7071067811865476
+                    2 -> -dx
+                    else -> (dx + dy) * .7071067811865476
+                }
+                val length = .68 + ((h ushr 5) % 401) / 1000.0
+                val halfWidth = .30 + ((h ushr 15) % 161) / 1000.0
+                val a = along / length; val b = across / halfWidth
+                val contour = abs(a) + b * b
+                if (contour > 1 || h <= top) continue
+                top = h
+                shade = if (contour > .62) {
+                    if (dy < 0 || dx < -.15) 4 else 3
+                } else if (abs(b) < .15 || a < -.45) 1 else 2
+            }
+        }
+        return shade
+    }
     fun emit(x: Int,y: Int,shade: Int) {
         val xs=linkedSetOf(x); val ys=linkedSetOf(y)
         if(mirrorX) xs.add(width-1-x)
@@ -138,6 +176,7 @@ internal fun paletteTexturePixels(tool: String, points: List<Pair<Int,Int>>, wid
     }
     val clusterCache = mutableMapOf<Int,Int>()
     val barkCache = mutableMapOf<Int,Int>()
+    val leavesCache = mutableMapOf<Int,Int>()
     fun stamp(x: Int,y: Int,tx: Double,ty: Double) {
         val left = x-size/2; val top = y-size/2
         if (left >= width || top >= height || left+size <= 0 || top+size <= 0) return
@@ -152,6 +191,7 @@ internal fun paletteTexturePixels(tool: String, points: List<Pair<Int,Int>>, wid
                 "ditherPaint", "ditherRetouch" -> 2
                 "cluster" -> clusterCache.getOrPut(py*width+px) { cluster(px.toDouble(),py.toDouble(),cell) }
                 "bark" -> barkCache.getOrPut(py*width+px) { bark(px, py) }
+                "leaves" -> leavesCache.getOrPut(py*width+px) { leaves(px, py) }
                 "stripes" -> cluster((px*tx+py*ty)/4,-px*ty+py*tx,cell)
                 "sphere" -> {
                     val light=(.62*sqrt(max(0.0,1-radius))-.70*ny-.18*nx).coerceIn(-1.0,1.0)
