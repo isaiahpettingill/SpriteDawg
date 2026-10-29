@@ -173,16 +173,16 @@ void main() {
     await t.pumpWidget(const SizedBox());
   });
 
-  for (final hand in [true, false]) {
+  for (final buttons in [2, 4]) {
     testWidgets(
-      '${hand ? "Hand tool" : "Right mouse drag"} explicitly pans tiled view',
+      '${buttons == 2 ? "Right mouse drag" : "Middle mouse drag"} explicitly pans tiled view',
       (t) async {
         final h = Harness();
-        await h.host(t, tool: hand ? 'pan' : 'pencil');
+        await h.host(t);
         final pan = await t.startGesture(
           h.point(t, -2, 3),
-          kind: hand ? ui.PointerDeviceKind.touch : ui.PointerDeviceKind.mouse,
-          buttons: hand ? 1 : 2,
+          kind: ui.PointerDeviceKind.mouse,
+          buttons: buttons,
         );
         await pan.moveBy(const Offset(35, 0));
         await pan.up();

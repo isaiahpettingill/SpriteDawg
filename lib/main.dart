@@ -130,7 +130,6 @@ class _EditorScreenState extends State<EditorScreen>
     'ditherPaint': (Icons.gradient, 'Dither Paint'),
     'ditherRetouch': (Icons.grid_4x4, 'Dither Retouch'),
     'selectRegion': (Icons.select_all, 'Select'),
-    'pan': (Icons.pan_tool_alt, 'Pan'),
   };
   @override
   void initState() {
@@ -662,7 +661,7 @@ class _EditorScreenState extends State<EditorScreen>
             builder: (context) => AlertDialog(
               title: const Text('Draw on the go'),
               content: const Text(
-                'Draw with one finger or a stylus. Pan and zoom with two fingers. Long-hold a toolbar group for subtools. Select drags a rectangle on the active layer; drag inside to move, or use Copy/Cut/Paste/Delete. Gradient paints the whole active layer; drag from Start to End.\n\nSave preserves layers, frames and metadata. PNG exports the current frame.\n\nUnsaved edits are kept in recovery copies.',
+                'Draw with one finger or a stylus. Pan and zoom with two fingers in any tool. On desktop, right-drag or middle-drag to pan. Long-hold a toolbar group for subtools. Select drags a rectangle on the active layer; drag inside to move, or use Copy/Cut/Paste/Delete. Gradient paints the whole active layer; drag from Start to End.\n\nSave preserves layers, frames and metadata. PNG exports the current frame.\n\nUnsaved edits are kept in recovery copies.',
               ),
               actions: [
                 TextButton(
@@ -1178,8 +1177,6 @@ class _EditorScreenState extends State<EditorScreen>
                   chooseTool('eyedropper'),
               const SingleActivator(LogicalKeyboardKey.keyM): () =>
                   chooseTool('selectRegion'),
-              const SingleActivator(LogicalKeyboardKey.keyH): () =>
-                  chooseTool('pan'),
             },
       child: Focus(autofocus: true, child: view),
     );
@@ -1327,7 +1324,8 @@ class _EditorScreenState extends State<EditorScreen>
   Widget drawingCanvas() => PixelCanvas(
     key: const Key('drawing-workspace'),
     editor: e,
-    tool: playing ? 'pan' : tool,
+    tool: tool,
+    navigationOnly: playing,
     color: color,
     brush: brush,
     grid: grid,

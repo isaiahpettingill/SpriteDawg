@@ -45,7 +45,6 @@ const drawingToolGroups = <String, List<DrawingSubtool>>{
     DrawingSubtool('ditherRetouch', 'Dither Retouch', Icons.grid_4x4),
   ],
   'select': [DrawingSubtool('selectRegion', 'Select', Icons.select_all)],
-  'pan': [DrawingSubtool('pan', 'Pan', Icons.pan_tool_alt)],
 };
 
 /// A tap chooses the remembered tool; hold/right-click/Menu key opens choices.

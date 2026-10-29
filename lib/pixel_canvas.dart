@@ -24,6 +24,7 @@ class PixelCanvas extends StatefulWidget {
     required this.fitToken,
     required this.onPick,
     required this.onStroke,
+    this.navigationOnly = false,
     this.filled = false,
     this.mirrorX = false,
     this.mirrorY = false,
@@ -40,6 +41,7 @@ class PixelCanvas extends StatefulWidget {
   final String tool;
   final int color, brush, fitToken;
   final bool grid, onion;
+  final bool navigationOnly;
   final bool filled, mirrorX, mirrorY, mirrorDiagonal, mirrorAntiDiagonal;
   final int density, seed, strength;
   final Map<String, dynamic> previewOptions;
@@ -162,7 +164,7 @@ class _PixelCanvasState extends State<PixelCanvas> {
       });
       return;
     }
-    if (editor.busy || _copyingRegion || _regionEditing) return;
+    if (widget.navigationOnly || editor.busy || _copyingRegion || _regionEditing) return;
     if (_regionAnchor != null) {
       _cancelRegionGesture();
       stroke.clear();
@@ -309,7 +311,6 @@ class _PixelCanvasState extends State<PixelCanvas> {
   int _previewEpoch = 0, _pointVersion = 0;
   bool get _usesPreview =>
       (widget.viewMode == CanvasViewMode.tiled &&
-          widget.tool != 'pan' &&
           widget.tool != 'eyedropper' &&
           widget.tool != 'selectRegion') ||
       const {
@@ -473,14 +474,16 @@ class _PixelCanvasState extends State<PixelCanvas> {
         (widget.editor.busy && !widget.editor.busyDrawing)) {
       _clearCommitting();
     }
-    if (old.tool != widget.tool ||
+    if (old.navigationOnly != widget.navigationOnly ||
+        old.tool != widget.tool ||
         old.viewMode != widget.viewMode ||
         !identical(old.editor, widget.editor)) {
       _selectionEpoch++;
       _selection = null;
       _cancelRegionGesture();
     }
-    if (old.tool != widget.tool ||
+    if (old.navigationOnly != widget.navigationOnly ||
+        old.tool != widget.tool ||
         (widget.editor.busy && !widget.editor.busyDrawing) ||
         old.color != widget.color ||
         old.brush != widget.brush ||
@@ -521,12 +524,13 @@ class _PixelCanvasState extends State<PixelCanvas> {
     }
     setState(() {
       if (pointers.isEmpty) {
-        _explicitPan = widget.tool == 'pan' || e.buttons == 2;
+        _explicitPan = e.kind == ui.PointerDeviceKind.mouse &&
+            e.buttons & 6 != 0;
       }
       pointers[e.pointer] = e.localPosition;
       if (pointers.length > 1 ||
-          widget.tool == 'pan' ||
-          e.buttons == 2 ||
+          widget.navigationOnly ||
+          _explicitPan ||
           (widget.viewMode == CanvasViewMode.slide &&
               !isEditableCanvasPoint(
                 _pixel(e.localPosition),
@@ -576,11 +580,9 @@ class _PixelCanvasState extends State<PixelCanvas> {
       final oldCenter = centroid, oldDistance = distance;
       pointers[e.pointer] = e.localPosition;
       if (navigating) {
-        // A remaining finger waits for the navigation gesture to finish. It
-        // neither pans nor resumes a partially committed tiled stroke.
-        if (widget.viewMode == CanvasViewMode.tiled &&
-            pointers.length < 2 &&
-            !_explicitPan) {
+        // Touch navigation always needs two fingers. A remaining finger waits
+        // until all fingers lift; it never resumes drawing or one-finger pan.
+        if (pointers.length < 2 && !_explicitPan) {
           return;
         }
         final newCenter = centroid;
@@ -703,7 +705,8 @@ class _PixelCanvasState extends State<PixelCanvas> {
       return Focus(
         focusNode: _selectionFocus,
         onKeyEvent: (_, event) {
-          if (widget.tool != 'selectRegion' || event is! KeyDownEvent) {
+          if (widget.navigationOnly ||
+              widget.tool != 'selectRegion' || event is! KeyDownEvent) {
             return KeyEventResult.ignored;
           }
           final key = event.logicalKey;
@@ -778,7 +781,7 @@ class _PixelCanvasState extends State<PixelCanvas> {
                   ),
                 ),
               ),
-              if (widget.tool == 'selectRegion') ...[
+              if (widget.tool == 'selectRegion' && !widget.navigationOnly) ...[
                 Positioned.fill(
                   child: IgnorePointer(
                     child: CustomPaint(
@@ -1143,7 +1146,6 @@ class _CanvasPainter extends CustomPainter {
   void paintStroke(Canvas canvas) {
     if (preview == null &&
         points.isNotEmpty &&
-        tool != 'pan' &&
         tool != 'eyedropper') {
       if (tool == 'gradient') {
         final guide = Paint()
