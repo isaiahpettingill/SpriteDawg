@@ -164,7 +164,12 @@ class _PixelCanvasState extends State<PixelCanvas> {
       });
       return;
     }
-    if (widget.navigationOnly || editor.busy || _copyingRegion || _regionEditing) return;
+    if (widget.navigationOnly ||
+        editor.busy ||
+        _copyingRegion ||
+        _regionEditing) {
+      return;
+    }
     if (_regionAnchor != null) {
       _cancelRegionGesture();
       stroke.clear();
@@ -524,8 +529,8 @@ class _PixelCanvasState extends State<PixelCanvas> {
     }
     setState(() {
       if (pointers.isEmpty) {
-        _explicitPan = e.kind == ui.PointerDeviceKind.mouse &&
-            e.buttons & 6 != 0;
+        _explicitPan =
+            e.kind == ui.PointerDeviceKind.mouse && e.buttons & 6 != 0;
       }
       pointers[e.pointer] = e.localPosition;
       if (pointers.length > 1 ||
@@ -706,7 +711,8 @@ class _PixelCanvasState extends State<PixelCanvas> {
         focusNode: _selectionFocus,
         onKeyEvent: (_, event) {
           if (widget.navigationOnly ||
-              widget.tool != 'selectRegion' || event is! KeyDownEvent) {
+              widget.tool != 'selectRegion' ||
+              event is! KeyDownEvent) {
             return KeyEventResult.ignored;
           }
           final key = event.logicalKey;
@@ -1144,9 +1150,7 @@ class _CanvasPainter extends CustomPainter {
   }
 
   void paintStroke(Canvas canvas) {
-    if (preview == null &&
-        points.isNotEmpty &&
-        tool != 'eyedropper') {
+    if (preview == null && points.isNotEmpty && tool != 'eyedropper') {
       if (tool == 'gradient') {
         final guide = Paint()
           ..color = Colors.white

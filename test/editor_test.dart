@@ -220,7 +220,9 @@ void main() {
     await finger.cancel();
     expect(count, 0);
     final mouse = await tester.startGesture(
-      center, kind: ui.PointerDeviceKind.mouse, buttons: 2,
+      center,
+      kind: ui.PointerDeviceKind.mouse,
+      buttons: 2,
     );
     await mouse.moveBy(const Offset(40, 20));
     await mouse.up();
