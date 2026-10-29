@@ -19,6 +19,11 @@ void main() {
     final editor = Editor(transport: (_, _) async => fixture.state());
     await t.pumpWidget(PocketPixelApp(editor: editor));
     await t.pumpAndSettle();
+    expect(find.byKey(const Key('tool-group-pan')), findsNothing);
+    expect(drawingToolGroups.containsKey('pan'), isFalse);
+    await t.sendKeyEvent(LogicalKeyboardKey.keyH);
+    await t.pump();
+    expect(t.widget<PixelCanvas>(find.byType(PixelCanvas)).tool, 'pencil');
     await t.tap(find.byKey(const Key('tool-group-select')));
     await t.pumpAndSettle();
     expect(t.takeException(), isNull);

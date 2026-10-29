@@ -26,7 +26,7 @@ MIT licensed, no ads, accounts, tracking, networking or broad Android storage pe
   In tiled/slide views, Select operates only on the central editable canvas.
 
 - Pencil, eraser, flood fill, eyedropper, line, outlined/filled rectangles and
-  ellipses, dispersed spray, soft airbrush, blur, jumble and pan. The eraser has its own eraser icon.
+  ellipses, dispersed spray, soft airbrush, blur and jumble. The eraser has its own eraser icon.
 - Long-hold a toolbar group to choose a subtool (right-click or the Menu key on desktop).
   Tap to use its last-selected tool; groups include ink, fill/gradient, shapes and effects.
   Filled rectangles/ellipses live with the outline shapes. Touch-sized group buttons
@@ -67,8 +67,9 @@ MIT licensed, no ads, accounts, tracking, networking or broad Android storage pe
   eight copies. Coincident copies do not repeatedly apply opacity. In indexed
   mode, gradients and blur map
   results to the current palette; jumble moves native pixel indices.
-- One finger/stylus draws; two fingers pan/pinch. Adding a second finger **keeps**
-  the drawn segment and switches to navigation until all fingers lift.
+- One finger/stylus draws; two fingers pan/pinch in every tool—no separate Pan
+  button or tool switch. Adding a second finger **keeps**
+  the drawn segment and switches to navigation until all fingers lift. A remaining finger neither draws nor pans.
 - Per-tool brush sizes, visual HSV/alpha color picker, palette, grid, previous-frame onion skin and Fit.
 - Spray and airbrush build up while held. Brush effects preview the actual engine
   result before release; the gesture remains one undo step. RGB transparency blends
@@ -105,8 +106,8 @@ Android uses the system document picker. Linux uses native GTK file dialogs.
 Android tabs and internal drafts use the document provider's filename, not its
 opaque URI ID. Older URI-ID draft labels are repaired when the original provider
 is accessible; recovery still opens an unsaved copy without restoring a save grant.
-Linux also supports pointer-wheel zoom, right-drag pan, Ctrl-Z/Y, Ctrl-Shift-Z,
-Ctrl-S/O, and B/E/G/I/H tool shortcuts. Controls remain usable in narrow portrait
+Linux also supports pointer-wheel zoom, right/middle-drag pan, Ctrl-Z/Y, Ctrl-Shift-Z,
+Ctrl-S/O, and B/E/G/I/M tool shortcuts. Controls remain usable in narrow portrait
 windows; desktop packaging declares mobile support to Linux phone shells.
 
 ## Documents, tags and palettes
@@ -308,8 +309,7 @@ The overflow menu's **View · Tiled (3×3)** repeats the current frame in nine
 whole brush footprints wrap across seams into the original tile, and all copies
 update together. Crossing a seam remains one stroke/undo, not a line across the
 middle. Two fingers pan/pinch and keep the segment already drawn; after one
-finger lifts, the remaining finger waits until both lift. The explicit Hand tool
-and desktop right-drag still pan. Drags begun in the margin outside the 3×3 area
+finger lifts, the remaining finger waits until both lift. Desktop right-drag and middle-drag still pan without switching tools. Drags begun in the margin outside the 3×3 area
 do nothing; a stroke leaving that area stops at its outer edge, never starts a pan.
 Bucket regions and blur/jumble neighborhoods connect across opposite edges.
 Bucket gradients keep their original-tile horizontal/vertical coordinates; they

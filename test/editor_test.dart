@@ -219,11 +219,13 @@ void main() {
     final finger = await tester.startGesture(center);
     await finger.cancel();
     expect(count, 0);
-    await canvas(tester, e, (_, p) => count++, tool: 'pan');
-    await tester.drag(
-      find.byKey(const Key('pixel-canvas')),
-      const Offset(40, 20),
+    final mouse = await tester.startGesture(
+      center,
+      kind: ui.PointerDeviceKind.mouse,
+      buttons: 2,
     );
+    await mouse.moveBy(const Offset(40, 20));
+    await mouse.up();
     expect(count, 0);
     e.dispose();
   });
