@@ -33,7 +33,11 @@ void main() {
     expect(find.text('No canvas open'), findsOneWidget);
     expect(creations, isEmpty);
     expect(
-      tester.widget<IconButton>(find.byTooltip('Save Aseprite')).onPressed,
+      tester
+          .widget<IconButton>(
+            find.widgetWithIcon(IconButton, Icons.save_outlined),
+          )
+          .onPressed,
       isNull,
     );
 

@@ -125,8 +125,8 @@ class Editor extends ChangeNotifier {
   Future<ui.Image?> thumbnail(int frame) => _thumbnails.get(frame);
   bool get hasDocument =>
       state['hasDocument'] as bool? ?? state.containsKey('width');
-  int get width => state['width'] as int? ?? 0;
-  int get height => state['height'] as int? ?? 0;
+  int get width => state['width'] as int? ?? 32;
+  int get height => state['height'] as int? ?? 32;
   int get frame => state['frame'] as int? ?? 0;
   int get layer => state['layer'] as int? ?? 0;
   bool get dirty => state['dirty'] == true;

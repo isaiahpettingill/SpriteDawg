@@ -81,7 +81,7 @@ class DesktopBackend {
   void _flushInBackground() {
     // Browsers need not wait for asynchronous pagehide handlers. Frequent
     // foreground snapshots are the primary protection, not this last chance.
-    if (!_closing) {
+    if (!_closing && _initialized) {
       unawaited(
         invoke('flushDrafts', null).then<void>(
           (_) {},

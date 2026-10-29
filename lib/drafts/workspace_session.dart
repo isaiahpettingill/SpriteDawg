@@ -124,7 +124,8 @@ class WorkspaceSession {
       if (repair) _restoreError = null;
       return true;
     } catch (issue) {
-      _saveError = 'Open tabs could not be remembered: $issue. Save a copy now.';
+      _saveError =
+          'Open tabs could not be remembered: $issue. Save a copy now.';
       return false;
     }
   }
