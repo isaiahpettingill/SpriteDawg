@@ -9,7 +9,7 @@ import '../drafts/draft_storage.dart';
 /// Origin-private IndexedDB storage. Both generations commit in one transaction;
 /// quota failures leave the last committed drawing untouched. Browsers may still
 /// evict site data, and private sessions may remove it when their window closes.
-class IndexedDbDraftStorage implements SizedDraftStorage {
+class IndexedDbDraftStorage implements SizedDraftStorage, WorkspaceStorage {
   IndexedDbDraftStorage({this.databaseName = 'spritedawg.drafts.v1'});
 
   final String databaseName;
@@ -185,6 +185,42 @@ class IndexedDbDraftStorage implements SizedDraftStorage {
     return done.future;
   }
 
+  // String key is intentionally excluded from the numeric draft-ID catalog.
+  static const _workspaceKey = 'workspace';
+
+  @override
+  Future<String?> readWorkspace() async {
+    final database = await _open();
+    final transaction = database.transaction(_current.toJS, 'readonly');
+    final value = await _request(
+      transaction.objectStore(_current).get(_workspaceKey.toJS),
+    );
+    return value.isUndefinedOrNull ? null : (value as JSString).toDart;
+  }
+
+  @override
+  Future<void> archiveWorkspace() async {
+    final raw = await readWorkspace();
+    if (raw == null) return;
+    final database = await _open();
+    final transaction = database.transaction(_previous.toJS, 'readwrite',
+      web.IDBTransactionOptions(durability: 'strict'));
+    final committed = _commit(transaction);
+    transaction.objectStore(_previous).add(raw.toJS,
+      'workspace-unreadable-${DateTime.now().microsecondsSinceEpoch}'.toJS);
+    await committed;
+  }
+
+  @override
+  Future<void> writeWorkspace(String value) async {
+    final database = await _open();
+    final transaction = database.transaction(_current.toJS, 'readwrite',
+      web.IDBTransactionOptions(durability: 'strict'));
+    final committed = _commit(transaction);
+    transaction.objectStore(_current).put(value.toJS, _workspaceKey.toJS);
+    await committed;
+  }
+
   @override
   Future<List<int>> ids() async {
     final database = await _open();
@@ -292,3 +328,4 @@ class IndexedDbDraftStorage implements SizedDraftStorage {
     await _releaseOwnership();
   }
 }
+

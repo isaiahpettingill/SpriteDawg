@@ -1,10 +1,11 @@
 import 'dart:io';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import '../drafts/draft_repository.dart';
 import '../drafts/draft_storage.dart';
 
-class FileDraftStorage implements SizedDraftStorage {
+class FileDraftStorage implements SizedDraftStorage, WorkspaceStorage {
   FileDraftStorage(this.directory);
   final Directory directory;
   static final _ownedPaths = <String>{};
@@ -64,6 +65,35 @@ class FileDraftStorage implements SizedDraftStorage {
       if (_ownsPath) _ownedPaths.remove(directory.absolute.path);
       _ownsPath = false;
     }
+  }
+
+  @override
+  Future<String?> readWorkspace() async {
+    await _open();
+    final file = File('${directory.path}/workspace.json');
+    if (!await file.exists()) return null;
+    if (await file.length() > 65536) {
+      throw const FormatException('Workspace metadata exceeds the safety limit');
+    }
+    return file.readAsString();
+  }
+
+  @override
+  Future<void> archiveWorkspace() async {
+    final raw = await readWorkspace();
+    if (raw == null) return;
+    final backup = File('${directory.path}/workspace-unreadable-'
+        '${DateTime.now().microsecondsSinceEpoch}.json');
+    // A unique backup is never considered a new current session.
+    if (await backup.exists()) throw StateError('Workspace backup already exists');
+    await _atomic(backup, Uint8List.fromList(utf8.encode(raw)));
+  }
+
+  @override
+  Future<void> writeWorkspace(String value) async {
+    await _open();
+    await _atomic(File('${directory.path}/workspace.json'),
+        Uint8List.fromList(utf8.encode(value)));
   }
 
   @override
@@ -165,3 +195,4 @@ class FileDraftStorage implements SizedDraftStorage {
     }
   }
 }
+

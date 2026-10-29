@@ -75,16 +75,13 @@ void main() {
     expect(initial['dirty'], false);
     expect(initial['canUndo'], false);
     expect(initial['hasTagClipboard'], false);
-    expect(initial['width'], 32);
-    expect(initial['height'], 32);
+    expect(initial['hasDocument'], false);
+    expect(initial['width'], 0);
+    expect(initial['height'], 0);
     expect((initial['pixels'] as Uint8List).every((value) => value == 0), true);
     expect((initial['userData'] as Map)['sprite'], isNull);
     final initialDocuments = restartMaps(initial, 'documents');
-    expect(initialDocuments, hasLength(1));
-    expect(
-      initialDocuments.single['title'],
-      'Untitled ${initialDocuments.single['id']}',
-    );
+    expect(initialDocuments, isEmpty);
 
     final seeded = <Map<String, dynamic>>[];
     for (final fixture in restartDraftFixtures) {
@@ -133,6 +130,7 @@ void main() {
       seeded.add({'id': id, 'title': document['title']});
       expect(document['dirty'], true);
     }
+    await restartInvoke('selectDocument', {'id': seeded.first['id']});
     final flushed = await restartInvoke('flushDrafts');
     final documents = restartMaps(flushed, 'documents');
     expect(documents, hasLength(2));
@@ -148,6 +146,7 @@ void main() {
         'sentinel': restartFixtureSentinel,
         'seedProcessId': pid,
         'drafts': seeded,
+        'activeId': flushed['documentId'],
       }),
       flush: true,
     );

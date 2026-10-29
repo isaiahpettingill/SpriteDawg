@@ -275,7 +275,7 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   });
-  testWidgets('Recovery prompt opens recovered copy only after confirmation', (
+  testWidgets('Closed drafts remain available without a startup prompt', (
     tester,
   ) async {
     final calls = <String>[];
@@ -300,8 +300,13 @@ void main() {
     );
     await tester.pumpWidget(PocketPixelApp(editor: editor));
     await tester.pumpAndSettle();
+    expect(find.text('Internal drafts'), findsNothing);
+    expect(calls, ['init']);
+    await tester.tap(find.byTooltip('Project and view options'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Internal drafts…'));
+    await tester.pumpAndSettle();
     expect(find.text('Internal drafts'), findsOneWidget);
-    expect(calls, ['init', 'flushDrafts', 'listDrafts']);
     await tester.tap(find.text('Hero draft'));
     await tester.pumpAndSettle();
     expect(calls, ['init', 'flushDrafts', 'listDrafts', 'recover']);
@@ -365,3 +370,4 @@ void main() {
     expect(find.byTooltip('Pencil'), findsOneWidget);
   });
 }
+

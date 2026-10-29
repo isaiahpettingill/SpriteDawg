@@ -20,6 +20,7 @@ void main() {
       supportDirectory: () async => Directory('${base.path}/support'),
     );
     await backend.invoke('init', null);
+    await backend.invoke('new', null);
   });
   tearDown(() async {
     await backend.dispose();
@@ -38,11 +39,11 @@ void main() {
   File recovery() =>
       File('${base.path}/support/draft-${backend.sessions.activeId}.sdd');
   test(
-    'new and fresh placeholders get defaults but late init never stamps imports',
+    'new gets defaults but late init never stamps existing documents',
     () async {
       const text = 'credits="A"\nlicense="CC0"\n';
       await backend.invoke('init', {'defaultUserData': text});
-      expect(backend.engine.document.data!.text, text);
+      expect(backend.engine.document.data, isNull);
       await backend.invoke('new', {
         'width': 8,
         'height': 8,
@@ -96,7 +97,7 @@ void main() {
     expect(backend.engine.state()['canUndo'], true);
   });
   test(
-    'save is valid, clears dirty/recovery; subsequent save reuses path',
+    'save is valid, clears dirty and retains open-tab snapshot; subsequent save reuses path',
     () async {
       await draw();
       savePath = '${base.path}/drawing.aseprite';
@@ -107,12 +108,12 @@ void main() {
         0xffff0000,
       );
       expect(backend.engine.dirty, false);
-      expect(await recovery().exists(), false);
+      expect(await recovery().exists(), true);
       savePath = null;
       await draw();
       await backend.invoke('save', null);
       expect(backend.engine.dirty, false);
-      expect(await recovery().exists(), false);
+      expect(await recovery().exists(), true);
       expect(base.listSync().where((f) => f.path.endsWith('.tmp')), isEmpty);
     },
   );
@@ -162,8 +163,8 @@ void main() {
       supportDirectory: () async => Directory('${base.path}/support'),
     );
     final state = await other.invoke('init', null);
-    expect(state!['recoveryAvailable'], true);
-    await other.invoke('recover', null);
+    expect(state!['hasDocument'], true);
+    expect(state['recoveryAvailable'], false);
     expect(other.engine.document.composite(0)[66], 0xffff0000);
     expect(other.engine.dirty, true);
     await other.invoke('save', null);
@@ -244,7 +245,8 @@ void main() {
       final state = await backend.invoke('open', null);
       expect(state!['width'], 8);
       expect(state['dirty'], false);
-      expect(state['recoveryError'], isNull);
+      // The original draft is untouched even if the new snapshot cannot write.
+      expect(await File('$support/draft-${backend.sessions.documents.first.id}.sdd').exists(), true);
       expect(backend.sessions.documents.length, 2);
     } finally {
       await Process.run('chmod', ['700', support]);
@@ -285,3 +287,4 @@ void main() {
     expect(row.skip(1), [200, 100, 50, 128]);
   });
 }
+

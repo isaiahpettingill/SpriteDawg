@@ -57,11 +57,12 @@ void main() {
       await b.dispose();
       final restart = create();
       final state = await restart.invoke('init', null);
-      expect((state!['drafts'] as List).length, 2);
-      await restart.invoke('recover', {'id': first});
+      expect((state!['documents'] as List).length, 2);
+      expect(state['drafts'], isEmpty);
+      await restart.invoke('selectDocument', {'id': first});
       expect(restart.sessions.activeId, first);
       expect(restart.engine.document.composite(0)[0], 0xffff0000);
-      await restart.invoke('recover', {'id': imported});
+      await restart.invoke('selectDocument', {'id': imported});
       expect(restart.sessions.active.title, 'original.aseprite');
       expect(restart.sessions.active.path, isNull);
       expect(restart.sessions.active.source, original.path);
@@ -71,7 +72,7 @@ void main() {
   );
 
   test(
-    'queued flush follows IDs and cannot resurrect discarded or saved documents',
+    'queued flush follows IDs and retains saved open snapshots, never discarded tabs',
     () async {
       final b = create(save: '${directory.path}/saved.aseprite');
       await b.invoke('new', null);
@@ -86,7 +87,7 @@ void main() {
       expect((await b.drafts.list()).map((d) => d.id), [second]);
       await b.invoke('save', null);
       await b.invoke('flushDrafts', null);
-      expect(await b.drafts.list(), isEmpty);
+      expect((await b.drafts.list()).map((d) => d.id), [second]);
     },
   );
 
@@ -129,10 +130,11 @@ void main() {
       await File('${directory.path}/draft-999.sdd').writeAsBytes([0]);
       final restart = create();
       final state = await restart.invoke('init', null);
-      expect((state!['drafts'] as List).length, 3);
-      await restart.invoke('recover', {'id': first});
+      expect((state!['drafts'] as List).length, 1);
+      expect((state['documents'] as List).length, 2);
+      await restart.invoke('selectDocument', {'id': first});
       expect(restart.engine.document.composite(0)[0], 0xff112233);
-      await restart.invoke('recover', {'id': second});
+      await restart.invoke('selectDocument', {'id': second});
       expect(restart.engine.document.width, 3);
       expect(await File('${directory.path}/draft-999.sdd').exists(), true);
     },
@@ -181,3 +183,4 @@ void main() {
     },
   );
 }
+

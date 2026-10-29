@@ -106,6 +106,8 @@ class MainActivity : FlutterActivity() {
         val saved=drafts.summaries().associateBy {it["id"] as Int}
         return sessions.state(available.isNotEmpty()) + mapOf(
             "drafts" to available,
+            "lastNewWidth" to runtime.lastNewWidth, "lastNewHeight" to runtime.lastNewHeight,
+            "recoveryError" to (runtime.workspaceError ?: sessions.documents.firstOrNull { it.id == sessions.activeId }?.recoveryError),
             "documents" to sessions.documents.map { session -> mapOf(
                 "id" to session.id, "title" to session.title,
                 "dirty" to session.engine.dirty, "active" to (session.id==sessions.activeId),
@@ -161,12 +163,13 @@ class MainActivity : FlutterActivity() {
             false
         }
     }
-    private fun flushDrafts() {
+    private fun flushDrafts(explicitChange: Boolean = false) {
         draftTask?.cancel(false);draftTask=null
         pendingDrafts.flush { id ->
             val session=sessions.documents.firstOrNull {it.id==id}
             session==null || persist(session)
         }
+        runtime.saveWorkspace(explicitChange)
     }
     private fun scheduleDraft() {
         val now=android.os.SystemClock.elapsedRealtime()
@@ -175,21 +178,25 @@ class MainActivity : FlutterActivity() {
         draftTask=worker.schedule({flushDrafts()},pendingDrafts.delay(now),TimeUnit.MILLISECONDS)
     }
     private fun changed() { revision++;scheduleDraft() }
-    private fun clearDraft(session: EditorSession = sessions.active) {
-        // Cancellation is ordered with all snapshots on this same worker.
-        pendingDrafts.forget(session.id)
-        try { drafts.delete(session.id);session.recoveryError=null }
-        catch(e: Exception) { session.recoveryError="Saved project is safe, but its old draft could not be removed: ${e.message}" }
-    }
     private fun closeDocument(id: Int, discard: Boolean, keepDraft: Boolean, defaultText: String) {
         val session=sessions.documents.firstOrNull {it.id==id} ?: error("Document is no longer open")
         require(!session.engine.dirty || discard || keepDraft) { "Save, keep a draft, or explicitly discard this document." }
         if(keepDraft) {
             require(persist(session)) { session.recoveryError ?: "Draft could not be written" }
-        } else {
-            // Do not close if explicit removal fails: it would promise a discard
-            // while leaving a recoverable copy behind.
+        }
+        // Commit the closed-tab topology first. On failure the tab and its
+        // snapshot remain open, so a kept draft cannot unexpectedly reopen.
+        check(runtime.saveWorkspace(explicitChange = true, excluding = id)) {
+            runtime.workspaceError ?: "Open tabs could not be remembered"
+        }
+        if (!keepDraft) try {
             drafts.delete(id)
+        } catch (error: Exception) {
+            // A partial deletion is repaired from the still-open model before
+            // rolling back the index. Never lose the user's in-memory drawing.
+            persist(session)
+            runtime.saveWorkspace(explicitChange = true)
+            throw error
         }
         pendingDrafts.forget(id)
         sessions.close(id,discard || keepDraft)
@@ -215,7 +222,14 @@ class MainActivity : FlutterActivity() {
                 "thumbnails" -> return@execute editor.thumbnails(args)
                 "frameImage" -> return@execute editor.frameImage(args)
                 "previewStroke" -> return@execute editor.previewStroke(args)
-                "new" -> { sessions.add(newSprite(args.number("width",32),args.number("height",32),defaultText),unsaved=true); changed() }
+                "new" -> {
+                    val width = args.strictInteger("width", runtime.lastNewWidth)
+                    val height = args.strictInteger("height", runtime.lastNewHeight)
+                    require(width in 1..2048 && height in 1..2048) { "Use dimensions from 1 to 2048" }
+                    sessions.add(newSprite(width,height,defaultText),unsaved=true)
+                    runtime.lastNewWidth=width;runtime.lastNewHeight=height
+                    changed()
+                }
                 "selectDocument" -> sessions.select(args.number("id",-1))
                 "closeDocument" -> closeDocument(args.number("id",-1),args["discard"]==true,args["keepDraft"]==true,defaultText)
                 "clearTagClipboard" -> sessions.clearClipboard()
@@ -240,6 +254,7 @@ class MainActivity : FlutterActivity() {
                 }
                 else -> error("Unknown editor method: ${call.method}")
             }
+            if (call.method in listOf("new", "openExternal", "selectDocument", "closeDocument", "recover", "save", "pasteTag")) flushDrafts(explicitChange = true)
             state()
         }
     }
@@ -256,7 +271,7 @@ class MainActivity : FlutterActivity() {
         Aseprite.read(bytes) // Validate before opening any destination for truncation.
         persist() // Best effort; a full draft store must not prevent manual Save.
         contentResolver.openOutputStream(uri,"wt")?.use { it.write(bytes); it.flush() } ?: error("The document provider refused this file. Use Save As.")
-        editor.saved(); rememberSaveTarget(uri); clearDraft()
+        editor.saved(); rememberSaveTarget(uri); persist(); pendingDrafts.forget(sessions.activeId)
     }
     private fun launchPicker(kind: String,result: MethodChannel.Result) {
         if(pending!=null) { result.error("busy","Finish the open file picker first",null); return }
@@ -307,11 +322,12 @@ class MainActivity : FlutterActivity() {
                     contentResolver.openOutputStream(uri,"wt")?.use { it.write(bytes); it.flush() } ?: error("The document provider refused this file")
                     if(kind=="saveAs") {
                         rememberSaveTarget(uri)
-                        if(revision==snapshotRevision) { editor.saved(); clearDraft() }
+                        if(revision==snapshotRevision) { editor.saved(); persist(); pendingDrafts.forget(sessions.activeId) }
                         else scheduleDraft() // Include the new name/source in the newer unsaved draft.
                     }
                 }
             }
+            flushDrafts(explicitChange = resultCode == RESULT_OK && uri != null)
             state()
         }
     }
@@ -330,3 +346,4 @@ class MainActivity : FlutterActivity() {
         super.onDestroy()
     }
 }
+

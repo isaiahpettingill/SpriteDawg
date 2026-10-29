@@ -13,30 +13,23 @@ class DefaultUserDataTest {
         }
         assertNull(newSprite(8,8,"").data)
     }
-    @Test fun placeholdersOnlyNeverImportedOrRecovery() {
+    @Test fun defaultsNeverCreateAnImplicitDocumentOrModifyImports() {
         val s = EditorSessions()
         s.initializePlaceholder(raw)
-        assertEquals(raw,s.active.engine.document.data?.text)
-        assertFalse(s.active.engine.dirty)
-        s.initializePlaceholder("replacement")
-        assertEquals(raw,s.active.engine.document.data?.text)
+        assertTrue(s.documents.isEmpty())
         s.add(Document.create().also { it.data=UserData(text="imported") })
         s.initializePlaceholder(raw)
         assertEquals("imported",s.active.engine.document.data?.text)
         s.add(Document.create());s.initializePlaceholder(raw)
         assertNull(s.active.engine.document.data)
-        val recovery=EditorSessions()
-        recovery.initializePlaceholder(raw, allow=false);assertNull(recovery.active.engine.document.data)
-        val edited=EditorSessions();edited.active.engine.replace(Document.create(),unsaved=true)
-        edited.initializePlaceholder(raw);assertNull(edited.active.engine.document.data)
         s.close(s.activeId);s.close(s.activeId);s.initializePlaceholder(raw)
-        assertEquals(raw,s.active.engine.document.data?.text)
+        assertTrue(s.documents.isEmpty())
     }
     @Test fun validatesUtf8BoundaryBeforeChanges() {
         assertEquals(65535,defaultUserData(mapOf("defaultUserData" to "a".repeat(65535))).length)
         assertThrows(IllegalArgumentException::class.java) { newSprite(8,8,"é".repeat(32768)) }
         assertThrows(IllegalArgumentException::class.java) { defaultUserData(mapOf("defaultUserData" to 1)) }
-        val s=EditorSessions(); val before=Aseprite.write(s.active.engine.document)
+        val s=EditorSessions(); s.add(Document.create()); val before=Aseprite.write(s.active.engine.document)
         assertThrows(IllegalArgumentException::class.java) { s.initializePlaceholder("é".repeat(32768)) }
         assertArrayEquals(before,Aseprite.write(s.active.engine.document))
     }
@@ -49,3 +42,4 @@ class DefaultUserDataTest {
         e.undo();assertArrayEquals(before,Aseprite.write(e.document))
     }
 }
+

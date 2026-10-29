@@ -16,6 +16,7 @@ void main() {
           supportDirectory: () async => base,
         );
         await backend.invoke('init', null);
+        await backend.invoke('new', null);
         final before = backend.engine.encode();
         final result = await backend.invoke('thumbnails', {
           'frames': [0],
@@ -25,12 +26,14 @@ void main() {
         final t = (result['thumbnails'] as List).single;
         expect([t['width'], t['height']], [16, 16]);
         expect(backend.engine.encode(), before);
-        expect(backend.engine.dirty, false);
+        expect(backend.engine.dirty, true);
         expect(backend.engine.state()['canUndo'], false);
         expect(await File('${base.path}/recovery.aseprite').exists(), false);
+        await backend.dispose();
       } finally {
         await base.delete(recursive: true);
       }
     },
   );
 }
+

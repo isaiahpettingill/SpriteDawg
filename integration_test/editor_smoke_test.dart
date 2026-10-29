@@ -26,6 +26,9 @@ void main() {
       reason: 'Use a clean emulator; this test will not discard existing work.',
     );
 
+    expect(initial['documents'], isEmpty);
+    expect(initial['hasDocument'], false);
+
     final editor = Editor(); // Real MethodChannel transport, not a test double.
     await tester.pumpWidget(PocketPixelApp(editor: editor));
     Future<void> settleNative() async {
@@ -43,6 +46,8 @@ void main() {
     }
 
     await settleNative();
+    expect(editor.maps('documents'), isEmpty);
+    expect(editor.image, isNull);
     expect(await editor.call('new', {'width': 16, 'height': 16}), true);
     await settleNative();
     expect(editor.width, 16);
@@ -118,6 +123,8 @@ void main() {
       expect(draft['title'], title);
       expect(draft['updatedAt'], greaterThan(0));
       expect(editor.state['recoveryAvailable'], true);
+      expect(editor.state['hasDocument'], false);
+      expect(editor.maps('documents'), isEmpty);
       expect(await editor.call('recover', {'id': id}), true);
       expect(editor.state['documentId'], id);
       expect(editor.maps('drafts').where((draft) => draft['id'] == id), isEmpty);
@@ -318,6 +325,8 @@ void main() {
     // A queued debounce or lifecycle flush must not resurrect discarded tabs.
     expect(await editor.call('flushDrafts'), true);
     expect(editor.maps('drafts'), isEmpty);
+    expect(editor.maps('documents'), isEmpty);
+    expect(editor.state['hasDocument'], false);
     expect(await editor.call('discardRecovery'), true);
     await tester.pumpWidget(const SizedBox.shrink());
   });

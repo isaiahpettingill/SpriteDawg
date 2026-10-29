@@ -12,8 +12,7 @@ class EditorSession(val id: Int, var title: String = "Untitled $id") {
     var revision = 0L
 }
 class EditorSessions(private val residentBudget:Long=64L*1024*1024) {
-    val documents = mutableListOf(EditorSession(1))
-    init { configure(documents.first()) }
+    val documents = mutableListOf<EditorSession>()
     private fun userBytes(d:UserData?)=(d?.text?.length ?: 0)*2L+(d?.properties?.size ?: 0)+16
     fun documentBytes(d:Document):Long=1024L+(d.header?.size ?: 0)+userBytes(d.data)+
         d.layers.sumOf {it.name.length*2L+(it.uuid?.size ?: 0)+userBytes(it.data)}+
@@ -28,10 +27,10 @@ class EditorSessions(private val residentBudget:Long=64L*1024*1024) {
         val total=documents.filter {it.id!=replacing}.sumOf {documentBytes(it.engine.document)}+(candidate?.let(::documentBytes) ?: 0L)+(clip?.let(::documentBytes) ?: 0L)
         require(total<=residentBudget) { "Open documents and copied tag exceed the 64 MiB editing budget. Close a document or clear the copied tag; no work was changed." }
     }
-    var activeId = 1
-    var nextId = 2
+    var activeId = 0
+    var nextId = 1
     private var clipboard: Document? = null
-    val active get() = documents.first { it.id == activeId }
+    val active get() = documents.firstOrNull { it.id == activeId } ?: error("Create or open a drawing first")
     fun add(document: Document, title: String? = null, unsaved: Boolean = false): EditorSession {
         checkBudget(document,if(documents.size==1&&active.placeholder&&!active.engine.dirty)activeId else null)
         if(documents.size==1 && active.placeholder && !active.engine.dirty)documents.clear()
@@ -44,7 +43,7 @@ class EditorSessions(private val residentBudget:Long=64L*1024*1024) {
     }
     fun initializePlaceholder(text: String, allow: Boolean = true) {
         defaultUserData(mapOf("defaultUserData" to text))
-        val session = active
+        val session = documents.firstOrNull { it.id == activeId } ?: return
         if (!allow || text.isEmpty() || !session.placeholder || session.engine.dirty ||
             session.engine.document.data != null) return
         val candidate = session.engine.document.copyDeep().also { it.data = UserData(text = text) }
@@ -57,8 +56,7 @@ class EditorSessions(private val residentBudget:Long=64L*1024*1024) {
         require(index>=0) { "Document is no longer open" }
         require(!documents[index].engine.dirty || discard) { "Save this document or confirm discarding its unsaved changes." }
         documents.removeAt(index)
-        if(documents.isEmpty()){val blank=EditorSession(nextId++);configure(blank);documents.add(blank)}
-        if(activeId==id)activeId=documents[index.coerceAtMost(documents.lastIndex)].id
+        if(activeId==id)activeId=if(documents.isEmpty())0 else documents[index.coerceAtMost(documents.lastIndex)].id
     }
     fun copyTag(index: Int) { val copy=TagTransfer.copy(active.engine.document,index);checkBudget(newClipboard=copy);clipboard=copy }
     fun clearClipboard(){clipboard=null}
@@ -96,8 +94,16 @@ class EditorSessions(private val residentBudget:Long=64L*1024*1024) {
         val section=clipboard ?: error("Copy a tag section first")
         add(Aseprite.read(Aseprite.write(section)),section.tags.single().name,true)
     }
-    fun state(recoveryAvailable: Boolean): Map<String,Any?> = active.engine.state(recoveryAvailable).toMutableMap().also {
-        it["documentId"]=activeId;it["hasTagClipboard"]=clipboard!=null;it["recoveryError"]=active.recoveryError
+    fun state(recoveryAvailable: Boolean): Map<String,Any?> = (if(documents.isEmpty()) mapOf<String,Any?>(
+        "width" to 0, "height" to 0, "frame" to 0, "layer" to 0, "depth" to 32,
+        "dirty" to false, "canUndo" to false, "canRedo" to false,
+        "recoveryAvailable" to recoveryAvailable, "pixels" to byteArrayOf(),
+        "palette" to emptyList<Int>(), "layers" to emptyList<Any>(),
+        "frames" to emptyList<Any>(), "tags" to emptyList<Any>(), "userData" to emptyMap<String,Any?>()
+    ) else active.engine.state(recoveryAvailable)).toMutableMap().also {
+        it["hasDocument"]=documents.isNotEmpty()
+        it["documentId"]=activeId;it["hasTagClipboard"]=clipboard!=null;it["recoveryError"]=documents.firstOrNull {s -> s.id==activeId}?.recoveryError
         it["documents"]=documents.map { s -> mapOf("id" to s.id,"title" to s.title,"dirty" to s.engine.dirty,"recoveryError" to s.recoveryError,"active" to (s.id==activeId)) }
     }
 }
+

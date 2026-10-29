@@ -129,7 +129,7 @@ void main() {
       s.close(b.id);
       expect(s.active.id, a.id);
       s.close(a.id, discard: true);
-      expect(s.documents.length, 1);
+      expect(s.documents, isEmpty);
     },
   );
   test(
@@ -169,12 +169,14 @@ void main() {
       savePath = '${dir.path}/saved.aseprite';
       await b.invoke('save', null);
       await b.invoke('flushDrafts', null);
-      expect(await File('${dir.path}/draft-$first.sdd').exists(), false);
+      expect(await File('${dir.path}/draft-$first.sdd').exists(), true);
       expect(await File('${dir.path}/draft-$second.sdd').exists(), true);
       await b.dispose();
       final reopened = backend();
-      expect((await reopened.invoke('init', null))!['recoveryAvailable'], true);
-      await reopened.invoke('recover', null);
+      expect((await reopened.invoke('init', null))!['hasDocument'], true);
+      expect(reopened.sessions.activeId, first);
+      expect(reopened.engine.dirty, true);
+      await reopened.invoke('selectDocument', {'id': second});
       expect(reopened.engine.document.width, 3);
       expect(reopened.engine.document.composite(0)[0], 0xff0000ff);
       expect(reopened.engine.dirty, true);
@@ -243,12 +245,12 @@ void main() {
         supportDirectory: () async => dir,
       );
       await b.invoke('init', null);
-      final before = b.engine.encode();
+      expect(b.sessions.documents, isEmpty);
       await expectLater(
         b.invoke('recover', null),
         throwsA(predicate((e) => e.toString().contains('No readable draft'))),
       );
-      expect(b.engine.encode(), before);
+      expect(b.sessions.documents, isEmpty);
       expect((await b.invoke('listDrafts', null))!['drafts'], hasLength(9));
       expect(
         await dir.list().where((f) => f.path.endsWith('.aseprite')).length,
@@ -297,3 +299,4 @@ void main() {
     expect(a.engine.document.data!.text!.length, 3000);
   });
 }
+
