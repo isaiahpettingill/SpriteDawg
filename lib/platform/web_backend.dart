@@ -1,3 +1,4 @@
+import '../drafts/workspace_session.dart';
 import 'dart:async';
 import 'dart:js_interop';
 import 'dart:math' as math;
@@ -52,6 +53,7 @@ class DesktopBackend {
   final Future<picker.XFile?> Function() _openFile;
   final Future<void> Function(String, Uint8List) _download;
   final DraftRepository _drafts;
+  late final workspace = WorkspaceSession(_drafts, sessions);
   late final DraftAutosave _autosave;
   late final JSFunction _beforeUnload, _visibility, _pageHide;
   final sessions = EditorSessions();
@@ -79,7 +81,7 @@ class DesktopBackend {
   void _flushInBackground() {
     // Browsers need not wait for asynchronous pagehide handlers. Frequent
     // foreground snapshots are the primary protection, not this last chance.
-    if (!_closing) {
+    if (!_closing && _initialized) {
       unawaited(
         invoke('flushDrafts', null).then<void>(
           (_) {},
@@ -104,12 +106,7 @@ class DesktopBackend {
           'Browser draft storage is unavailable: $error. Download a copy now.';
     }
     _prepareCreation();
-    final blank = EditorSession(sessions.nextId++, title: 'Untitled');
-    sessions.configure(blank);
-    sessions.documents
-      ..clear()
-      ..add(blank);
-    sessions.activeId = blank.id;
+    await workspace.restore();
   }
 
   List<DraftInfo> get _closedDrafts {
@@ -121,7 +118,10 @@ class DesktopBackend {
     ...sessions.state(),
     'drafts': _closedDrafts.map((draft) => draft.toMap()).toList(),
     'recoveryAvailable': _closedDrafts.isNotEmpty,
-    'recoveryError': _storageIssue ?? sessions.active.recoveryError,
+    'recoveryError':
+        _storageIssue ??
+        (sessions.hasDocument ? sessions.active.recoveryError : null),
+    ...workspace.state,
   };
 
   Future<void> _persist(EditorSession session) async {
@@ -150,6 +150,7 @@ class DesktopBackend {
     for (final session in sessions.documents.where((s) => ids.contains(s.id))) {
       await _persist(session);
     }
+    await workspace.save();
   }
 
   Future<void> _refresh() async {
@@ -250,9 +251,27 @@ class DesktopBackend {
     final defaultText = const {'init', 'new', 'closeDocument'}.contains(method)
         ? defaultUserData(args)
         : '';
+    if (!sessions.hasDocument &&
+        !const {
+          'init',
+          'state',
+          'new',
+          'open',
+          'openExternal',
+          'recover',
+          'listDrafts',
+          'discardRecovery',
+          'flushDrafts',
+          'clearTagClipboard',
+        }.contains(method) &&
+        !(method == 'pasteTag' && args['asNew'] == true)) {
+      throw StateError('Create or open a drawing first.');
+    }
     switch (method) {
       case 'init':
         sessions.initializePlaceholder(defaultText);
+      case 'state':
+        break;
       case 'listDrafts':
         await _refresh();
       case 'flushDrafts':
@@ -347,15 +366,25 @@ class DesktopBackend {
             session.recoveryError == null,
             session.recoveryError ?? 'Draft save failed',
           );
-        } else {
-          await _drafts.delete(id);
-          _catalog.removeWhere((draft) => draft.id == id);
+        }
+        require(
+          await workspace.save(excluding: id, repair: true),
+          'The closed tab could not be remembered. This drawing remains open.',
+        );
+        if (!keep) {
+          try {
+            await _drafts.delete(id);
+          } catch (_) {
+            // The tab remains open; restore its manifest entry on failed delete.
+            await workspace.save(repair: true);
+            rethrow;
+          }
+          _catalog.removeWhere((d) => d.id == id);
         }
         _autosave.forget(id);
         _failed.remove(id);
         _prepareCreation();
         sessions.close(id, discard: keep || args['discard'] == true);
-        if (sessions.active.placeholder) sessions.active.title = 'Untitled';
         sessions.initializePlaceholder(defaultText);
       case 'copyTag':
         sessions.copyTag((args['index'] as num).toInt());
@@ -369,18 +398,23 @@ class DesktopBackend {
           sessions.pasteTag(after: (args['after'] as num?)?.toInt());
         }
         _autosave.mark(sessions.activeId);
+        await _flush();
       case 'new':
         _prepareCreation();
         sessions.add(
           newSprite(
-            (args['width'] as num?)?.toInt() ?? 32,
-            (args['height'] as num?)?.toInt() ?? 32,
+            WorkspaceSession.dimension(args['width'] ?? workspace.lastNewWidth),
+            WorkspaceSession.dimension(
+              args['height'] ?? workspace.lastNewHeight,
+            ),
             defaultText,
           ),
           title: 'Untitled ${_untitled++}',
           unsaved: true,
         );
         _autosave.mark(sessions.activeId);
+        workspace.lastNewWidth = engine.document.width;
+        workspace.lastNewHeight = engine.document.height;
         await _flush();
       case 'recover':
         final requested = (args['id'] as num?)?.toInt();
@@ -420,6 +454,29 @@ class DesktopBackend {
         if (const {'stroke', 'edit', 'undo', 'redo'}.contains(method)) {
           _autosave.mark(sessions.activeId);
         }
+    }
+    if (const {
+      'init',
+      'new',
+      'open',
+      'openExternal',
+      'save',
+      'saveAs',
+      'selectDocument',
+      'closeDocument',
+      'recover',
+      'pasteTag',
+    }.contains(method)) {
+      await workspace.save(
+        repair: const {
+          'new',
+          'open',
+          'openExternal',
+          'recover',
+          'pasteTag',
+          'closeDocument',
+        }.contains(method),
+      );
     }
     return _state();
   }

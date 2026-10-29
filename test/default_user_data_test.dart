@@ -23,32 +23,30 @@ void main() {
     expect(newSprite(4, 4, '').data, isNull);
   });
   test(
-    'placeholder only, preserves imported, edited, recovery and existing metadata',
+    'empty init stays empty and preserves imported, edited and recovered metadata',
     () {
       final s = EditorSessions();
       s.initializePlaceholder(raw);
-      expect(s.active.engine.document.data!.text, raw);
-      expect(s.active.engine.dirty, false);
-      s.initializePlaceholder('replacement');
-      expect(s.active.engine.document.data!.text, raw);
+      expect(s.documents, isEmpty);
+      expect(s.state()['hasDocument'], false);
       s.add(SpriteDocument.create()..data = UserData(text: 'imported'));
       s.initializePlaceholder(raw);
       expect(s.active.engine.document.data!.text, 'imported');
       s.add(SpriteDocument.create());
       s.initializePlaceholder(raw);
       expect(s.active.engine.document.data, isNull);
-      final recovery = EditorSessions();
+      final recovery = EditorSessions()..add(SpriteDocument.create());
       recovery.active.engine.recoveryAvailable = true;
       recovery.initializePlaceholder(raw);
       expect(recovery.active.engine.document.data, isNull);
-      final edited = EditorSessions();
+      final edited = EditorSessions()..add(SpriteDocument.create());
       edited.active.engine.dirty = true;
       edited.initializePlaceholder(raw);
       expect(edited.active.engine.document.data, isNull);
       s.close(s.activeId);
       s.close(s.activeId);
       s.initializePlaceholder(raw);
-      expect(s.active.engine.document.data!.text, raw);
+      expect(s.documents, isEmpty);
     },
   );
   test('UTF8 limit validates before replacing a document', () {

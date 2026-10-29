@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'document.dart';
 import 'default_user_data.dart';
 import 'aseprite.dart';
@@ -16,9 +18,7 @@ class EditorSession {
 /// Document ownership is independent from viewport selection. Switching never
 /// serializes through a shared engine, so undo and selected layer/frame survive.
 class EditorSessions {
-  EditorSessions({this.residentBudget = 64 * 1024 * 1024}) {
-    configure(documents.first);
-  }
+  EditorSessions({this.residentBudget = 64 * 1024 * 1024});
   final int residentBudget;
   static int _userBytes(UserData? d) =>
       (d?.text?.length ?? 0) * 2 + (d?.properties?.length ?? 0) + 16;
@@ -76,8 +76,9 @@ class EditorSessions {
     );
   }
 
-  final List<EditorSession> documents = [EditorSession(1)];
-  int activeId = 1, nextId = 2;
+  final List<EditorSession> documents = [];
+  int activeId = 0, nextId = 1;
+  bool get hasDocument => documents.isNotEmpty;
   SpriteDocument? clipboard;
   EditorSession get active => documents.firstWhere((s) => s.id == activeId);
   EditorSession add(
@@ -114,6 +115,7 @@ class EditorSessions {
 
   void initializePlaceholder(String text) {
     defaultUserData({'defaultUserData': text});
+    if (!hasDocument) return;
     final session = active;
     if (text.isEmpty ||
         !session.placeholder ||
@@ -142,11 +144,8 @@ class EditorSessions {
     );
     documents.removeAt(index);
     if (documents.isEmpty) {
-      final blank = EditorSession(nextId++);
-      configure(blank);
-      documents.add(blank);
-    }
-    if (activeId == id) {
+      activeId = 0;
+    } else if (activeId == id) {
       activeId = documents[index.clamp(0, documents.length - 1)].id;
     }
   }
@@ -242,11 +241,33 @@ class EditorSessions {
     );
   }
 
+  static Map<String, dynamic> get emptyState => {
+    'width': 0,
+    'height': 0,
+    'frame': 0,
+    'layer': 0,
+    'depth': 32,
+    'transparentIndex': 0,
+    'paletteNames': <String>[],
+    'dirty': false,
+    'canUndo': false,
+    'canRedo': false,
+    'recoveryAvailable': false,
+    'pixels': Uint8List(0),
+    'previousPixels': null,
+    'palette': <int>[],
+    'layers': <Map<String, dynamic>>[],
+    'frames': <Map<String, dynamic>>[],
+    'tags': <Map<String, dynamic>>[],
+    'userData': <String, dynamic>{},
+  };
+
   Map<String, dynamic> state() => {
-    ...active.engine.state(),
+    ...(hasDocument ? active.engine.state() : emptyState),
+    'hasDocument': hasDocument,
     'documentId': activeId,
     'hasTagClipboard': clipboard != null,
-    'recoveryError': active.recoveryError,
+    'recoveryError': hasDocument ? active.recoveryError : null,
     'documents': documents
         .map(
           (s) => {

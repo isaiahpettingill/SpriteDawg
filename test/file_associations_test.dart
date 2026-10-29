@@ -19,6 +19,7 @@ void main() {
         supportDirectory: () async => Directory('${dir.path}/support'),
       );
       await backend.invoke('init', null);
+      await backend.invoke('new', null);
       await backend.invoke('stroke', {
         'tool': 'pencil',
         'points': [
@@ -54,6 +55,7 @@ void main() {
       backend.sessions.select(original);
       expect(backend.engine.encode(), bytes);
       expect(backend.engine.state()['canUndo'], isTrue);
+      await backend.dispose();
     },
   );
 

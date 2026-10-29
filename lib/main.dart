@@ -1,3 +1,4 @@
+import 'new_canvas_dialog.dart';
 import 'draft_picker.dart';
 import 'default_user_data_dialog.dart';
 import 'dart:async';
@@ -150,10 +151,6 @@ class _EditorScreenState extends State<EditorScreen>
   Future<void> initialize() async {
     await e.call('init');
     if (!mounted) return;
-    if (e.state['recoveryAvailable'] == true) {
-      await showDraftPicker(context, e);
-      if (mounted) setState(() => fitToken++);
-    }
     _initialized = true;
     try {
       await _externalChannel.invokeMethod<void>('ready');
@@ -372,25 +369,28 @@ class _EditorScreenState extends State<EditorScreen>
     }
   }
 
+  bool _creatingCanvas = false;
   Future<void> newProject() async {
-    if (!await beforeDocumentSwitch()) return;
-    final raw = await input(
-      'New canvas',
-      '32 × 32',
-      hint: 'Width × height, e.g. 64 × 64',
-    );
-    if (raw == null) return;
-    final dims = raw.split(RegExp(r'\s*[xX×,]\s*')).map(int.tryParse).toList();
-    if (dims.length != 2 || dims.any((n) => n == null || n < 1 || n > 2048)) {
-      notice('Use dimensions from 1 to 2048, for example 32 × 32.');
-      return;
-    }
-    stop();
-    if (await e.call('new', {'width': dims[0], 'height': dims[1]}) && mounted) {
-      setState(() {
-        fitToken++;
-        selectedTag = -1;
-      });
+    if (_creatingCanvas || e.busy) return;
+    _creatingCanvas = true;
+    try {
+      if (!await beforeDocumentSwitch() || !mounted) return;
+      final dims = await showNewCanvasDialog(
+        context,
+        width: e.state['lastNewWidth'] as int? ?? 32,
+        height: e.state['lastNewHeight'] as int? ?? 32,
+      );
+      if (dims == null || !mounted) return;
+      stop();
+      if (await e.call('new', {'width': dims.$1, 'height': dims.$2}) &&
+          mounted) {
+        setState(() {
+          fitToken++;
+          selectedTag = -1;
+        });
+      }
+    } finally {
+      _creatingCanvas = false;
     }
   }
 
@@ -608,6 +608,17 @@ class _EditorScreenState extends State<EditorScreen>
 
   Future<void> menu(String action) async {
     stop();
+    if (!e.hasDocument &&
+        !const {
+          'new',
+          'open',
+          'drafts',
+          'defaultUserData',
+          'help',
+          'updates',
+        }.contains(action)) {
+      return;
+    }
     switch (action) {
       case 'new':
         await newProject();
@@ -805,7 +816,9 @@ class _EditorScreenState extends State<EditorScreen>
                       ),
                     ),
                     Text(
-                      '${e.width} × ${e.height} · ${e.state['depth'] ?? 32}-bit',
+                      e.hasDocument
+                          ? '${e.width} × ${e.height} · ${e.state['depth'] ?? 32}-bit'
+                          : 'No canvas open',
                       style: Theme.of(context).textTheme.labelSmall,
                     ),
                   ],
@@ -818,7 +831,7 @@ class _EditorScreenState extends State<EditorScreen>
                   ),
                   IconButton(
                     tooltip: 'Save Aseprite',
-                    onPressed: e.busy
+                    onPressed: e.busy || !e.hasDocument
                         ? null
                         : () {
                             stop();
@@ -835,17 +848,19 @@ class _EditorScreenState extends State<EditorScreen>
                         value: 'new',
                         child: Text('New canvas'),
                       ),
-                      const PopupMenuItem(
+                      PopupMenuItem(
                         value: 'saveAs',
-                        child: Text('Save as…'),
+                        enabled: e.hasDocument,
+                        child: const Text('Save as…'),
                       ),
                       const PopupMenuItem(
                         value: 'drafts',
                         child: Text('Internal drafts…'),
                       ),
-                      const PopupMenuItem(
+                      PopupMenuItem(
                         value: 'exportPng',
-                        child: Text('Export…'),
+                        enabled: e.hasDocument,
+                        child: const Text('Export…'),
                       ),
                       const PopupMenuDivider(),
                       CheckedPopupMenuItem(
@@ -873,21 +888,25 @@ class _EditorScreenState extends State<EditorScreen>
                         checked: canvasViewMode == CanvasViewMode.slide,
                         child: const Text('View · Slide'),
                       ),
-                      const PopupMenuItem(
+                      PopupMenuItem(
                         value: 'fit',
-                        child: Text('Fit canvas'),
+                        enabled: e.hasDocument,
+                        child: const Text('Fit canvas'),
                       ),
-                      const PopupMenuItem(
+                      PopupMenuItem(
                         value: 'flipHorizontal',
-                        child: Text('Flip active cel horizontally'),
+                        enabled: e.hasDocument,
+                        child: const Text('Flip active cel horizontally'),
                       ),
-                      const PopupMenuItem(
+                      PopupMenuItem(
                         value: 'flipVertical',
-                        child: Text('Flip active cel vertically'),
+                        enabled: e.hasDocument,
+                        child: const Text('Flip active cel vertically'),
                       ),
-                      const PopupMenuItem(
+                      PopupMenuItem(
                         value: 'metadata',
-                        child: Text('User data'),
+                        enabled: e.hasDocument,
+                        child: const Text('User data'),
                       ),
                       const PopupMenuItem(
                         value: 'defaultUserData',
@@ -912,170 +931,186 @@ class _EditorScreenState extends State<EditorScreen>
             children: [
               if (recoveryIssue != null) recoveryBanner(),
               Expanded(
-                child: ResponsiveEditorShell(
-                  documentTabs:
-                      panel == 'tags' &&
-                          MediaQuery.viewInsetsOf(context).bottom > 0
-                      ? null
-                      : DocumentTabs(
-                          editor: e,
-                          onNew: () => newProject(),
-                          onOpen: () => open(),
-                          beforeSwitch: beforeDocumentSwitch,
+                child: !e.hasDocument
+                    ? emptyWorkspace()
+                    : ResponsiveEditorShell(
+                        documentTabs:
+                            panel == 'tags' &&
+                                MediaQuery.viewInsetsOf(context).bottom > 0
+                            ? null
+                            : DocumentTabs(
+                                editor: e,
+                                onNew: () => newProject(),
+                                onOpen: () => open(),
+                                beforeSwitch: beforeDocumentSwitch,
+                              ),
+                        canvas: Column(
+                          children: [
+                            paletteStrip(),
+                            if (hasStrokeOptions) strokeOptions(),
+                            Expanded(child: drawingCanvas()),
+                          ],
                         ),
-                  canvas: Column(
-                    children: [
-                      paletteStrip(),
-                      if (hasStrokeOptions) strokeOptions(),
-                      Expanded(child: drawingCanvas()),
-                    ],
-                  ),
-                  tools: toolRail(),
-                  layers: layerPanel(),
-                  timeline: wideTimeline(),
-                  timelineHeight: panel == 'tags' ? 288 : 168,
-                  mobileBody: Column(
-                    children: [
-                      SizedBox(
-                        height: 3,
-                        child: e.busy ? const LinearProgressIndicator() : null,
-                      ),
-                      if (!compactTags)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  tool == 'gradient'
-                                      ? 'Gradient · whole active layer'
-                                      : '${tools[tool]!.$2} · $layerName',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(
-                                    context,
-                                  ).textTheme.labelMedium,
+                        tools: toolRail(),
+                        layers: layerPanel(),
+                        timeline: wideTimeline(),
+                        timelineHeight: panel == 'tags' ? 288 : 168,
+                        mobileBody: Column(
+                          children: [
+                            SizedBox(
+                              height: 3,
+                              child: e.busy
+                                  ? const LinearProgressIndicator()
+                                  : null,
+                            ),
+                            if (!compactTags)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        tool == 'gradient'
+                                            ? 'Gradient · whole active layer'
+                                            : '${tools[tool]!.$2} · $layerName',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.labelMedium,
+                                      ),
+                                    ),
+                                    if (tightHeight)
+                                      IconButton(
+                                        tooltip:
+                                            'Manage palette and color mode',
+                                        onPressed: managePalette,
+                                        icon: const Icon(
+                                          Icons.palette_outlined,
+                                        ),
+                                      ),
+                                    if (tightHeight) mirroringMenu(),
+                                    if (tightHeight) compactBrushMenu(),
+                                    IconButton(
+                                      tooltip: 'Undo',
+                                      onPressed: e.canUndo && !e.busy
+                                          ? () {
+                                              stop();
+                                              e.call('undo');
+                                            }
+                                          : null,
+                                      icon: const Icon(Icons.undo),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Redo',
+                                      onPressed: e.canRedo && !e.busy
+                                          ? () {
+                                              stop();
+                                              e.call('redo');
+                                            }
+                                          : null,
+                                      icon: const Icon(Icons.redo),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Fit canvas',
+                                      onPressed: () =>
+                                          setState(() => fitToken++),
+                                      icon: const Icon(Icons.fit_screen),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              if (tightHeight)
-                                IconButton(
-                                  tooltip: 'Manage palette and color mode',
-                                  onPressed: managePalette,
-                                  icon: const Icon(Icons.palette_outlined),
-                                ),
-                              if (tightHeight) mirroringMenu(),
-                              if (tightHeight) compactBrushMenu(),
-                              IconButton(
-                                tooltip: 'Undo',
-                                onPressed: e.canUndo && !e.busy
-                                    ? () {
-                                        stop();
-                                        e.call('undo');
-                                      }
-                                    : null,
-                                icon: const Icon(Icons.undo),
-                              ),
-                              IconButton(
-                                tooltip: 'Redo',
-                                onPressed: e.canRedo && !e.busy
-                                    ? () {
-                                        stop();
-                                        e.call('redo');
-                                      }
-                                    : null,
-                                icon: const Icon(Icons.redo),
-                              ),
-                              IconButton(
-                                tooltip: 'Fit canvas',
-                                onPressed: () => setState(() => fitToken++),
-                                icon: const Icon(Icons.fit_screen),
-                              ),
-                            ],
-                          ),
-                        ),
-                      Expanded(
-                        child: LayoutBuilder(
-                          builder: (context, box) {
-                            final tagHeight = (box.maxHeight * .78).clamp(
-                              0.0,
-                              tightTagKeyboard ? 132.0 : 248.0,
-                            );
-                            final panelHeight = panel == 'tags'
-                                ? tagHeight
-                                : panel == 'frames'
-                                ? 120.0
-                                : panel == 'layers'
-                                ? (box.maxHeight * .6).clamp(0.0, 180.0)
-                                : 0.0;
-                            return Column(
-                              children: [
-                                Expanded(child: drawingCanvas()),
-                                SizedBox(
-                                  height: panelHeight,
-                                  child: Stack(
+                            Expanded(
+                              child: LayoutBuilder(
+                                builder: (context, box) {
+                                  final tagHeight = (box.maxHeight * .78).clamp(
+                                    0.0,
+                                    tightTagKeyboard ? 132.0 : 248.0,
+                                  );
+                                  final panelHeight = panel == 'tags'
+                                      ? tagHeight
+                                      : panel == 'frames'
+                                      ? 120.0
+                                      : panel == 'layers'
+                                      ? (box.maxHeight * .6).clamp(0.0, 180.0)
+                                      : 0.0;
+                                  return Column(
                                     children: [
-                                      if (panel == 'layers') layerPanel(),
-                                      if (panel == 'frames') framePanel(),
-                                      // Retain unfinished names while changing panels.
-                                      Offstage(
-                                        offstage: panel != 'tags',
-                                        child: tagPanel(),
+                                      Expanded(child: drawingCanvas()),
+                                      SizedBox(
+                                        height: panelHeight,
+                                        child: Stack(
+                                          children: [
+                                            if (panel == 'layers') layerPanel(),
+                                            if (panel == 'frames') framePanel(),
+                                            // Retain unfinished names while changing panels.
+                                            Offstage(
+                                              offstage: panel != 'tags',
+                                              child: tagPanel(),
+                                            ),
+                                          ],
+                                        ),
                                       ),
                                     ],
+                                  );
+                                },
+                              ),
+                            ),
+                            if (!hideDrawingStrips && !tightHeight)
+                              paletteStrip(),
+                            if (!hideDrawingStrips &&
+                                !tightHeight &&
+                                hasStrokeOptions)
+                              strokeOptions(),
+                            if (!hideDrawingStrips)
+                              Wrap(
+                                alignment: WrapAlignment.center,
+                                children: groupedTools(),
+                              ),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                              children: [
+                                panelButton(
+                                  'layers',
+                                  Icons.layers_outlined,
+                                  'Layers',
+                                ),
+                                panelButton(
+                                  'frames',
+                                  Icons.view_carousel_outlined,
+                                  'Frames',
+                                ),
+                                panelButton(
+                                  'tags',
+                                  Icons.sell_outlined,
+                                  'Tags',
+                                ),
+                                IconButton(
+                                  iconSize: 32,
+                                  constraints: const BoxConstraints(
+                                    minWidth: 56,
+                                    minHeight: 48,
+                                  ),
+                                  tooltip: playing
+                                      ? 'Stop animation'
+                                      : 'Play animation',
+                                  onPressed:
+                                      e.maps('frames').length > 1 && !e.busy
+                                      ? play
+                                      : null,
+                                  icon: Icon(
+                                    playing
+                                        ? Icons.pause_circle
+                                        : Icons.play_circle_outline,
                                   ),
                                 ),
                               ],
-                            );
-                          },
+                            ),
+                          ],
                         ),
                       ),
-                      if (!hideDrawingStrips && !tightHeight) paletteStrip(),
-                      if (!hideDrawingStrips &&
-                          !tightHeight &&
-                          hasStrokeOptions)
-                        strokeOptions(),
-                      if (!hideDrawingStrips)
-                        Wrap(
-                          alignment: WrapAlignment.center,
-                          children: groupedTools(),
-                        ),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          panelButton(
-                            'layers',
-                            Icons.layers_outlined,
-                            'Layers',
-                          ),
-                          panelButton(
-                            'frames',
-                            Icons.view_carousel_outlined,
-                            'Frames',
-                          ),
-                          panelButton('tags', Icons.sell_outlined, 'Tags'),
-                          IconButton(
-                            iconSize: 32,
-                            constraints: const BoxConstraints(
-                              minWidth: 56,
-                              minHeight: 48,
-                            ),
-                            tooltip: playing
-                                ? 'Stop animation'
-                                : 'Play animation',
-                            onPressed: e.maps('frames').length > 1 && !e.busy
-                                ? play
-                                : null,
-                            icon: Icon(
-                              playing
-                                  ? Icons.pause_circle
-                                  : Icons.play_circle_outline,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
               ),
             ],
           ),
@@ -1148,6 +1183,7 @@ class _EditorScreenState extends State<EditorScreen>
   }
 
   Future<bool> fileAction(String method) async {
+    if (!e.hasDocument) return false;
     stop();
     if (!await (_tagEditorKey.currentState?.savePending() ??
         Future.value(true))) {
@@ -1166,6 +1202,44 @@ class _EditorScreenState extends State<EditorScreen>
     }
     return null;
   }
+
+  Widget emptyWorkspace() => Center(
+    key: const Key('empty-workspace'),
+    child: SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.image_outlined, size: 48),
+          const SizedBox(height: 16),
+          const Text('Create a new sprite or open a drawing.'),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            alignment: WrapAlignment.center,
+            children: [
+              FilledButton.icon(
+                onPressed: e.busy ? null : newProject,
+                icon: const Icon(Icons.add),
+                label: const Text('New canvas'),
+              ),
+              OutlinedButton.icon(
+                onPressed: e.busy ? null : open,
+                icon: const Icon(Icons.folder_open),
+                label: const Text('Open drawing'),
+              ),
+              if (e.maps('drafts').isNotEmpty)
+                TextButton(
+                  onPressed: e.busy ? null : () => showDraftPicker(context, e),
+                  child: const Text('Internal drafts'),
+                ),
+            ],
+          ),
+        ],
+      ),
+    ),
+  );
 
   Widget recoveryBanner() {
     final problem = e
@@ -1195,11 +1269,19 @@ class _EditorScreenState extends State<EditorScreen>
                         if (await beforeDocumentSwitch()) {
                           await e.call('selectDocument', {'id': problem['id']});
                         }
-                      } else {
+                      } else if (e.hasDocument) {
                         await fileAction('saveAs');
+                      } else {
+                        await showDraftPicker(context, e);
                       }
                     },
-              child: Text(problem == null ? 'Save as' : 'Open drawing'),
+              child: Text(
+                !e.hasDocument
+                    ? 'Internal drafts'
+                    : problem == null
+                    ? 'Save as'
+                    : 'Open drawing',
+              ),
             ),
           ],
         ),

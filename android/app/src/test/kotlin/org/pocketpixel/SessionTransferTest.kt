@@ -31,7 +31,7 @@ class SessionTransferTest {
     @Test fun dirtyCloseRequiresExplicitDiscard(){
         val s=EditorSessions();val a=s.add(source(),unsaved=true);val b=s.add(Document.create())
         try{s.close(a.id);fail("must confirm discard")}catch(_:IllegalArgumentException){}
-        s.close(b.id);assertEquals(a.id,s.activeId);s.close(a.id,true);assertEquals(1,s.documents.size)
+        s.close(b.id);assertEquals(a.id,s.activeId);s.close(a.id,true);assertEquals(0,s.documents.size);assertEquals(false,s.state(false)["hasDocument"])
     }
     @Test fun pasteAsNewAndDestinationLinksRemainIndependent(){
         val s=EditorSessions();val origin=s.add(source());s.copyTag(0);s.pasteTagAsNew()
@@ -62,3 +62,4 @@ class SessionTransferTest {
         assertEquals(2000,restored[0].engine.document.data!!.text!!.length);assertEquals(1000,restored[1].engine.document.data!!.text!!.length);assertEquals(b.id,s.activeId)
     }
 }
+

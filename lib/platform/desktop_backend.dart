@@ -1,3 +1,4 @@
+import '../drafts/workspace_session.dart';
 import 'dart:io';
 
 import '../drafts/draft_autosave.dart';
@@ -37,6 +38,8 @@ class DesktopBackend {
   final Future<Directory> Function() _supportDirectory;
   final DraftStorage? _providedStorage;
   late DraftRepository drafts;
+  late WorkspaceSession workspace;
+  String? _storageIssue;
   bool _storeReady = false;
   List<DraftInfo> _catalog = [];
   late final _autosave = DraftAutosave(
@@ -77,7 +80,11 @@ class DesktopBackend {
 
   Directory? _base;
   set _recoveryError(String? value) {
-    sessions.active.recoveryError = value;
+    if (sessions.hasDocument) {
+      sessions.active.recoveryError = value;
+    } else {
+      _storageIssue = value;
+    }
   }
 
   static const _ase = XTypeGroup(
@@ -104,14 +111,8 @@ class DesktopBackend {
     for (final draft in _catalog) {
       if (draft.id >= sessions.nextId) sessions.nextId = draft.id + 1;
     }
-    if (_catalog.isNotEmpty) {
-      sessions.documents.clear();
-      final blank = EditorSession(sessions.nextId++);
-      sessions.configure(blank);
-      sessions.documents.add(blank);
-      sessions.activeId = blank.id;
-    }
-    engine.recoveryAvailable = _catalog.isNotEmpty;
+    workspace = WorkspaceSession(drafts, sessions);
+    await workspace.restore();
   }
 
   Map<String, dynamic> _state() {
@@ -121,6 +122,8 @@ class DesktopBackend {
       ...sessions.state(),
       'drafts': available.map((d) => d.toMap()).toList(),
       'recoveryAvailable': available.isNotEmpty,
+      if (_storageIssue != null) 'recoveryError': _storageIssue,
+      ...workspace.state,
     };
   }
 
@@ -167,19 +170,7 @@ class DesktopBackend {
         await _persist(session);
       }
     }
-  }
-
-  Future<void> _clearRecovery() async {
-    _autosave.forget(sessions.activeId);
-    try {
-      await drafts.delete(sessions.activeId);
-      _catalog.removeWhere((d) => d.id == sessions.activeId);
-      engine.recoveryAvailable = false;
-      _recoveryError = null;
-    } catch (error) {
-      _recoveryError =
-          'Project is safe, but its old draft could not be removed: $error';
-    }
+    await workspace.save();
   }
 
   Future<Map<String, dynamic>?> invoke(
@@ -201,9 +192,27 @@ class DesktopBackend {
     final defaultText = const {'init', 'new', 'closeDocument'}.contains(method)
         ? defaultUserData(args)
         : '';
+    if (!sessions.hasDocument &&
+        !const {
+          'init',
+          'state',
+          'new',
+          'open',
+          'openExternal',
+          'recover',
+          'listDrafts',
+          'discardRecovery',
+          'flushDrafts',
+          'clearTagClipboard',
+        }.contains(method) &&
+        !(method == 'pasteTag' && args['asNew'] == true)) {
+      throw StateError('Create or open a drawing first.');
+    }
     switch (method) {
       case 'init':
         sessions.initializePlaceholder(defaultText);
+      case 'state':
+        break;
       case 'saveExport':
         await _flush();
         return ExportFiles().save(args);
@@ -244,6 +253,7 @@ class DesktopBackend {
         opened.path = file.path;
         opened.source = file.path;
         _autosave.mark(opened.id);
+        await _flush();
       case 'save':
       case 'saveAs':
         var path = method == 'save' ? _path : null;
@@ -260,7 +270,7 @@ class DesktopBackend {
         sessions.active.source = path;
         sessions.active.title = path.split('/').last;
         engine.saved();
-        await _clearRecovery();
+        await _persist(sessions.active);
       case 'exportPng':
         await _flush();
         final chosen = await _savePath(true);
@@ -340,17 +350,28 @@ class DesktopBackend {
           !session.engine.dirty || args['discard'] == true || keep,
           'Save this document, keep its draft, or confirm discarding changes.',
         );
-        _autosave.forget(id);
         if (keep) {
           await _persist(session);
           require(
             session.recoveryError == null,
             'Draft could not be kept. This document remains open. Save a copy first.',
           );
-        } else {
-          await drafts.delete(id);
+        }
+        require(
+          await workspace.save(excluding: id, repair: true),
+          'The closed tab could not be remembered. This drawing remains open.',
+        );
+        if (!keep) {
+          try {
+            await drafts.delete(id);
+          } catch (_) {
+            // The tab remains open; restore its manifest entry on failed delete.
+            await workspace.save(repair: true);
+            rethrow;
+          }
           _catalog.removeWhere((d) => d.id == id);
         }
+        _autosave.forget(id);
         sessions.close(id, discard: args['discard'] == true || keep);
         sessions.initializePlaceholder(defaultText);
       case 'clearTagClipboard':
@@ -364,16 +385,22 @@ class DesktopBackend {
           sessions.pasteTag(after: (args['after'] as num?)?.toInt());
         }
         _autosave.mark(sessions.activeId);
+        await _flush();
       case 'new':
         sessions.add(
           newSprite(
-            (args['width'] as num?)?.toInt() ?? 32,
-            (args['height'] as num?)?.toInt() ?? 32,
+            WorkspaceSession.dimension(args['width'] ?? workspace.lastNewWidth),
+            WorkspaceSession.dimension(
+              args['height'] ?? workspace.lastNewHeight,
+            ),
             defaultText,
           ),
           unsaved: true,
         );
         _autosave.mark(sessions.activeId);
+        workspace.lastNewWidth = engine.document.width;
+        workspace.lastNewHeight = engine.document.height;
+        await _flush();
       default:
         engine.invoke(method, args);
         if (method == 'new') {
@@ -383,6 +410,29 @@ class DesktopBackend {
         if (['new', 'stroke', 'edit', 'undo', 'redo'].contains(method)) {
           _autosave.mark(sessions.activeId);
         }
+    }
+    if (const {
+      'init',
+      'new',
+      'open',
+      'openExternal',
+      'save',
+      'saveAs',
+      'selectDocument',
+      'closeDocument',
+      'recover',
+      'pasteTag',
+    }.contains(method)) {
+      await workspace.save(
+        repair: const {
+          'new',
+          'open',
+          'openExternal',
+          'recover',
+          'pasteTag',
+          'closeDocument',
+        }.contains(method),
+      );
     }
     return _state();
   }

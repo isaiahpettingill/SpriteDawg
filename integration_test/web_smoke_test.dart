@@ -57,7 +57,7 @@ void main() {
     });
     final editor = Editor(transport: backend.invoke, defaultsStore: restart);
     expect(await editor.call('init'), true, reason: editor.error);
-    expect(backend.engine.document.data!.text, raw);
+    expect(backend.sessions.documents, isEmpty);
     expect(await editor.call('new', {'width': 8, 'height': 8}), true);
     expect(AsepriteCodec.decode(backend.engine.encode()).data!.text, raw);
     final blank = AsepriteCodec.encode(SpriteDocument.create());
@@ -92,8 +92,8 @@ void main() {
       }),
       true,
     );
-    expect(backend.engine.document.data!.text, raw);
-    expect(backend.engine.dirty, false);
+    expect(backend.sessions.documents, isEmpty);
+    expect(backend.sessions.state()['dirty'], false);
     web.window.localStorage.removeItem(key);
     editor.dispose();
   });

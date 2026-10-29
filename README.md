@@ -94,6 +94,16 @@ windows; desktop packaging declares mobile support to Linux phone shells.
 
 ## Documents, tags and palettes
 
+**New canvas** has separate Width and Height fields (1–2048 pixels), prefilled
+with the last successfully created size. Cancel leaves the workspace unchanged.
+Startup restores the tabs left open last time, in order with the active tab selected,
+from app-private snapshots—not by overwriting or reopening original files. Restored
+drawings are unsaved copies; use Save as to choose their destination. Explicitly
+closed tabs stay closed, including drafts kept for later. A new installation or an
+empty workspace stays blank until you choose New canvas or Open drawing.
+Damaged snapshots remain available in Internal drafts; other readable tabs still
+restore. Tab restoration does not preserve undo history.
+
 Open up to eight documents in tabs with independent selection, undo, save targets
 and recovery snapshots. Closing unsaved work requires explicit confirmation. On
 roomier tablet/desktop windows, tools, canvas, layers and frame/tag workspace remain

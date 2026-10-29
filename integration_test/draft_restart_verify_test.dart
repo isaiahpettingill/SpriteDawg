@@ -17,7 +17,7 @@ import 'draft_restart_seed_test.dart'
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
-  testWidgets('recover exact drafts after Android force-stop and relaunch', (
+  testWidgets('automatically restore exact tabs after force-stop and relaunch', (
     tester,
   ) async {
     expect(defaultTargetPlatform, TargetPlatform.android);
@@ -51,31 +51,32 @@ void main() {
     }
 
     final initial = await restartInvoke('init');
-    final drafts = restartMaps(initial, 'drafts');
-    expect(initial['recoveryAvailable'], true);
+    expect(initial['recoveryAvailable'], false);
+    expect(restartMaps(initial, 'drafts'), isEmpty);
+    final documents = restartMaps(initial, 'documents');
     expect(
-      drafts.map((draft) => draft['id']).toSet(),
-      expectedIds,
-      reason: 'Refusing unexpected/missing drafts; no unknown work is deleted.',
+      documents.map((document) => document['id']).toList(),
+      identities.map((identity) => identity['id']).toList(),
+      reason: 'Startup must restore the same tabs in their original order.',
     );
-    expect(drafts, hasLength(2));
-    expect(restartMaps(initial, 'documents'), hasLength(1));
-    expect(initial['dirty'], false);
+    expect(initial['documentId'], saved['activeId']);
+    expect(initial['hasDocument'], true);
+    expect(initial['dirty'], true);
+    expect(initial['lastNewWidth'], restartDraftFixtures.last.width);
+    expect(initial['lastNewHeight'], restartDraftFixtures.last.height);
     expect(initial['externalPending'], false);
     for (var index = 0; index < restartDraftFixtures.length; index++) {
       final fixture = restartDraftFixtures[index];
       final identity = identities[index];
-      final draft = drafts.firstWhere(
+      final document = documents.firstWhere(
         (candidate) => candidate['id'] == identity['id'],
       );
-      expect(draft['title'], identity['title']);
-      expect(draft['width'], fixture.width);
-      expect(draft['height'], fixture.height);
-      expect(draft['frames'], 1);
-      expect(draft['updatedAt'], greaterThan(0));
-      expect(draft['error'], isNull);
-      expect(draft['fallback'], false);
-      final recovered = await restartInvoke('recover', {'id': identity['id']});
+      expect(document['title'], identity['title']);
+      expect(document['draftSavedAt'], greaterThan(0));
+      expect(document['recoveryError'], isNull);
+      final recovered = await restartInvoke('selectDocument', {
+        'id': identity['id'],
+      });
       expect(recovered['documentId'], identity['id']);
       expect(recovered['width'], fixture.width);
       expect(recovered['height'], fixture.height);
@@ -107,6 +108,8 @@ void main() {
     final finished = await restartInvoke('flushDrafts');
     expect(restartMaps(finished, 'drafts'), isEmpty);
     expect(finished['dirty'], false);
+    expect(finished['hasDocument'], false);
+    expect(restartMaps(finished, 'documents'), isEmpty);
     await manifest.delete();
   });
 }

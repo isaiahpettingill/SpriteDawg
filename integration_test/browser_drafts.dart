@@ -97,14 +97,15 @@ void registerBrowserDraftTests() {
     ]);
     await backend.dispose();
     final state = (await restarted.invoke('init', null))!;
-    final drafts = (state['drafts'] as List).cast<Map>();
-    expect(drafts.map((draft) => draft['id']).toSet(), {imported, unsaved});
-    expect(drafts.every((draft) => (draft['updatedAt'] as int) > 0), true);
-    await restarted.invoke('recover', {'id': unsaved});
+    final tabs = (state['documents'] as List).cast<Map>();
+    expect(tabs.map((tab) => tab['id']), [imported, unsaved]);
+    expect(restarted.sessions.activeId, imported);
+    expect(state['drafts'], isEmpty);
+    await restarted.invoke('selectDocument', {'id': unsaved});
     expect(restarted.sessions.activeId, unsaved);
     expect(restarted.engine.document.composite(0).take(2), [0xffff0000, 0xff00ff00]);
     expect(restarted.engine.dirty, true);
-    await restarted.invoke('recover', {'id': imported});
+    await restarted.invoke('selectDocument', {'id': imported});
     expect(restarted.sessions.active.title, 'source.aseprite');
     expect(restarted.sessions.active.source, 'source.aseprite');
     expect(restarted.sessions.active.path, isNull);
@@ -138,10 +139,11 @@ void registerBrowserDraftTests() {
     await storage.close();
     final state = (await restarted.invoke('init', null))!;
     final drafts = (state['drafts'] as List).cast<Map>();
-    expect(drafts.singleWhere((draft) => draft['id'] == good)['fallback'], true);
+    expect(restarted.sessions.activeId, good);
+    expect(state['recoveryError'], isNotNull);
     expect(drafts.singleWhere((draft) => draft['id'] == corrupt)['error'], isNotNull);
     await expectLater(restarted.invoke('recover', {'id': corrupt}), throwsFormatException);
-    await restarted.invoke('recover', {'id': good});
+    await restarted.invoke('selectDocument', {'id': good});
     expect(restarted.engine.document.composite(0)[0], 0xffff0000);
     expect(await restartStorage.read(corrupt), isNotEmpty);
   });
@@ -244,7 +246,7 @@ void registerBrowserDraftTests() {
     );
     await backend.dispose();
     await restarted.invoke('init', null);
-    await restarted.invoke('recover', {'id': id});
+    expect(restarted.sessions.activeId, id);
     expect(restarted.engine.document.composite(0)[0], 0xff123456);
   });
 
@@ -287,7 +289,7 @@ void registerBrowserDraftTests() {
     expect(backend.engine.document.composite(0)[0], 0xff123456);
     expect(backend.engine.document.composite(0)[1], 0);
     await restarted.invoke('init', null);
-    await restarted.invoke('recover', {'id': id});
+    expect(restarted.sessions.activeId, id);
     expect(restarted.engine.document.composite(0)[0], 0xff123456);
     expect(restarted.engine.document.composite(0)[1], 0);
   });
