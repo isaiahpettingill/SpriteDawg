@@ -8,11 +8,28 @@ MIT licensed, no ads, accounts, tracking, networking or broad Android storage pe
 
 ## Draw
 
+- **Select** (dashed-square toolbar button, desktop **M**) chooses a rectangular
+  region on the active layer. Drag inside the outline to move; drag outside to
+  select again. Copy, Cut, Paste, Delete and Deselect appear above the canvas;
+  desktop Ctrl/Cmd-C/X/V, Delete and Escape work while the canvas is focused.
+  Moves stay inside the canvas, so dragging beyond an edge never loses pixels.
+  Each move, cut, paste or delete is one undo step. Copy and selection do not
+  change the drawing. Two-finger navigation or pointer cancellation cancels the
+  unfinished selection/move. Switching frame/layer/document, undoing or choosing
+  another tool clears the outline. The app-local pixel clipboard remains until
+  the canvas is closed; this is separate from the animation-tag clipboard.
+  Paste replaces the selected-sized rectangle (including transparent pixels)
+  at the selection's top-left, or at the canvas origin without a selection.
+  The packed pixel clipboard is bounded to 4 MiB (1,048,576 pixels).
+  Indexed values are exact; a different indexed palette/mode is refused, not
+  silently recolored. Hidden, locked and background layers are protected.
+  In tiled/slide views, Select operates only on the central editable canvas.
+
 - Pencil, eraser, flood fill, eyedropper, line, outlined/filled rectangles and
   ellipses, dispersed spray, soft airbrush, blur, jumble and pan. The eraser has its own eraser icon.
 - Long-hold a toolbar group to choose a subtool (right-click or the Menu key on desktop).
   Tap to use its last-selected tool; groups include ink, fill/gradient, shapes and effects.
-  Filled rectangles/ellipses live with the outline shapes. Eight touch-sized group buttons
+  Filled rectangles/ellipses live with the outline shapes. Touch-sized group buttons
   wrap on very narrow phones rather than hiding tools in a long scrolling strip.
 - The texture group includes **Bark**: irregular vertical grooves, lit ridges and
   occasional knots, using perceptually related shades from your chosen palette.

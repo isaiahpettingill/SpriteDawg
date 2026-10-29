@@ -86,6 +86,7 @@ class EditorEngine {
         val action = args["action"] as? String ?: error("Missing edit action")
         var nextFrame = frame; var nextLayer = layer
         mutate { d -> when(action) {
+            "region" -> editRegion(d,frame,layer,args)
             "paletteAdd", "paletteEdit", "paletteMove", "paletteRemove", "palettePreset", "convertMode" -> applyPaletteAction(d, args, frame)
             "addLayer" -> { require(d.layers.size < 256); d.layers.add(Layer(args["name"] as? String ?: "Layer ${d.layers.size+1}")); d.frames.forEach { it.cels.add(null) }; nextLayer=d.layers.lastIndex }
             "deleteLayer" -> { require(d.layers.size > 1) { "Keep at least one layer" }; d.layers.removeAt(layer); d.frames.forEach { it.cels.removeAt(layer) }; nextLayer=layer.coerceAtMost(d.layers.lastIndex) }

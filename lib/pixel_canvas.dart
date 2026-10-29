@@ -1,10 +1,10 @@
 import 'dart:math' as math;
 import 'dart:async';
 import 'dart:ui' as ui;
-import 'dart:typed_data';
 import 'rgba_image.dart';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart' show PointerScrollEvent;
 
 import 'editor.dart';
@@ -61,6 +61,168 @@ class _PixelCanvasState extends State<PixelCanvas> {
   ui.Image? _preview;
   final List<_CanvasPainter> _committing = [];
 
+  Rect? _selection, _regionPreview;
+  Offset? _regionAnchor;
+  bool _movingRegion = false, _regionEditing = false, _copyingRegion = false;
+  Map<String, dynamic>? _regionClipboard;
+  int _selectionEpoch = 0;
+  final _selectionFocus = FocusNode();
+
+  Map<String, dynamic> _bounds(Rect r) => {
+    'x': r.left.toInt(),
+    'y': r.top.toInt(),
+    'width': r.width.toInt(),
+    'height': r.height.toInt(),
+  };
+  Offset _regionPoint(Offset p) => Offset(
+    p.dx.floor().clamp(0, widget.editor.width - 1).toDouble(),
+    p.dy.floor().clamp(0, widget.editor.height - 1).toDouble(),
+  );
+  void _beginRegion(Offset p) {
+    _selectionFocus.requestFocus();
+    _regionAnchor = _regionPoint(p);
+    _movingRegion = _selection?.contains(_regionAnchor!) ?? false;
+    _regionPreview = _movingRegion
+        ? _selection
+        : Rect.fromLTWH(_regionAnchor!.dx, _regionAnchor!.dy, 1, 1);
+  }
+
+  void _updateRegion(Offset p) {
+    final anchor = _regionAnchor;
+    if (anchor == null) return;
+    final point = _regionPoint(p);
+    if (_movingRegion) {
+      final r = _selection!;
+      final delta = point - anchor;
+      _regionPreview = r.shift(
+        Offset(
+          delta.dx.clamp(-r.left, widget.editor.width - r.right).toDouble(),
+          delta.dy.clamp(-r.top, widget.editor.height - r.bottom).toDouble(),
+        ),
+      );
+    } else {
+      final left = math.min(anchor.dx, point.dx),
+          top = math.min(anchor.dy, point.dy);
+      _regionPreview = Rect.fromLTRB(
+        left,
+        top,
+        math.max(anchor.dx, point.dx) + 1,
+        math.max(anchor.dy, point.dy) + 1,
+      );
+    }
+  }
+
+  void _cancelRegionGesture() {
+    _regionAnchor = null;
+    _regionPreview = null;
+    _movingRegion = false;
+  }
+
+  Future<void> _finishRegion() async {
+    final before = _selection, next = _regionPreview;
+    final move = _movingRegion;
+    _cancelRegionGesture();
+    if (next == null) return;
+    setState(() => _selection = next);
+    if (move && before != null && next != before) {
+      final ok = await _regionEdit('move', before, {
+        'dx': (next.left - before.left).toInt(),
+        'dy': (next.top - before.top).toInt(),
+      });
+      if (!ok && mounted) setState(() => _selection = before);
+    }
+  }
+
+  Future<bool> _regionEdit(
+    String operation,
+    Rect rect, [
+    Map<String, dynamic> extra = const {},
+  ]) async {
+    _regionEditing = true;
+    try {
+      return await widget.editor.edit('region', {
+        'operation': operation,
+        ..._bounds(rect),
+        ...extra,
+      });
+    } finally {
+      _regionEditing = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _regionAction(String action) async {
+    final editor = widget.editor;
+    final r = _selection;
+    if (action == 'deselect') {
+      _selectionEpoch++;
+      setState(() {
+        _selection = null;
+        _cancelRegionGesture();
+      });
+      return;
+    }
+    if (editor.busy || _copyingRegion || _regionEditing) return;
+    if (_regionAnchor != null) {
+      _cancelRegionGesture();
+      stroke.clear();
+      if (pointers.isNotEmpty) navigating = true;
+    }
+    if (action == 'copy' || action == 'cut') {
+      if (r == null) return;
+      final revision = editor.revision;
+      final epoch = _selectionEpoch;
+      setState(() => _copyingRegion = true);
+      try {
+        final result = await editor.transport('copyRegion', _bounds(r));
+        if (!mounted ||
+            editor.revision != revision ||
+            result == null ||
+            epoch != _selectionEpoch) {
+          return;
+        }
+        _regionClipboard = Map<String, dynamic>.from(result);
+        if (action == 'cut' && await _regionEdit('delete', r)) {
+          _selection = null;
+        }
+      } catch (error) {
+        if (mounted) {
+          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+            SnackBar(content: Text('Could not copy selection: $error')),
+          );
+        }
+      } finally {
+        _copyingRegion = false;
+        if (mounted) setState(() {});
+      }
+    } else if (action == 'delete' && r != null) {
+      if (await _regionEdit('delete', r) && mounted) {
+        setState(() => _selection = null);
+      }
+    } else if (action == 'paste' && _regionClipboard != null) {
+      final w = (_regionClipboard!['width'] as num).toDouble();
+      final h = (_regionClipboard!['height'] as num).toDouble();
+      if (w > editor.width || h > editor.height) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          const SnackBar(
+            content: Text('Copied region is larger than this canvas'),
+          ),
+        );
+        return;
+      }
+      final target = Rect.fromLTWH(
+        (r?.left ?? 0).clamp(0, editor.width - w).toDouble(),
+        (r?.top ?? 0).clamp(0, editor.height - h).toDouble(),
+        w,
+        h,
+      );
+      if (await _regionEdit('paste', target, {'clipboard': _regionClipboard}) &&
+          mounted) {
+        setState(() => _selection = target);
+      }
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -69,6 +231,15 @@ class _PixelCanvasState extends State<PixelCanvas> {
   }
 
   void _imageReady() {
+    if (!_regionEditing) {
+      _selectionEpoch++;
+      _selection = null;
+      _cancelRegionGesture();
+      if (widget.tool == 'selectRegion') {
+        stroke.clear();
+        if (pointers.isNotEmpty) navigating = true;
+      }
+    }
     // Retire the matching visual synchronously with the decoded image swap,
     // before the painter sees it. Waiting for the callback Future alone can
     // leave one frame with both the committed pixels and their alpha overlay.
@@ -139,7 +310,8 @@ class _PixelCanvasState extends State<PixelCanvas> {
   bool get _usesPreview =>
       (widget.viewMode == CanvasViewMode.tiled &&
           widget.tool != 'pan' &&
-          widget.tool != 'eyedropper') ||
+          widget.tool != 'eyedropper' &&
+          widget.tool != 'selectRegion') ||
       const {
         'spray',
         'airbrush',
@@ -257,6 +429,7 @@ class _PixelCanvasState extends State<PixelCanvas> {
 
   @override
   void dispose() {
+    _selectionFocus.dispose();
     widget.editor.imageChanges.removeListener(_imageReady);
     widget.editor.setSlideViewEnabled(false);
     _stopSpraying();
@@ -301,6 +474,13 @@ class _PixelCanvasState extends State<PixelCanvas> {
       _clearCommitting();
     }
     if (old.tool != widget.tool ||
+        old.viewMode != widget.viewMode ||
+        !identical(old.editor, widget.editor)) {
+      _selectionEpoch++;
+      _selection = null;
+      _cancelRegionGesture();
+    }
+    if (old.tool != widget.tool ||
         (widget.editor.busy && !widget.editor.busyDrawing) ||
         old.color != widget.color ||
         old.brush != widget.brush ||
@@ -319,6 +499,7 @@ class _PixelCanvasState extends State<PixelCanvas> {
   }
 
   void down(PointerDownEvent e) {
+    if (_copyingRegion || _regionEditing) return;
     if (widget.editor.busy && !widget.editor.busyDrawing && pointers.isEmpty) {
       return;
     }
@@ -333,7 +514,11 @@ class _PixelCanvasState extends State<PixelCanvas> {
                 e.timeStamp - _startedAt > const Duration(milliseconds: 150))
         ? List<Offset>.of(stroke)
         : null;
-    if (pending != null && widget.tool != 'eyedropper') _commit(pending);
+    if (pending != null &&
+        widget.tool != 'eyedropper' &&
+        widget.tool != 'selectRegion') {
+      _commit(pending);
+    }
     setState(() {
       if (pointers.isEmpty) {
         _explicitPan = widget.tool == 'pan' || e.buttons == 2;
@@ -351,6 +536,7 @@ class _PixelCanvasState extends State<PixelCanvas> {
         _stopSpraying();
         _clearPreview();
         navigating = true;
+        _cancelRegionGesture();
         stroke.clear();
       } else {
         navigating = false;
@@ -364,6 +550,16 @@ class _PixelCanvasState extends State<PixelCanvas> {
             )) {
           stroke.clear();
           return;
+        }
+        if (widget.tool == 'selectRegion') {
+          if (!isEditableCanvasPoint(
+            _pixel(e.localPosition),
+            widget.editor.width,
+            widget.editor.height,
+          )) {
+            return;
+          }
+          _beginRegion(_pixel(e.localPosition));
         }
         _startedAt = e.timeStamp;
         stroke = [_pixel(e.localPosition)];
@@ -400,6 +596,10 @@ class _PixelCanvasState extends State<PixelCanvas> {
       } else {
         if (stroke.isEmpty) return;
         final raw = _pixel(e.localPosition);
+        if (widget.tool == 'selectRegion') {
+          _updateRegion(raw);
+          return;
+        }
         final p = widget.viewMode == CanvasViewMode.tiled
             ? clampTiledCanvasPoint(
                 raw,
@@ -436,7 +636,13 @@ class _PixelCanvasState extends State<PixelCanvas> {
     final points = List<Offset>.of(stroke);
     final commit =
         !cancel && !navigating && pointers.length == 1 && points.isNotEmpty;
-    if (commit && widget.tool != 'eyedropper') {
+    if (widget.tool == 'selectRegion') {
+      if (commit) {
+        unawaited(_finishRegion());
+      } else {
+        _cancelRegionGesture();
+      }
+    } else if (commit && widget.tool != 'eyedropper') {
       _commit(points);
     } else {
       _clearPreview();
@@ -494,58 +700,189 @@ class _PixelCanvasState extends State<PixelCanvas> {
         );
         fitted = true;
       }
-      return ClipRect(
-        child: Listener(
-          key: const Key('pixel-canvas'),
-          behavior: HitTestBehavior.opaque,
-          onPointerDown: down,
-          onPointerMove: move,
-          onPointerUp: (e) => up(e),
-          onPointerCancel: (e) => up(e, cancel: true),
-          onPointerSignal: (event) {
-            if (event is PointerScrollEvent && pointers.isEmpty) {
-              setState(() {
-                final next = (scale * math.exp(-event.scrollDelta.dy / 400))
-                    .clamp(.25, 128.0)
-                    .toDouble();
-                origin =
-                    event.localPosition -
-                    (event.localPosition - origin) * (next / scale);
-                scale = next;
-              });
-            }
-          },
-          child: RepaintBoundary(
-            child: CustomPaint(
-              size: size,
-              painter: _CanvasPainter(
-                widget.editor,
-                origin,
-                scale,
-                widget.grid,
-                widget.onion,
-                stroke,
-                widget.tool,
-                widget.color,
-                widget.brush,
-                widget.filled,
-                widget.mirrorX,
-                widget.mirrorY,
-                widget.mirrorDiagonal,
-                widget.mirrorAntiDiagonal,
-                widget.density,
-                _strokeSeed,
-                widget.strength,
-                _preview,
-                committing: _committing,
-                viewMode: widget.viewMode,
+      return Focus(
+        focusNode: _selectionFocus,
+        onKeyEvent: (_, event) {
+          if (widget.tool != 'selectRegion' || event is! KeyDownEvent) {
+            return KeyEventResult.ignored;
+          }
+          final key = event.logicalKey;
+          final control =
+              HardwareKeyboard.instance.isControlPressed ||
+              HardwareKeyboard.instance.isMetaPressed;
+          final action = key == LogicalKeyboardKey.escape
+              ? 'deselect'
+              : key == LogicalKeyboardKey.delete ||
+                    key == LogicalKeyboardKey.backspace
+              ? 'delete'
+              : control && key == LogicalKeyboardKey.keyC
+              ? 'copy'
+              : control && key == LogicalKeyboardKey.keyX
+              ? 'cut'
+              : control && key == LogicalKeyboardKey.keyV
+              ? 'paste'
+              : null;
+          if (action == null) return KeyEventResult.ignored;
+          unawaited(_regionAction(action));
+          return KeyEventResult.handled;
+        },
+        child: ClipRect(
+          child: Stack(
+            children: [
+              Listener(
+                key: const Key('pixel-canvas'),
+                behavior: HitTestBehavior.opaque,
+                onPointerDown: down,
+                onPointerMove: move,
+                onPointerUp: (e) => up(e),
+                onPointerCancel: (e) => up(e, cancel: true),
+                onPointerSignal: (event) {
+                  if (event is PointerScrollEvent && pointers.isEmpty) {
+                    setState(() {
+                      final next =
+                          (scale * math.exp(-event.scrollDelta.dy / 400))
+                              .clamp(.25, 128.0)
+                              .toDouble();
+                      origin =
+                          event.localPosition -
+                          (event.localPosition - origin) * (next / scale);
+                      scale = next;
+                    });
+                  }
+                },
+                child: RepaintBoundary(
+                  child: CustomPaint(
+                    size: size,
+                    painter: _CanvasPainter(
+                      widget.editor,
+                      origin,
+                      scale,
+                      widget.grid,
+                      widget.onion,
+                      widget.tool == 'selectRegion' ? const [] : stroke,
+                      widget.tool,
+                      widget.color,
+                      widget.brush,
+                      widget.filled,
+                      widget.mirrorX,
+                      widget.mirrorY,
+                      widget.mirrorDiagonal,
+                      widget.mirrorAntiDiagonal,
+                      widget.density,
+                      _strokeSeed,
+                      widget.strength,
+                      _preview,
+                      committing: _committing,
+                      viewMode: widget.viewMode,
+                    ),
+                  ),
+                ),
               ),
-            ),
+              if (widget.tool == 'selectRegion') ...[
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: CustomPaint(
+                      painter: _RegionPainter(
+                        _regionPreview ?? _selection,
+                        origin,
+                        scale,
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 4,
+                  right: 4,
+                  top: 4,
+                  child: Material(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.surface.withValues(alpha: .95),
+                    borderRadius: BorderRadius.circular(8),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _selection == null
+                              ? 'Select: drag a rectangle on the active layer'
+                              : 'Drag inside to move · outside to select again',
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          children: [
+                            for (final item in const [
+                              ('copy', 'Copy', Icons.copy),
+                              ('cut', 'Cut', Icons.content_cut),
+                              ('paste', 'Paste', Icons.content_paste),
+                              ('delete', 'Delete', Icons.delete_outline),
+                              ('deselect', 'Deselect', Icons.deselect),
+                            ])
+                              IconButton(
+                                key: Key('selection-${item.$1}'),
+                                tooltip: item.$2,
+                                onPressed:
+                                    widget.editor.busy ||
+                                        _copyingRegion ||
+                                        _regionEditing ||
+                                        (item.$1 == 'paste'
+                                            ? _regionClipboard == null
+                                            : _selection == null)
+                                    ? null
+                                    : () => _regionAction(item.$1),
+                                icon: Icon(item.$3, size: 20),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
       );
     },
   );
+}
+
+class _RegionPainter extends CustomPainter {
+  const _RegionPainter(this.region, this.origin, this.scale);
+  final Rect? region;
+  final Offset origin;
+  final double scale;
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (region == null) return;
+    final r = Rect.fromLTWH(
+      origin.dx + region!.left * scale,
+      origin.dy + region!.top * scale,
+      region!.width * scale,
+      region!.height * scale,
+    );
+    canvas.drawRect(
+      r,
+      Paint()
+        ..color = Colors.black
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3,
+    );
+    canvas.drawRect(
+      r,
+      Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _RegionPainter oldDelegate) =>
+      oldDelegate.region != region ||
+      oldDelegate.origin != origin ||
+      oldDelegate.scale != scale;
 }
 
 class _CanvasPainter extends CustomPainter {
