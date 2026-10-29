@@ -16,26 +16,57 @@ EditorEngine fixture({bool indexed = false}) {
   c.pixels[1] = indexed ? 1 : 0xffaabbcc;
   return EditorEngine()..replace(d);
 }
+
 void main() {
   for (final indexed in [false, true]) {
-    test('native region copy/move/delete/paste round trip indexed=$indexed', () {
-      final e = fixture(indexed: indexed);
-      final before = e.encode();
-      final copy = e.invoke('copyRegion', area);
-      expect(e.encode(), before);
-      expect(e.state()['dirty'], false);
-      expect(e.state()['canUndo'], false);
-      e.invoke('edit', {'action': 'region', 'operation': 'move', ...area, 'dx': 1, 'dy': 0});
-      final pixels = e.document.resolved(0, 0)!.pixels;
-      expect(pixels.take(3), indexed ? [2, 0, 1] : [0, 0x80123456, 0xffaabbcc]);
-      e.invoke('undo');
-      expect(e.encode(), before);
-      e.invoke('redo');
-      e.invoke('edit', {'action': 'region', 'operation': 'delete', ...area, 'x': 1});
-      expect(e.document.resolved(0, 0)!.pixels.take(3), indexed ? [2, 2, 2] : [0, 0, 0]);
-      e.invoke('edit', {'action': 'region', 'operation': 'paste', ...area, 'clipboard': copy});
-      expect(e.document.resolved(0, 0)!.pixels.take(2), [for (var i = 0; i < 2; i++) ByteData.sublistView(copy['pixels'] as Uint8List).getUint32(i * 4, Endian.little)]);
-    });
+    test(
+      'native region copy/move/delete/paste round trip indexed=$indexed',
+      () {
+        final e = fixture(indexed: indexed);
+        final before = e.encode();
+        final copy = e.invoke('copyRegion', area);
+        expect(e.encode(), before);
+        expect(e.state()['dirty'], false);
+        expect(e.state()['canUndo'], false);
+        e.invoke('edit', {
+          'action': 'region',
+          'operation': 'move',
+          ...area,
+          'dx': 1,
+          'dy': 0,
+        });
+        final pixels = e.document.resolved(0, 0)!.pixels;
+        expect(
+          pixels.take(3),
+          indexed ? [2, 0, 1] : [0, 0x80123456, 0xffaabbcc],
+        );
+        e.invoke('undo');
+        expect(e.encode(), before);
+        e.invoke('redo');
+        e.invoke('edit', {
+          'action': 'region',
+          'operation': 'delete',
+          ...area,
+          'x': 1,
+        });
+        expect(
+          e.document.resolved(0, 0)!.pixels.take(3),
+          indexed ? [2, 2, 2] : [0, 0, 0],
+        );
+        e.invoke('edit', {
+          'action': 'region',
+          'operation': 'paste',
+          ...area,
+          'clipboard': copy,
+        });
+        expect(e.document.resolved(0, 0)!.pixels.take(2), [
+          for (var i = 0; i < 2; i++)
+            ByteData.sublistView(
+              copy['pixels'] as Uint8List,
+            ).getUint32(i * 4, Endian.little),
+        ]);
+      },
+    );
   }
   test('rejected edits leave pixels, history and dirty state alone', () {
     for (final args in [
@@ -44,25 +75,53 @@ void main() {
       {'operation': 'delete', 'width': 9},
       {'operation': 'paste', 'clipboard': <String, dynamic>{}},
     ]) {
-      final e = fixture(); final before = e.encode();
-      expect(() => e.invoke('edit', {'action': 'region', ...area, ...args}), throwsFormatException);
+      final e = fixture();
+      final before = e.encode();
+      expect(
+        () => e.invoke('edit', {'action': 'region', ...area, ...args}),
+        throwsFormatException,
+      );
       expect(e.encode(), before);
       expect(e.state()['canUndo'], false);
       expect(e.dirty, false);
     }
     for (final flags in [1, 11]) {
-      final e = fixture(); e.document.layers[0].flags = flags;
-      expect(() => e.invoke('edit', {'action': 'region', 'operation': 'delete', ...area}), throwsFormatException);
+      final e = fixture();
+      e.document.layers[0].flags = flags;
+      expect(
+        () => e.invoke('edit', {
+          'action': 'region',
+          'operation': 'delete',
+          ...area,
+        }),
+        throwsFormatException,
+      );
     }
-    final hidden = fixture(); hidden.document.layers[0].visible = false;
-    expect(() => hidden.invoke('edit', {'action': 'region', 'operation': 'delete', ...area}), throwsFormatException);
+    final hidden = fixture();
+    hidden.document.layers[0].visible = false;
+    expect(
+      () => hidden.invoke('edit', {
+        'action': 'region',
+        'operation': 'delete',
+        ...area,
+      }),
+      throwsFormatException,
+    );
   });
   test('indexed palette changes are rejected without recoloring', () {
     final e = fixture(indexed: true);
     final copy = e.invoke('copyRegion', area);
     e.document.frames[0].palette[0] = 0xffffffff;
     final before = e.encode();
-    expect(() => e.invoke('edit', {'action': 'region', 'operation': 'paste', ...area, 'clipboard': copy}), throwsFormatException);
+    expect(
+      () => e.invoke('edit', {
+        'action': 'region',
+        'operation': 'paste',
+        ...area,
+        'clipboard': copy,
+      }),
+      throwsFormatException,
+    );
     expect(e.encode(), before);
   });
   test('linked frames and other layers are detached and unchanged', () {
@@ -81,27 +140,55 @@ void main() {
     e.invoke('undo');
     expect(e.document.resolved(0, 0)!.pixels, other);
   });
-  test('grayscale alpha and transparent pixels replace the destination exactly', () {
-    final e = fixture(); e.document.depth = 16;
-    e.document.editable(0, 0).pixels[0] = 0x80808080;
-    e.document.editable(0, 0).pixels[1] = 0;
-    final copy = e.invoke('copyRegion', area);
-    e.document.editable(0, 0).pixels[3] = 0xffffffff;
-    e.invoke('edit', {'action': 'region', 'operation': 'paste', ...area, 'x': 2, 'clipboard': copy});
-    expect(e.document.resolved(0, 0)!.pixels.skip(2).take(2), [0x80808080, 0]);
-  });
+  test(
+    'grayscale alpha and transparent pixels replace the destination exactly',
+    () {
+      final e = fixture();
+      e.document.depth = 16;
+      e.document.editable(0, 0).pixels[0] = 0x80808080;
+      e.document.editable(0, 0).pixels[1] = 0;
+      final copy = e.invoke('copyRegion', area);
+      e.document.editable(0, 0).pixels[3] = 0xffffffff;
+      e.invoke('edit', {
+        'action': 'region',
+        'operation': 'paste',
+        ...area,
+        'x': 2,
+        'clipboard': copy,
+      });
+      expect(e.document.resolved(0, 0)!.pixels.skip(2).take(2), [
+        0x80808080,
+        0,
+      ]);
+    },
+  );
   test('oversized copy and malformed clipboard refuse before mutation', () {
     final e = EditorEngine()..replace(SpriteDocument.create(1025, 1024));
-    expect(() => e.invoke('copyRegion', {'x': 0, 'y': 0, 'width': 1025, 'height': 1024}), throwsFormatException);
+    expect(
+      () => e.invoke('copyRegion', {
+        'x': 0,
+        'y': 0,
+        'width': 1025,
+        'height': 1024,
+      }),
+      throwsFormatException,
+    );
     final small = fixture();
     final copy = small.invoke('copyRegion', area);
     for (final bad in [
       {...copy, 'width': 2.5},
       {...copy, 'pixels': Uint8List(3)},
     ]) {
-      expect(() => small.invoke('edit', {'action': 'region', 'operation': 'paste', ...area, 'clipboard': bad}), throwsFormatException);
+      expect(
+        () => small.invoke('edit', {
+          'action': 'region',
+          'operation': 'paste',
+          ...area,
+          'clipboard': bad,
+        }),
+        throwsFormatException,
+      );
       expect(small.dirty, false);
     }
   });
-
 }

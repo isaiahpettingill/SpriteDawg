@@ -129,6 +129,7 @@ class _EditorScreenState extends State<EditorScreen>
     'leaves': (Icons.eco, 'Leaves'),
     'ditherPaint': (Icons.gradient, 'Dither Paint'),
     'ditherRetouch': (Icons.grid_4x4, 'Dither Retouch'),
+    'selectRegion': (Icons.select_all, 'Select'),
     'pan': (Icons.pan_tool_alt, 'Pan'),
   };
   @override
