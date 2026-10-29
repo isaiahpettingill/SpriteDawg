@@ -143,30 +143,55 @@ void main() {
       editor.dispose();
     },
   );
-  testWidgets('a delayed cut is canceled when its selection tool is dismissed', (t) async {
-    final engine = EditorEngine();
-    engine.invoke('new', {'width': 8, 'height': 8});
-    engine.document.editable(0, 0).pixels[27] = 0xff123456;
-    final pending = Completer<Map<String, dynamic>?>();
-    final editor = Editor(transport: (method, args) async {
-      if (method == 'copyRegion') return pending.future;
-      return engine.invoke(method, args ?? {});
-    });
-    await editor.call('state');
-    Future<void> host(String tool) => t.pumpWidget(MaterialApp(home: Scaffold(body: PixelCanvas(
-      editor: editor, tool: tool, color: 0, brush: 1,
-      grid: false, onion: false, fitToken: 0, onPick: (_) {}, onStroke: (_, _) {},
-    ))));
-    await host('selectRegion');
-    final source = t.getCenter(find.byKey(const Key('pixel-canvas'))) - const Offset(12, 12);
-    final select = await t.startGesture(source); await select.up(); await t.pump();
-    await t.tap(find.byKey(const Key('selection-cut'))); await t.pump();
-    await host('pencil');
-    pending.complete(engine.invoke('copyRegion', {'x': 3, 'y': 3, 'width': 1, 'height': 1}));
-    await t.pumpAndSettle();
-    expect(engine.document.resolved(0, 0)!.pixels[27], 0xff123456);
-    expect(engine.state()['canUndo'], false);
-    await t.pumpWidget(const SizedBox()); editor.dispose();
-  });
-
+  testWidgets(
+    'a delayed cut is canceled when its selection tool is dismissed',
+    (t) async {
+      final engine = EditorEngine();
+      engine.invoke('new', {'width': 8, 'height': 8});
+      engine.document.editable(0, 0).pixels[27] = 0xff123456;
+      final pending = Completer<Map<String, dynamic>?>();
+      final editor = Editor(
+        transport: (method, args) async {
+          if (method == 'copyRegion') return pending.future;
+          return engine.invoke(method, args ?? {});
+        },
+      );
+      await editor.call('state');
+      Future<void> host(String tool) => t.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: PixelCanvas(
+              editor: editor,
+              tool: tool,
+              color: 0,
+              brush: 1,
+              grid: false,
+              onion: false,
+              fitToken: 0,
+              onPick: (_) {},
+              onStroke: (_, _) {},
+            ),
+          ),
+        ),
+      );
+      await host('selectRegion');
+      final source =
+          t.getCenter(find.byKey(const Key('pixel-canvas'))) -
+          const Offset(12, 12);
+      final select = await t.startGesture(source);
+      await select.up();
+      await t.pump();
+      await t.tap(find.byKey(const Key('selection-cut')));
+      await t.pump();
+      await host('pencil');
+      pending.complete(
+        engine.invoke('copyRegion', {'x': 3, 'y': 3, 'width': 1, 'height': 1}),
+      );
+      await t.pumpAndSettle();
+      expect(engine.document.resolved(0, 0)!.pixels[27], 0xff123456);
+      expect(engine.state()['canUndo'], false);
+      await t.pumpWidget(const SizedBox());
+      editor.dispose();
+    },
+  );
 }

@@ -163,6 +163,11 @@ class _PixelCanvasState extends State<PixelCanvas> {
       return;
     }
     if (editor.busy || _copyingRegion || _regionEditing) return;
+    if (_regionAnchor != null) {
+      _cancelRegionGesture();
+      stroke.clear();
+      if (pointers.isNotEmpty) navigating = true;
+    }
     if (action == 'copy' || action == 'cut') {
       if (r == null) return;
       final revision = editor.revision;
@@ -170,8 +175,12 @@ class _PixelCanvasState extends State<PixelCanvas> {
       setState(() => _copyingRegion = true);
       try {
         final result = await editor.transport('copyRegion', _bounds(r));
-        if (!mounted || editor.revision != revision || result == null ||
-            epoch != _selectionEpoch) return;
+        if (!mounted ||
+            editor.revision != revision ||
+            result == null ||
+            epoch != _selectionEpoch) {
+          return;
+        }
         _regionClipboard = Map<String, dynamic>.from(result);
         if (action == 'cut' && await _regionEdit('delete', r)) {
           _selection = null;

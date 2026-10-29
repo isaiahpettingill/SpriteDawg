@@ -9,7 +9,9 @@ import 'package:spritedawg/tool_groups.dart';
 import 'editor_test.dart' as fixture;
 
 void main() {
-  testWidgets('Select is visible and usable in the compact application', (t) async {
+  testWidgets('Select is visible and usable in the compact application', (
+    t,
+  ) async {
     t.view.physicalSize = const Size(320, 740);
     t.view.devicePixelRatio = 1;
     addTearDown(t.view.resetPhysicalSize);
@@ -20,7 +22,10 @@ void main() {
     await t.tap(find.byKey(const Key('tool-group-select')));
     await t.pumpAndSettle();
     expect(t.takeException(), isNull);
-    expect(t.widget<PixelCanvas>(find.byType(PixelCanvas)).tool, 'selectRegion');
+    expect(
+      t.widget<PixelCanvas>(find.byType(PixelCanvas)).tool,
+      'selectRegion',
+    );
     expect(find.byKey(const Key('selection-copy')), findsOneWidget);
     await t.pumpWidget(const SizedBox());
   });
