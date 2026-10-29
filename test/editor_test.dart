@@ -370,4 +370,3 @@ void main() {
     expect(find.byTooltip('Pencil'), findsOneWidget);
   });
 }
-

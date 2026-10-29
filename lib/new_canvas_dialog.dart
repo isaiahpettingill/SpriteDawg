@@ -57,7 +57,10 @@ class _NewCanvasDialogState extends State<_NewCanvasDialog> {
               autofocus: true,
               keyboardType: TextInputType.number,
               textInputAction: TextInputAction.next,
-              decoration: const InputDecoration(labelText: 'Width', suffixText: 'px'),
+              decoration: const InputDecoration(
+                labelText: 'Width',
+                suffixText: 'px',
+              ),
               validator: _validate,
             ),
             const SizedBox(height: 12),
@@ -66,7 +69,10 @@ class _NewCanvasDialogState extends State<_NewCanvasDialog> {
               controller: _height,
               keyboardType: TextInputType.number,
               textInputAction: TextInputAction.done,
-              decoration: const InputDecoration(labelText: 'Height', suffixText: 'px'),
+              decoration: const InputDecoration(
+                labelText: 'Height',
+                suffixText: 'px',
+              ),
               validator: _validate,
               onFieldSubmitted: (_) => _create(),
             ),

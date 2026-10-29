@@ -609,8 +609,16 @@ class _EditorScreenState extends State<EditorScreen>
   Future<void> menu(String action) async {
     stop();
     if (!e.hasDocument &&
-        !const {'new', 'open', 'drafts', 'defaultUserData', 'help', 'updates'}
-            .contains(action)) return;
+        !const {
+          'new',
+          'open',
+          'drafts',
+          'defaultUserData',
+          'help',
+          'updates',
+        }.contains(action)) {
+      return;
+    }
     switch (action) {
       case 'new':
         await newProject();
@@ -926,169 +934,183 @@ class _EditorScreenState extends State<EditorScreen>
                 child: !e.hasDocument
                     ? emptyWorkspace()
                     : ResponsiveEditorShell(
-                  documentTabs:
-                      panel == 'tags' &&
-                          MediaQuery.viewInsetsOf(context).bottom > 0
-                      ? null
-                      : DocumentTabs(
-                          editor: e,
-                          onNew: () => newProject(),
-                          onOpen: () => open(),
-                          beforeSwitch: beforeDocumentSwitch,
+                        documentTabs:
+                            panel == 'tags' &&
+                                MediaQuery.viewInsetsOf(context).bottom > 0
+                            ? null
+                            : DocumentTabs(
+                                editor: e,
+                                onNew: () => newProject(),
+                                onOpen: () => open(),
+                                beforeSwitch: beforeDocumentSwitch,
+                              ),
+                        canvas: Column(
+                          children: [
+                            paletteStrip(),
+                            if (hasStrokeOptions) strokeOptions(),
+                            Expanded(child: drawingCanvas()),
+                          ],
                         ),
-                  canvas: Column(
-                    children: [
-                      paletteStrip(),
-                      if (hasStrokeOptions) strokeOptions(),
-                      Expanded(child: drawingCanvas()),
-                    ],
-                  ),
-                  tools: toolRail(),
-                  layers: layerPanel(),
-                  timeline: wideTimeline(),
-                  timelineHeight: panel == 'tags' ? 288 : 168,
-                  mobileBody: Column(
-                    children: [
-                      SizedBox(
-                        height: 3,
-                        child: e.busy ? const LinearProgressIndicator() : null,
-                      ),
-                      if (!compactTags)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  tool == 'gradient'
-                                      ? 'Gradient · whole active layer'
-                                      : '${tools[tool]!.$2} · $layerName',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(
-                                    context,
-                                  ).textTheme.labelMedium,
+                        tools: toolRail(),
+                        layers: layerPanel(),
+                        timeline: wideTimeline(),
+                        timelineHeight: panel == 'tags' ? 288 : 168,
+                        mobileBody: Column(
+                          children: [
+                            SizedBox(
+                              height: 3,
+                              child: e.busy
+                                  ? const LinearProgressIndicator()
+                                  : null,
+                            ),
+                            if (!compactTags)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        tool == 'gradient'
+                                            ? 'Gradient · whole active layer'
+                                            : '${tools[tool]!.$2} · $layerName',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.labelMedium,
+                                      ),
+                                    ),
+                                    if (tightHeight)
+                                      IconButton(
+                                        tooltip:
+                                            'Manage palette and color mode',
+                                        onPressed: managePalette,
+                                        icon: const Icon(
+                                          Icons.palette_outlined,
+                                        ),
+                                      ),
+                                    if (tightHeight) mirroringMenu(),
+                                    if (tightHeight) compactBrushMenu(),
+                                    IconButton(
+                                      tooltip: 'Undo',
+                                      onPressed: e.canUndo && !e.busy
+                                          ? () {
+                                              stop();
+                                              e.call('undo');
+                                            }
+                                          : null,
+                                      icon: const Icon(Icons.undo),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Redo',
+                                      onPressed: e.canRedo && !e.busy
+                                          ? () {
+                                              stop();
+                                              e.call('redo');
+                                            }
+                                          : null,
+                                      icon: const Icon(Icons.redo),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Fit canvas',
+                                      onPressed: () =>
+                                          setState(() => fitToken++),
+                                      icon: const Icon(Icons.fit_screen),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              if (tightHeight)
-                                IconButton(
-                                  tooltip: 'Manage palette and color mode',
-                                  onPressed: managePalette,
-                                  icon: const Icon(Icons.palette_outlined),
-                                ),
-                              if (tightHeight) mirroringMenu(),
-                              if (tightHeight) compactBrushMenu(),
-                              IconButton(
-                                tooltip: 'Undo',
-                                onPressed: e.canUndo && !e.busy
-                                    ? () {
-                                        stop();
-                                        e.call('undo');
-                                      }
-                                    : null,
-                                icon: const Icon(Icons.undo),
-                              ),
-                              IconButton(
-                                tooltip: 'Redo',
-                                onPressed: e.canRedo && !e.busy
-                                    ? () {
-                                        stop();
-                                        e.call('redo');
-                                      }
-                                    : null,
-                                icon: const Icon(Icons.redo),
-                              ),
-                              IconButton(
-                                tooltip: 'Fit canvas',
-                                onPressed: () => setState(() => fitToken++),
-                                icon: const Icon(Icons.fit_screen),
-                              ),
-                            ],
-                          ),
-                        ),
-                      Expanded(
-                        child: LayoutBuilder(
-                          builder: (context, box) {
-                            final tagHeight = (box.maxHeight * .78).clamp(
-                              0.0,
-                              tightTagKeyboard ? 132.0 : 248.0,
-                            );
-                            final panelHeight = panel == 'tags'
-                                ? tagHeight
-                                : panel == 'frames'
-                                ? 120.0
-                                : panel == 'layers'
-                                ? (box.maxHeight * .6).clamp(0.0, 180.0)
-                                : 0.0;
-                            return Column(
-                              children: [
-                                Expanded(child: drawingCanvas()),
-                                SizedBox(
-                                  height: panelHeight,
-                                  child: Stack(
+                            Expanded(
+                              child: LayoutBuilder(
+                                builder: (context, box) {
+                                  final tagHeight = (box.maxHeight * .78).clamp(
+                                    0.0,
+                                    tightTagKeyboard ? 132.0 : 248.0,
+                                  );
+                                  final panelHeight = panel == 'tags'
+                                      ? tagHeight
+                                      : panel == 'frames'
+                                      ? 120.0
+                                      : panel == 'layers'
+                                      ? (box.maxHeight * .6).clamp(0.0, 180.0)
+                                      : 0.0;
+                                  return Column(
                                     children: [
-                                      if (panel == 'layers') layerPanel(),
-                                      if (panel == 'frames') framePanel(),
-                                      // Retain unfinished names while changing panels.
-                                      Offstage(
-                                        offstage: panel != 'tags',
-                                        child: tagPanel(),
+                                      Expanded(child: drawingCanvas()),
+                                      SizedBox(
+                                        height: panelHeight,
+                                        child: Stack(
+                                          children: [
+                                            if (panel == 'layers') layerPanel(),
+                                            if (panel == 'frames') framePanel(),
+                                            // Retain unfinished names while changing panels.
+                                            Offstage(
+                                              offstage: panel != 'tags',
+                                              child: tagPanel(),
+                                            ),
+                                          ],
+                                        ),
                                       ),
                                     ],
+                                  );
+                                },
+                              ),
+                            ),
+                            if (!hideDrawingStrips && !tightHeight)
+                              paletteStrip(),
+                            if (!hideDrawingStrips &&
+                                !tightHeight &&
+                                hasStrokeOptions)
+                              strokeOptions(),
+                            if (!hideDrawingStrips)
+                              Wrap(
+                                alignment: WrapAlignment.center,
+                                children: groupedTools(),
+                              ),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                              children: [
+                                panelButton(
+                                  'layers',
+                                  Icons.layers_outlined,
+                                  'Layers',
+                                ),
+                                panelButton(
+                                  'frames',
+                                  Icons.view_carousel_outlined,
+                                  'Frames',
+                                ),
+                                panelButton(
+                                  'tags',
+                                  Icons.sell_outlined,
+                                  'Tags',
+                                ),
+                                IconButton(
+                                  iconSize: 32,
+                                  constraints: const BoxConstraints(
+                                    minWidth: 56,
+                                    minHeight: 48,
+                                  ),
+                                  tooltip: playing
+                                      ? 'Stop animation'
+                                      : 'Play animation',
+                                  onPressed:
+                                      e.maps('frames').length > 1 && !e.busy
+                                      ? play
+                                      : null,
+                                  icon: Icon(
+                                    playing
+                                        ? Icons.pause_circle
+                                        : Icons.play_circle_outline,
                                   ),
                                 ),
                               ],
-                            );
-                          },
+                            ),
+                          ],
                         ),
                       ),
-                      if (!hideDrawingStrips && !tightHeight) paletteStrip(),
-                      if (!hideDrawingStrips &&
-                          !tightHeight &&
-                          hasStrokeOptions)
-                        strokeOptions(),
-                      if (!hideDrawingStrips)
-                        Wrap(
-                          alignment: WrapAlignment.center,
-                          children: groupedTools(),
-                        ),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          panelButton(
-                            'layers',
-                            Icons.layers_outlined,
-                            'Layers',
-                          ),
-                          panelButton(
-                            'frames',
-                            Icons.view_carousel_outlined,
-                            'Frames',
-                          ),
-                          panelButton('tags', Icons.sell_outlined, 'Tags'),
-                          IconButton(
-                            iconSize: 32,
-                            constraints: const BoxConstraints(
-                              minWidth: 56,
-                              minHeight: 48,
-                            ),
-                            tooltip: playing
-                                ? 'Stop animation'
-                                : 'Play animation',
-                            onPressed: e.maps('frames').length > 1 && !e.busy
-                                ? play
-                                : null,
-                            icon: Icon(
-                              playing
-                                  ? Icons.pause_circle
-                                  : Icons.play_circle_outline,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
               ),
             ],
           ),
@@ -1253,9 +1275,13 @@ class _EditorScreenState extends State<EditorScreen>
                         await showDraftPicker(context, e);
                       }
                     },
-              child: Text(!e.hasDocument
-                  ? 'Internal drafts'
-                  : problem == null ? 'Save as' : 'Open drawing'),
+              child: Text(
+                !e.hasDocument
+                    ? 'Internal drafts'
+                    : problem == null
+                    ? 'Save as'
+                    : 'Open drawing',
+              ),
             ),
           ],
         ),
@@ -1895,4 +1921,3 @@ class _EditorScreenState extends State<EditorScreen>
     },
   );
 }
-

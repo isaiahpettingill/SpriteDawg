@@ -203,19 +203,29 @@ class IndexedDbDraftStorage implements SizedDraftStorage, WorkspaceStorage {
     final raw = await readWorkspace();
     if (raw == null) return;
     final database = await _open();
-    final transaction = database.transaction(_previous.toJS, 'readwrite',
-      web.IDBTransactionOptions(durability: 'strict'));
+    final transaction = database.transaction(
+      _previous.toJS,
+      'readwrite',
+      web.IDBTransactionOptions(durability: 'strict'),
+    );
     final committed = _commit(transaction);
-    transaction.objectStore(_previous).add(raw.toJS,
-      'workspace-unreadable-${DateTime.now().microsecondsSinceEpoch}'.toJS);
+    transaction
+        .objectStore(_previous)
+        .add(
+          raw.toJS,
+          'workspace-unreadable-${DateTime.now().microsecondsSinceEpoch}'.toJS,
+        );
     await committed;
   }
 
   @override
   Future<void> writeWorkspace(String value) async {
     final database = await _open();
-    final transaction = database.transaction(_current.toJS, 'readwrite',
-      web.IDBTransactionOptions(durability: 'strict'));
+    final transaction = database.transaction(
+      _current.toJS,
+      'readwrite',
+      web.IDBTransactionOptions(durability: 'strict'),
+    );
     final committed = _commit(transaction);
     transaction.objectStore(_current).put(value.toJS, _workspaceKey.toJS);
     await committed;
@@ -328,4 +338,3 @@ class IndexedDbDraftStorage implements SizedDraftStorage, WorkspaceStorage {
     await _releaseOwnership();
   }
 }
-

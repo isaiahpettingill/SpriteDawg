@@ -123,7 +123,8 @@ class Editor extends ChangeNotifier {
   int documentRevision = 0;
   late final FrameThumbnailCache _thumbnails = FrameThumbnailCache(transport);
   Future<ui.Image?> thumbnail(int frame) => _thumbnails.get(frame);
-  bool get hasDocument => state['hasDocument'] as bool? ?? state.containsKey('width');
+  bool get hasDocument =>
+      state['hasDocument'] as bool? ?? state.containsKey('width');
   int get width => state['width'] as int? ?? 0;
   int get height => state['height'] as int? ?? 0;
   int get frame => state['frame'] as int? ?? 0;
@@ -137,8 +138,12 @@ class Editor extends ChangeNotifier {
   List<int> get palette =>
       (state['palette'] as List? ?? [0xff000000, 0xffffffff]).cast<int>();
   Future<ui.Image?> _decode(dynamic data) async {
-    if (width < 1 || height < 1 ||
-        data is! Uint8List || data.length != width * height * 4) return null;
+    if (width < 1 ||
+        height < 1 ||
+        data is! Uint8List ||
+        data.length != width * height * 4) {
+      return null;
+    }
     return decodeImage(data, width: width, height: height);
   }
 
@@ -392,4 +397,3 @@ class Editor extends ChangeNotifier {
 class _EditorSignal extends ChangeNotifier {
   void emit() => notifyListeners();
 }
-

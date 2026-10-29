@@ -73,7 +73,9 @@ class FileDraftStorage implements SizedDraftStorage, WorkspaceStorage {
     final file = File('${directory.path}/workspace.json');
     if (!await file.exists()) return null;
     if (await file.length() > 65536) {
-      throw const FormatException('Workspace metadata exceeds the safety limit');
+      throw const FormatException(
+        'Workspace metadata exceeds the safety limit',
+      );
     }
     return file.readAsString();
   }
@@ -82,18 +84,24 @@ class FileDraftStorage implements SizedDraftStorage, WorkspaceStorage {
   Future<void> archiveWorkspace() async {
     final raw = await readWorkspace();
     if (raw == null) return;
-    final backup = File('${directory.path}/workspace-unreadable-'
-        '${DateTime.now().microsecondsSinceEpoch}.json');
+    final backup = File(
+      '${directory.path}/workspace-unreadable-'
+      '${DateTime.now().microsecondsSinceEpoch}.json',
+    );
     // A unique backup is never considered a new current session.
-    if (await backup.exists()) throw StateError('Workspace backup already exists');
+    if (await backup.exists()) {
+      throw StateError('Workspace backup already exists');
+    }
     await _atomic(backup, Uint8List.fromList(utf8.encode(raw)));
   }
 
   @override
   Future<void> writeWorkspace(String value) async {
     await _open();
-    await _atomic(File('${directory.path}/workspace.json'),
-        Uint8List.fromList(utf8.encode(value)));
+    await _atomic(
+      File('${directory.path}/workspace.json'),
+      Uint8List.fromList(utf8.encode(value)),
+    );
   }
 
   @override
@@ -195,4 +203,3 @@ class FileDraftStorage implements SizedDraftStorage, WorkspaceStorage {
     }
   }
 }
-

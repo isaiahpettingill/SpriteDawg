@@ -76,4 +76,3 @@ void main() {
     expect(e.encode(), before);
   });
 }
-

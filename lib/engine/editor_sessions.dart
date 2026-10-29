@@ -242,13 +242,24 @@ class EditorSessions {
   }
 
   static Map<String, dynamic> get emptyState => {
-    'width': 0, 'height': 0, 'frame': 0, 'layer': 0, 'depth': 32,
-    'transparentIndex': 0, 'paletteNames': <String>[],
-    'dirty': false, 'canUndo': false, 'canRedo': false,
-    'recoveryAvailable': false, 'pixels': Uint8List(0),
-    'previousPixels': null, 'palette': <int>[],
-    'layers': <Map<String, dynamic>>[], 'frames': <Map<String, dynamic>>[],
-    'tags': <Map<String, dynamic>>[], 'userData': <String, dynamic>{},
+    'width': 0,
+    'height': 0,
+    'frame': 0,
+    'layer': 0,
+    'depth': 32,
+    'transparentIndex': 0,
+    'paletteNames': <String>[],
+    'dirty': false,
+    'canUndo': false,
+    'canRedo': false,
+    'recoveryAvailable': false,
+    'pixels': Uint8List(0),
+    'previousPixels': null,
+    'palette': <int>[],
+    'layers': <Map<String, dynamic>>[],
+    'frames': <Map<String, dynamic>>[],
+    'tags': <Map<String, dynamic>>[],
+    'userData': <String, dynamic>{},
   };
 
   Map<String, dynamic> state() => {
@@ -270,4 +281,3 @@ class EditorSessions {
         .toList(),
   };
 }
-

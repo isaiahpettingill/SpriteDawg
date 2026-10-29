@@ -118,7 +118,8 @@ class DesktopBackend {
     ...sessions.state(),
     'drafts': _closedDrafts.map((draft) => draft.toMap()).toList(),
     'recoveryAvailable': _closedDrafts.isNotEmpty,
-    'recoveryError': _storageIssue ??
+    'recoveryError':
+        _storageIssue ??
         (sessions.hasDocument ? sessions.active.recoveryError : null),
     ...workspace.state,
   };
@@ -250,10 +251,20 @@ class DesktopBackend {
     final defaultText = const {'init', 'new', 'closeDocument'}.contains(method)
         ? defaultUserData(args)
         : '';
-    if (!sessions.hasDocument && !const {
-      'init', 'state', 'new', 'open', 'openExternal', 'recover', 'listDrafts',
-      'discardRecovery', 'flushDrafts', 'clearTagClipboard',
-    }.contains(method) && !(method == 'pasteTag' && args['asNew'] == true)) {
+    if (!sessions.hasDocument &&
+        !const {
+          'init',
+          'state',
+          'new',
+          'open',
+          'openExternal',
+          'recover',
+          'listDrafts',
+          'discardRecovery',
+          'flushDrafts',
+          'clearTagClipboard',
+        }.contains(method) &&
+        !(method == 'pasteTag' && args['asNew'] == true)) {
       throw StateError('Create or open a drawing first.');
     }
     switch (method) {
@@ -356,8 +367,10 @@ class DesktopBackend {
             session.recoveryError ?? 'Draft save failed',
           );
         }
-        require(await workspace.save(excluding: id, repair: true),
-          'The closed tab could not be remembered. This drawing remains open.');
+        require(
+          await workspace.save(excluding: id, repair: true),
+          'The closed tab could not be remembered. This drawing remains open.',
+        );
         if (!keep) {
           try {
             await _drafts.delete(id);
@@ -391,7 +404,9 @@ class DesktopBackend {
         sessions.add(
           newSprite(
             WorkspaceSession.dimension(args['width'] ?? workspace.lastNewWidth),
-            WorkspaceSession.dimension(args['height'] ?? workspace.lastNewHeight),
+            WorkspaceSession.dimension(
+              args['height'] ?? workspace.lastNewHeight,
+            ),
             defaultText,
           ),
           title: 'Untitled ${_untitled++}',
@@ -440,12 +455,29 @@ class DesktopBackend {
           _autosave.mark(sessions.activeId);
         }
     }
-    if (const {'init', 'new', 'open', 'openExternal', 'save', 'saveAs',
-      'selectDocument', 'closeDocument', 'recover', 'pasteTag'}.contains(method)) {
-      await workspace.save(repair: const {'new', 'open', 'openExternal',
-        'recover', 'pasteTag', 'closeDocument'}.contains(method));
+    if (const {
+      'init',
+      'new',
+      'open',
+      'openExternal',
+      'save',
+      'saveAs',
+      'selectDocument',
+      'closeDocument',
+      'recover',
+      'pasteTag',
+    }.contains(method)) {
+      await workspace.save(
+        repair: const {
+          'new',
+          'open',
+          'openExternal',
+          'recover',
+          'pasteTag',
+          'closeDocument',
+        }.contains(method),
+      );
     }
     return _state();
   }
 }
-

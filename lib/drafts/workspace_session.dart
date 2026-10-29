@@ -11,7 +11,8 @@ class WorkspaceSession {
   final DraftRepository drafts;
   final EditorSessions sessions;
   int lastNewWidth = 32, lastNewHeight = 32;
-  String? error;
+  String? _restoreError, _saveError;
+  String? get error => _saveError ?? _restoreError;
   bool _readable = true;
 
   Map<String, dynamic> get state => {
@@ -22,7 +23,9 @@ class WorkspaceSession {
 
   static int dimension(dynamic value) {
     if (value is! int || value < 1 || value > 2048) {
-      throw const FormatException('Canvas dimensions must be whole numbers from 1 to 2048');
+      throw const FormatException(
+        'Canvas dimensions must be whole numbers from 1 to 2048',
+      );
     }
     return value;
   }
@@ -35,20 +38,25 @@ class WorkspaceSession {
     try {
       final raw = await storage.readWorkspace();
       if (raw == null) return;
-      if (raw.length > 65536) throw const FormatException('Workspace too large');
+      if (raw.length > 65536) {
+        throw const FormatException('Workspace too large');
+      }
       final data = jsonDecode(raw);
       if (data is! Map || data['version'] != 1 || data['tabs'] is! List) {
         throw const FormatException('Invalid workspace metadata');
       }
       tabs = data['tabs'] as List;
-      if (tabs.length > 8) throw const FormatException('Too many workspace tabs');
+      if (tabs.length > 8) {
+        throw const FormatException('Too many workspace tabs');
+      }
       lastNewWidth = dimension(data['width']);
       lastNewHeight = dimension(data['height']);
       active = data['active'] as int?;
     } catch (issue) {
       // Do not replace unreadable evidence with an empty startup session.
       _readable = false;
-      error = 'Last open tabs could not be read. Stored drafts were kept. '
+      _restoreError =
+          'Last open tabs could not be read. Stored drafts were kept. '
           'Automatic tab remembering is paused. Creating, opening or recovering '
           'a drawing will start a new session while preserving this metadata: $issue';
       return;
@@ -70,11 +78,13 @@ class WorkspaceSession {
         // Provenance is not write permission. Recovered documents use Save As;
         // startup never touches the original file, including inaccessible files.
         if (snapshot.info.fallback) {
-          error = 'An older validated draft was restored. Save a copy to keep it.';
+          _restoreError =
+              'An older validated draft was restored. Save a copy to keep it.';
         }
       } catch (issue) {
         _readable = false;
-        error = 'Some open tabs could not be restored. Their drafts were kept: $issue';
+        _restoreError =
+            'Some open tabs could not be restored. Their drafts were kept: $issue';
       }
     }
     if (sessions.documents.any((s) => s.id == active)) sessions.select(active!);
@@ -86,23 +96,35 @@ class WorkspaceSession {
     if (!_readable && !repair) return false;
     try {
       if (!_readable) await storage.archiveWorkspace();
-      await storage.writeWorkspace(jsonEncode({
-        'version': 1,
-        'width': lastNewWidth,
-        'height': lastNewHeight,
-        'active': sessions.activeId == excluding
-            ? sessions.documents.where((s) => s.id != excluding).firstOrNull?.id ?? 0
-            : sessions.activeId,
-        'tabs': [
-          for (final session in sessions.documents)
-            if (session.id != excluding)
-            {'id': session.id, 'dirty': session.engine.dirty},
-        ],
-      }));
+      var activeId = sessions.activeId;
+      if (activeId == excluding) {
+        final index = sessions.documents.indexWhere((s) => s.id == excluding);
+        final remaining = sessions.documents
+            .where((s) => s.id != excluding)
+            .toList();
+        activeId = remaining.isEmpty
+            ? 0
+            : remaining[index.clamp(0, remaining.length - 1)].id;
+      }
+      await storage.writeWorkspace(
+        jsonEncode({
+          'version': 1,
+          'width': lastNewWidth,
+          'height': lastNewHeight,
+          'active': activeId,
+          'tabs': [
+            for (final session in sessions.documents)
+              if (session.id != excluding)
+                {'id': session.id, 'dirty': session.engine.dirty},
+          ],
+        }),
+      );
       _readable = true;
+      _saveError = null;
+      if (repair) _restoreError = null;
       return true;
     } catch (issue) {
-      error = 'Open tabs could not be remembered: $issue. Save a copy now.';
+      _saveError = 'Open tabs could not be remembered: $issue. Save a copy now.';
       return false;
     }
   }

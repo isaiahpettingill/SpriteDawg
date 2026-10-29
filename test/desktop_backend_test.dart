@@ -246,7 +246,12 @@ void main() {
       expect(state!['width'], 8);
       expect(state['dirty'], false);
       // The original draft is untouched even if the new snapshot cannot write.
-      expect(await File('$support/draft-${backend.sessions.documents.first.id}.sdd').exists(), true);
+      expect(
+        await File(
+          '$support/draft-${backend.sessions.documents.first.id}.sdd',
+        ).exists(),
+        true,
+      );
       expect(backend.sessions.documents.length, 2);
     } finally {
       await Process.run('chmod', ['700', support]);
@@ -287,4 +292,3 @@ void main() {
     expect(row.skip(1), [200, 100, 50, 128]);
   });
 }
-

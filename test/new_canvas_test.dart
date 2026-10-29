@@ -41,6 +41,7 @@ void main() {
       await tester.tap(find.text('New canvas'));
       await tester.pumpAndSettle();
     }
+
     final width = find.byKey(const Key('new-canvas-width'));
     final height = find.byKey(const Key('new-canvas-height'));
     String value(Finder field) =>

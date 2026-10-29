@@ -14,10 +14,9 @@ abstract interface class SizedDraftStorage implements DraftStorage {
   Future<int> totalBytes();
 }
 
-
 /// The last open tab set is separate from recoverable, explicitly closed drafts.
 /// Implementations use the same exclusive ownership as the draft store.
-abstract interface class WorkspaceStorage {
+abstract interface class WorkspaceStorage implements DraftStorage {
   Future<String?> readWorkspace();
   Future<void> writeWorkspace(String value);
   Future<void> archiveWorkspace();
