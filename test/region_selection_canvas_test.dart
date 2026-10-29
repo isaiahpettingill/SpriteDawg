@@ -7,6 +7,21 @@ import 'package:spritedawg/editor.dart';
 import 'package:spritedawg/engine/editor_engine.dart';
 import 'package:spritedawg/pixel_canvas.dart';
 
+// These tests inspect authoritative native pixels, not image decoding. Omitting
+// presentation bytes keeps Flutter's real codec callbacks out of fake-async.
+Map<String, dynamic> response(
+  EditorEngine engine,
+  String method,
+  Map<String, dynamic>? args,
+) {
+  final result = engine.invoke(method, args ?? {});
+  if (method != 'copyRegion') {
+    result.remove('pixels');
+    result.remove('previousPixels');
+  }
+  return result;
+}
+
 void main() {
   for (final kind in [PointerDeviceKind.touch, PointerDeviceKind.mouse]) {
     testWidgets('Select, move, copy/cut/paste/delete and undo: $kind', (
@@ -16,7 +31,7 @@ void main() {
       engine.invoke('new', {'width': 8, 'height': 8});
       engine.document.editable(0, 0).pixels[3 * 8 + 3] = 0xff123456;
       final editor = Editor(
-        transport: (method, args) async => engine.invoke(method, args ?? {}),
+        transport: (method, args) async => response(engine, method, args),
       );
       await editor.call('state');
       await t.pumpWidget(
@@ -83,7 +98,7 @@ void main() {
       engine.invoke('new', {'width': 8, 'height': 8});
       engine.document.editable(0, 0).pixels[27] = 0xff123456;
       final editor = Editor(
-        transport: (method, args) async => engine.invoke(method, args ?? {}),
+        transport: (method, args) async => response(engine, method, args),
       );
       await editor.call('state');
       await t.pumpWidget(
@@ -153,7 +168,7 @@ void main() {
       final editor = Editor(
         transport: (method, args) async {
           if (method == 'copyRegion') return pending.future;
-          return engine.invoke(method, args ?? {});
+          return response(engine, method, args);
         },
       );
       await editor.call('state');
