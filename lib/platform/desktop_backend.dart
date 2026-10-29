@@ -222,6 +222,7 @@ class DesktopBackend {
         final frame = engine.frame;
         return Isolate.run(() => exportSnapshot(snapshot, frame, args));
       case 'thumbnails':
+      case 'copyRegion':
       case 'frameImage':
       case 'previewStroke':
         return engine.invoke(method, args);

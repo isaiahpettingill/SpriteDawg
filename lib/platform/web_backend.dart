@@ -445,6 +445,7 @@ class DesktopBackend {
           _autosave.forget(id);
           _failed.remove(id);
         }
+      case 'copyRegion':
       case 'frameImage':
       case 'thumbnails':
       case 'previewStroke':

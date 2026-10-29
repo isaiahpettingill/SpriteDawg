@@ -220,6 +220,7 @@ class MainActivity : FlutterActivity() {
                 "openExternal" -> openExternal()
                 "exportSnapshot" -> return@execute exportSnapshot(editor.document, editor.frame, args)
                 "thumbnails" -> return@execute editor.thumbnails(args)
+                "copyRegion" -> return@execute copyRegion(editor.document,editor.frame,editor.layer,args)
                 "frameImage" -> return@execute editor.frameImage(args)
                 "previewStroke" -> return@execute editor.previewStroke(args)
                 "new" -> {

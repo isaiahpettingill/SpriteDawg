@@ -44,6 +44,7 @@ const drawingToolGroups = <String, List<DrawingSubtool>>{
     DrawingSubtool('jumble', 'Jumble', Icons.shuffle),
     DrawingSubtool('ditherRetouch', 'Dither Retouch', Icons.grid_4x4),
   ],
+  'select': [DrawingSubtool('selectRegion', 'Select', Icons.select_all)],
   'pan': [DrawingSubtool('pan', 'Pan', Icons.pan_tool_alt)],
 };
 

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'aseprite.dart';
 import 'document.dart';
+import 'region_selection.dart' as region;
 import 'default_user_data.dart';
 import 'palette_operations.dart';
 import 'palette_texture_brush.dart';
@@ -41,6 +42,8 @@ class EditorEngine {
     Map<String, dynamic> args = const {},
   ]) {
     switch (method) {
+      case 'copyRegion':
+        return region.copyRegion(document, frame, layer, args);
       case 'thumbnails':
         return thumbnails(args);
       case 'frameImage':
@@ -892,6 +895,8 @@ class EditorEngine {
     var nextFrame = frame, nextLayer = layer;
     _mutate((d) {
       switch (action) {
+        case 'region':
+          region.editRegion(d, frame, layer, a);
         case 'paletteAdd':
         case 'paletteEdit':
         case 'paletteMove':

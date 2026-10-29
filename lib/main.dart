@@ -661,7 +661,7 @@ class _EditorScreenState extends State<EditorScreen>
             builder: (context) => AlertDialog(
               title: const Text('Draw on the go'),
               content: const Text(
-                'Draw with one finger or a stylus. Pan and zoom with two fingers. Long-hold a toolbar group for subtools. Gradient paints the whole active layer; drag from Start to End.\n\nSave preserves layers, frames and metadata. PNG exports the current frame.\n\nUnsaved edits are kept in recovery copies.',
+                'Draw with one finger or a stylus. Pan and zoom with two fingers. Long-hold a toolbar group for subtools. Select drags a rectangle on the active layer; drag inside to move, or use Copy/Cut/Paste/Delete. Gradient paints the whole active layer; drag from Start to End.\n\nSave preserves layers, frames and metadata. PNG exports the current frame.\n\nUnsaved edits are kept in recovery copies.',
               ),
               actions: [
                 TextButton(
@@ -1175,6 +1175,8 @@ class _EditorScreenState extends State<EditorScreen>
                   chooseTool('fill'),
               const SingleActivator(LogicalKeyboardKey.keyI): () =>
                   chooseTool('eyedropper'),
+              const SingleActivator(LogicalKeyboardKey.keyM): () =>
+                  chooseTool('selectRegion'),
               const SingleActivator(LogicalKeyboardKey.keyH): () =>
                   chooseTool('pan'),
             },
