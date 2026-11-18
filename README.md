@@ -299,7 +299,7 @@ Publication stages a draft, checks all five platform assets against `SHA256SUMS`
 
 ### Open with SpriteDawg
 
-Android registers narrow Aseprite MIME/extension handlers; Linux bundles include MIME registration and a per-user installer. External opens add document tabs instead of replacing unsaved work. See [file association installation and provider limitations](FILE_ASSOCIATIONS.md).
+Android file managers can open or edit Aseprite projects, including binary downloads with opaque document IDs; Linux bundles include MIME registration and a per-user installer. External opens add document tabs instead of replacing unsaved work. See [file association installation and provider limitations](FILE_ASSOCIATIONS.md).
 
 
 ### Canvas view modes

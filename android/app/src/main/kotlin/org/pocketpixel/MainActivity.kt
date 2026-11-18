@@ -19,8 +19,14 @@ class MainActivity : FlutterActivity() {
         // allocation while the previous Activity's final flush is still queued.
         private val runtime = NativeEditorRuntime()
         // Retain requests not yet drained by Flutter when an Activity recreates.
-        private val externalUris = java.util.concurrent.ConcurrentLinkedQueue<Uri>()
+        private val externalUris = java.util.concurrent.ConcurrentLinkedQueue<ExternalProject>()
     }
+    private data class ExternalProject(val uri: Uri, val flags: Int)
+    private data class PickerRequest(
+        val kind: String, val result: MethodChannel.Result,
+        val documentId: Int, val revision: Long, val bytes: ByteArray?, val title: String,
+    )
+
     private var restoredActivity = false
     override fun onCreate(savedInstanceState: Bundle?) {
         restoredActivity = savedInstanceState != null
@@ -31,6 +37,7 @@ class MainActivity : FlutterActivity() {
     private val worker get() = runtime.worker
     private val main = Handler(Looper.getMainLooper())
     private val exportFiles by lazy { ExportFiles(this, worker, main) }
+    private val projectFiles by lazy { ProjectFiles(applicationContext) }
     private val documentNames by lazy { DocumentNames(applicationContext.contentResolver) }
     private val drafts get() = runtime.drafts
     private val pendingDrafts get() = runtime.pendingDrafts
@@ -38,22 +45,15 @@ class MainActivity : FlutterActivity() {
         get() = runtime.draftTask
         set(value) { runtime.draftTask = value }
     private val draftsInitialized get() = runtime.initialized
-    private var currentUri: Uri?
-        get() = sessions.active.path?.let(Uri::parse)
-        set(value) { sessions.active.path=value?.toString() }
-    private var pending: MethodChannel.Result? = null
-    private var pendingKind = ""
-    private var pendingBytes: ByteArray? = null
-    private var pendingRevision = 0L
+    private var pending: PickerRequest? = null
     private var revision: Long
         get() = sessions.active.revision
         set(value) { sessions.active.revision=value }
-    private var pendingDocument = 0
     private var externalChannel: MethodChannel? = null
     private var externalOpenError: String? = null
     @Volatile private var externalQueueError: String? = null
     private fun enqueueExternal(value: Intent?) {
-        if(value?.action != Intent.ACTION_VIEW) return
+        if (value == null || (value.action != Intent.ACTION_VIEW && value.action != Intent.ACTION_EDIT)) return
         val uri=value.data ?: return
         if(uri.scheme != "content" && uri.scheme != "file") return
         if(externalUris.size >= 8) {
@@ -62,9 +62,7 @@ class MainActivity : FlutterActivity() {
             return
         }
         externalQueueError=null
-        externalUris.add(uri)
-        // VIEW grants are transient; decode while this activity owns the grant.
-        // Save As avoids retaining unnecessary provider access.
+        externalUris.add(ExternalProject(uri, value.flags))
         externalChannel?.invokeMethod("pending", null)
     }
     override fun onNewIntent(intent: Intent) {
@@ -72,21 +70,21 @@ class MainActivity : FlutterActivity() {
         setIntent(intent)
         enqueueExternal(intent)
     }
+    private fun openProject(uri: Uri, flags: Int) {
+        require(sessions.documents.size < 8) { "Close a document before opening another (8 maximum)." }
+        val loaded = projectFiles.read(uri)
+        val target = projectFiles.writableTarget(uri, flags)
+        val opened = sessions.add(loaded, documentNames.resolve(uri))
+        opened.path = target?.toString()
+        opened.sourceUri = uri.toString()
+        changed()
+    }
+
     private fun openExternal() {
-        val uri=externalUris.poll() ?: return
+        val request = externalUris.poll() ?: return
         externalOpenError=null
         try {
-            require(sessions.documents.size < 8) { "Close a document before opening another (8 maximum)." }
-            val loaded=contentResolver.openInputStream(uri)?.use { stream ->
-                val out=java.io.ByteArrayOutputStream();val buffer=ByteArray(65536)
-                while(true) {val n=stream.read(buffer);if(n<0)break;require(out.size()+n<=Aseprite.MAX_FILE) {"File exceeds the 64 MiB safety limit"};out.write(buffer,0,n)}
-                Aseprite.read(out.toByteArray())
-            } ?: error("The provider could not read this project")
-            val opened=sessions.add(loaded, documentNames.resolve(uri))
-            // VIEW commonly grants read-only access. Saving always asks for a destination.
-            opened.path=null
-            opened.sourceUri=uri.toString()
-            changed()
+            openProject(request.uri, request.flags)
         } catch(e: Exception) { externalOpenError="Could not open project: ${e.message}" }
     }
 
@@ -210,7 +208,6 @@ class MainActivity : FlutterActivity() {
             exportFiles.begin(args, result); return
         }
         if (exportFiles.busy) { result.error("busy", "Finish the export first", null); return }
-        if (call.method in listOf("open","saveAs","exportPng")) { launchPicker(call.method,result); return }
         execute(result) {
             val defaultText = if(call.method in listOf("init","new","closeDocument")) defaultUserData(args) else ""
             when(call.method) {
@@ -248,88 +245,106 @@ class MainActivity : FlutterActivity() {
                     require(id==null || targets.isNotEmpty()) { "Draft is already open or no longer available" }
                     targets.forEach {drafts.delete(it["id"] as Int)}
                 }
-                "save" -> {
-                    val uri=currentUri
-                    if(uri==null) { main.post { launchPicker("saveAs",result) }; return@execute DeferredResult }
-                    writeDocument(uri)
+                "open" -> return@execute requestPicker("open", result)
+                "exportPng" -> {
+                    val doc = editor.document
+                    return@execute requestPicker("exportPng", result, Png.encode(doc.width, doc.height, doc.composite(editor.frame)))
+                }
+                "save", "saveAs" -> {
+                    val bytes = Aseprite.write(editor.document)
+                    Aseprite.read(bytes) // Validate before opening the destination for truncation.
+                    persist() // A full draft store must still permit a manual save.
+                    val target = sessions.active.path?.let(Uri::parse)
+                    if (call.method == "save" && target != null) {
+                        val output = projectFiles.outputForExisting(target)
+                        if (output != null) {
+                            output.use { it.write(bytes) }
+                            finishSave(target, revision, sessions.active.title)
+                            flushDrafts(explicitChange = true)
+                            return@execute state() + ("savedProject" to sessions.active.title)
+                        }
+                    }
+                    return@execute requestPicker("saveAs", result, bytes)
                 }
                 else -> error("Unknown editor method: ${call.method}")
             }
-            if (call.method in listOf("new", "openExternal", "selectDocument", "closeDocument", "recover", "save", "pasteTag")) flushDrafts(explicitChange = true)
+            if (call.method in listOf("new", "openExternal", "selectDocument", "closeDocument", "recover", "pasteTag")) flushDrafts(explicitChange = true)
             state()
         }
     }
     private object DeferredResult
-    private fun rememberSaveTarget(uri: Uri) {
+    private fun finishSave(uri: Uri, savedRevision: Long, fallbackTitle: String) {
         val session = sessions.active
-        currentUri = uri
+        session.path = uri.toString()
         session.sourceUri = uri.toString()
-        session.title = documentNames.resolve(uri, if (session.titleNeedsRefresh) "Opened document" else session.title)
+        session.title = documentNames.resolve(uri, fallbackTitle)
         session.titleNeedsRefresh = false
+        if (revision == savedRevision) editor.saved()
+        // Retry failed draft writes through the normal pending-draft flush.
+        scheduleDraft()
     }
-    private fun writeDocument(uri: Uri) {
-        val bytes=Aseprite.write(editor.document)
-        Aseprite.read(bytes) // Validate before opening any destination for truncation.
-        persist() // Best effort; a full draft store must not prevent manual Save.
-        contentResolver.openOutputStream(uri,"wt")?.use { it.write(bytes); it.flush() } ?: error("The document provider refused this file. Use Save As.")
-        editor.saved(); rememberSaveTarget(uri); persist(); pendingDrafts.forget(sessions.activeId)
-    }
-    private fun launchPicker(kind: String,result: MethodChannel.Result) {
-        if(pending!=null) { result.error("busy","Finish the open file picker first",null); return }
-        pending=result; pendingKind=kind;pendingDocument=sessions.activeId
-        if(kind=="open") {
-            val intent=Intent(Intent.ACTION_OPEN_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type="*/*"; addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION) }
-            try { startActivityForResult(intent,42) } catch(e: Exception) { pending=null; result.error("picker_error",e.message,null) }
-        } else {
-            worker.execute {
-                try {
-                    initializeDrafts()
-                    pendingBytes=if(kind=="exportPng") {
-                        val d=editor.document
-                        Png.encode(d.width,d.height,d.composite(editor.frame))
-                    } else { Aseprite.write(editor.document).also { Aseprite.read(it); persist() } }
-                    pendingRevision=revision
-                    main.post {
-                        val intent=Intent(Intent.ACTION_CREATE_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type=if(kind=="exportPng") "image/png" else "application/octet-stream"; putExtra(Intent.EXTRA_TITLE,if(kind=="exportPng") "sprite.png" else "sprite.aseprite"); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION) }
-                        try { startActivityForResult(intent,42) } catch(e: Exception) { pending=null; pendingBytes=null; result.error("picker_error",e.message,null) }
-                    }
-                } catch(e: Exception) { main.post { pending=null; pendingBytes=null; result.error("save_error",e.message,null) } }
+
+    private fun requestPicker(kind: String, result: MethodChannel.Result, bytes: ByteArray? = null): DeferredResult {
+        val title = when (kind) {
+            "saveAs" -> ProjectFiles.suggestedName(sessions.active.title)
+            "exportPng" -> "sprite.png"
+            else -> ""
+        }
+        val request = PickerRequest(kind, result, sessions.activeId, if (bytes == null) 0L else revision, bytes, title)
+        main.post {
+            if (pending != null || exportFiles.busy) {
+                result.error("busy", "Finish the open file picker first", null)
+                return@post
+            }
+            val intent = Intent(if (kind == "open") Intent.ACTION_OPEN_DOCUMENT else Intent.ACTION_CREATE_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = when (kind) {
+                    "open" -> "*/*"
+                    "exportPng" -> "image/png"
+                    else -> ProjectFiles.MIME_TYPE
+                }
+                if (kind != "open") putExtra(Intent.EXTRA_TITLE, title)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+            }
+            pending = request
+            try {
+                startActivityForResult(intent, 42)
+            } catch (e: Exception) {
+                pending = null
+                result.error("picker_error", e.message, null)
             }
         }
+        return DeferredResult
     }
+
     @Deprecated("Android activity result callback is required by FlutterActivity's SAF bridge")
-    override fun onActivityResult(requestCode: Int,resultCode: Int,data: Intent?) {
-        super.onActivityResult(requestCode,resultCode,data)
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == ExportFiles.REQUEST) { exportFiles.complete(resultCode, data); return }
-        if(requestCode!=42) return
-        val result=pending ?: return
-        val kind=pendingKind; val bytes=pendingBytes; val snapshotRevision=pendingRevision; val snapshotDocument=pendingDocument
-        pending=null; pendingBytes=null
-        execute(result) {
-            require(sessions.activeId==snapshotDocument) { "Active document changed while file picker was open. Try again." }
-            val uri=data?.data
-            if(resultCode==RESULT_OK && uri!=null) {
-                try { contentResolver.takePersistableUriPermission(uri,((data?.flags ?: 0) and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION))) } catch(_: SecurityException) { /* A provider may offer only this session. */ }
-                if(kind=="open") {
-                    val loaded=contentResolver.openInputStream(uri)?.use { stream ->
-                        val out=java.io.ByteArrayOutputStream(); val buffer=ByteArray(65536)
-                        while(true) { val n=stream.read(buffer); if(n<0) break; require(out.size()+n<=Aseprite.MAX_FILE) { "File exceeds the 64 MiB safety limit" }; out.write(buffer,0,n) }
-                        Aseprite.read(out.toByteArray())
-                    } ?: error("The document provider could not read this file")
-                    val opened=sessions.add(loaded, documentNames.resolve(uri))
-                    opened.path=uri.toString();opened.sourceUri=uri.toString();changed()
-                } else {
-                    requireNotNull(bytes)
-                    contentResolver.openOutputStream(uri,"wt")?.use { it.write(bytes); it.flush() } ?: error("The document provider refused this file")
-                    if(kind=="saveAs") {
-                        rememberSaveTarget(uri)
-                        if(revision==snapshotRevision) { editor.saved(); persist(); pendingDrafts.forget(sessions.activeId) }
-                        else scheduleDraft() // Include the new name/source in the newer unsaved draft.
-                    }
-                }
+        if (requestCode != 42) return
+        val request = pending ?: return
+        pending = null
+        execute(request.result) {
+            val uri = data?.data
+            if (resultCode != RESULT_OK || uri == null) return@execute state()
+            require(uri.scheme == "content") { "Choose a file from a document provider" }
+            if (request.kind == "open") {
+                openProject(uri, data.flags)
+            } else {
+                require(sessions.activeId == request.documentId) { "Active document changed while the picker was open. Try again." }
+                val bytes = requireNotNull(request.bytes)
+                projectFiles.openOutput(uri).use { it.write(bytes) }
+                if (request.kind == "saveAs") finishSave(uri, request.revision, request.title)
             }
-            flushDrafts(explicitChange = resultCode == RESULT_OK && uri != null)
-            state()
+            // After restart, only legacy title lookups use the original URI.
+            // Restored drafts choose their own destination on the next save.
+            val persistentRead = Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION
+            if (request.kind != "exportPng" && data.flags and persistentRead == persistentRead) {
+                try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                catch (_: SecurityException) { /* The provider offered only session access. */ }
+            }
+            flushDrafts(explicitChange = true)
+            if (request.kind == "saveAs") state() + ("savedProject" to sessions.active.title) else state()
         }
     }
     override fun onPause() {
