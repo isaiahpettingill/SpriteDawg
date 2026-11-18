@@ -1189,7 +1189,12 @@ class _EditorScreenState extends State<EditorScreen>
         Future.value(true))) {
       return false;
     }
-    return e.call(method);
+    final completed = await e.call(method);
+    final savedProject = e.state['savedProject'];
+    if (completed && mounted && savedProject is String) {
+      notice('Saved $savedProject');
+    }
+    return completed;
   }
 
   String? get recoveryIssue {

@@ -1,8 +1,10 @@
 # Open Aseprite projects from a file manager
 
-Android registers SpriteDawg for `image/x-aseprite` and `application/x-aseprite`, and for `.aseprite`/`.ase` URI paths with no MIME type or `application/octet-stream`. Choose **Open with → SpriteDawg**. Both cold starts and subsequent VIEW intents open additional document tabs without replacing dirty work. The full Aseprite decoder validates content before adding a document. Files opened via VIEW use Save As because many providers grant read-only access. No storage-wide permission is requested.
+On Android, select a project in your file manager and choose **Open with → SpriteDawg** or **Edit → SpriteDawg**. Both actions open a tab. SpriteDawg checks the file contents before it adds the tab.
 
-Some Android providers send only an opaque content URI and `application/octet-stream`, without a filename in the URI. Android cannot match the filename in that case; use SpriteDawg's Open picker instead. The app intentionally does not claim every binary file. Association availability is provider-dependent; physical-device validation is not claimed.
+**Save** updates the original when the file manager or the system picker grants write access. For a read-only file or an expired grant, Save opens the system **Save as** picker with the project name. After the first successful save, subsequent saves use that destination. Restored drafts still require a destination.
+
+Some providers identify every binary download as `application/octet-stream` and give it a numeric URI. SpriteDawg accepts this type so these providers can offer it for an Aseprite project. This also puts SpriteDawg in the chooser for other binary files. It also registers for Aseprite MIME types and for visible `.aseprite` and `.ase` path extensions. If the file manager supplies neither a recognized type nor a matching path, use **Open Aseprite** inside SpriteDawg.
 
 Linux: the AppImage contains the unique `org.pocketpixel.SpriteDawg` desktop ID,
 original SpriteDawg icon, and `.aseprite`/`.ase` MIME definitions. Launching a portable
