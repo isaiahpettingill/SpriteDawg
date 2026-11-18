@@ -336,9 +336,11 @@ class MainActivity : FlutterActivity() {
                 projectFiles.openOutput(uri).use { it.write(bytes) }
                 if (request.kind == "saveAs") finishSave(uri, request.revision, request.title)
             }
-            if (request.kind != "exportPng" && data.flags and Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION != 0) {
-                val grants = data.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-                try { contentResolver.takePersistableUriPermission(uri, grants) }
+            // After restart, only legacy title lookups use the original URI.
+            // Restored drafts choose their own destination on the next save.
+            val persistentRead = Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION
+            if (request.kind != "exportPng" && data.flags and persistentRead == persistentRead) {
+                try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
                 catch (_: SecurityException) { /* The provider offered only session access. */ }
             }
             flushDrafts(explicitChange = true)
